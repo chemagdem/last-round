@@ -2360,6 +2360,7 @@ document.addEventListener('wheel', e => {
 const reloadRuntime = { reloading: false, reloadT: 0, duration: 1.5 };
 let fireCooldown = 0;
 let knifeFlipT = -1;
+let weaponRecoilT = -1;
 
 function currentWeaponDef(){
   if (currentSlot === 'melee') return WEAPONS.knife;
@@ -2464,6 +2465,26 @@ function updateBoltCycle(dt){
   const pull = p < 0.5 ? Math.sin((p / 0.5) * (Math.PI / 2)) : Math.cos(((p - 0.5) / 0.5) * (Math.PI / 2));
   boltHandle.position.z = currentVisual.boltRestZ + pull * 0.12;
   boltHandle.position.x = currentVisual.boltRestX + pull * 0.02;
+}
+
+// Visible first-person kick for heavy weapons. Camera recoil changes aim, but this local model
+// recoil is what tells the player that the rifle itself violently cycled. The AWP gets a longer,
+// heavier impulse than automatic weapons and settles before the next bolt can be fired.
+function updateWeaponRecoil(dt){
+  if (!currentVisual || weaponRecoilT < 0) return;
+  weaponRecoilT += dt;
+  const duration = currentWeaponDef().boltAction ? 0.34 : 0.16;
+  const p = Math.min(1, weaponRecoilT / duration);
+  const impulse = p < 0.16 ? p / 0.16 : 1 - ((p - 0.16) / 0.84);
+  const clamped = Math.max(0, impulse);
+  const strength = currentWeaponDef().boltAction ? 1 : 0.45;
+  currentVisual.group.position.z = clamped * 0.105 * strength;
+  currentVisual.group.rotation.x = -clamped * 0.19 * strength;
+  if (p >= 1) {
+    weaponRecoilT = -1;
+    currentVisual.group.position.z = 0;
+    currentVisual.group.rotation.x = 0;
+  }
 }
 
 function updateKnifeFlip(dt){
@@ -2576,6 +2597,7 @@ function fireWeapon(){
   // spring back to rest via the existing lerps in updatePlayer (AWP kicks by far the hardest)
   weaponGroup.position.z += def.kickPush ?? 0.06;
   weaponGroup.rotation.x -= def.kickTilt ?? 0.05;
+  weaponRecoilT = 0;
 
   spawnMuzzleSmoke();
   spawnShellCasing();
@@ -3203,28 +3225,38 @@ function makeEnemySoldier(){
 // walk-cycle swing of the hips/knees driven by phase. The gun-holding arm keeps its steady
 // "ready" pose (see createTacticalSoldier) rather than swinging like a free limb, which reads far
 // more like a soldier carrying a weapon than a loose walking animation would.
-function animateSoldierRig(mesh, dt, speed){
+function animateSoldierRig(mesh, dt, speed, crouching = false){
   const rig = mesh.userData.rig;
   if (!rig) return;
   const t = performance.now() * 0.001;
+  mesh.userData.crouchBlend = THREE.MathUtils.lerp(mesh.userData.crouchBlend || 0, crouching ? 1 : 0, Math.min(1, dt * 12));
+  const crouch = mesh.userData.crouchBlend;
   const moving = speed > 0.05;
   if (moving) mesh.userData.animPhase += dt * speed * 3.2;
   const phase = mesh.userData.animPhase;
 
   const strideAmp = moving ? Math.min(0.55, 0.18 + speed * 0.12) : 0;
-  rig.legs.L.hip.rotation.x = Math.sin(phase) * strideAmp;
-  rig.legs.R.hip.rotation.x = -Math.sin(phase) * strideAmp;
-  rig.legs.L.knee.rotation.x = Math.max(0, -Math.sin(phase + 0.6)) * strideAmp * 1.3;
-  rig.legs.R.knee.rotation.x = Math.max(0, Math.sin(phase - 0.6)) * strideAmp * 1.3;
+  const leftHipWalk = Math.sin(phase) * strideAmp;
+  const rightHipWalk = -Math.sin(phase) * strideAmp;
+  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.6)) * strideAmp * 1.3;
+  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.6)) * strideAmp * 1.3;
+  // A crouch is a joint pose, not a root translation: the feet stay planted while hips descend,
+  // thighs angle forward and shins fold back. This prevents the old half-body-through-floor look.
+  rig.legs.L.hip.rotation.x = THREE.MathUtils.lerp(leftHipWalk, -0.58, crouch);
+  rig.legs.R.hip.rotation.x = THREE.MathUtils.lerp(rightHipWalk, -0.58, crouch);
+  rig.legs.L.knee.rotation.x = THREE.MathUtils.lerp(leftKneeWalk, 1.12, crouch);
+  rig.legs.R.knee.rotation.x = THREE.MathUtils.lerp(rightKneeWalk, 1.12, crouch);
+  rig.hips.position.y = THREE.MathUtils.lerp(HIP_TO_GROUND, 0.62, crouch);
 
   // idle breathing (always) + a walking bob layered on top (only while moving)
   const breathe = Math.sin(t * 1.6) * 0.006;
   const stepBob = moving ? Math.abs(Math.sin(phase)) * 0.02 : 0;
-  rig.torso.position.y = 0.02 + breathe + stepBob;
+  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04;
+  rig.torso.rotation.x = -crouch * 0.16;
 
   // a small counter-sway on the support arm only - the gun-holding arm stays put so the weapon
   // doesn't wobble around while walking
-  rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0);
+  rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0) + crouch * 0.12;
 }
 
 const BOT_NAMES = ['Tom', 'Mike', 'Matt', 'Jason', 'Jon', 'Chris', 'Steve', 'Alex', 'Dave', 'Nick'];
@@ -3922,6 +3954,7 @@ function updateNetworking(dt){
     type: 'state', id: netMyId, roundNum: roundState.roundNum,
     pos: [player.pos.x, player.pos.y, player.pos.z],
     yaw: player.yaw, pitch: player.pitch,
+    crouching: player.crouching,
     health: player.health, alive: player.alive,
     weaponId: currentSlot === 'melee' ? 'knife' : (inventory[currentSlot] || 'knife')
   };
@@ -3943,7 +3976,7 @@ function getOrCreateRemoteAvatar(id, team){
   const rosterEntry = netRoster.find(p => p.id === id);
   avatar = {
     mesh, health: 100, maxHealth: 100, speed: 0, fireCooldown: 0, alive: true, dying: false, deathT: 0,
-    name: (rosterEntry && rosterEntry.name) || 'Player', isRemote: true, netId: id, team,
+    name: (rosterEntry && rosterEntry.name) || 'Player', isRemote: true, netId: id, team, targetCrouching: false,
     targetPos: new THREE.Vector3(), targetYaw: 0, interpStarted: false
   };
   mesh.traverse(o => { if (o.isMesh) o.userData.enemyRef = avatar; });
@@ -3966,8 +3999,12 @@ function applyRemoteState(msg){
   // position/rotation snapshots only arrive ~20 times/sec over the network - snapping straight to
   // each one made remote players look jerky/stepped between updates. updateEnemies() now smoothly
   // interpolates the mesh toward this target every render frame instead of jumping to it directly.
-  avatar.targetPos.set(msg.pos[0], msg.pos[1] - player.height, msg.pos[2]);
+  // Network position is the local eye position. Convert it back to feet using the sender's
+  // stance; subtracting standing height while crouched was exactly what buried the remote model.
+  const remoteHeight = msg.crouching ? player.crouchHeight : player.height;
+  avatar.targetPos.set(msg.pos[0], msg.pos[1] - remoteHeight, msg.pos[2]);
   avatar.targetYaw = msg.yaw;
+  avatar.targetCrouching = !!msg.crouching;
   if (!avatar.interpStarted) { avatar.mesh.position.copy(avatar.targetPos); avatar.mesh.rotation.y = avatar.targetYaw; avatar.interpStarted = true; }
   avatar.health = msg.health;
   avatar.alive = msg.alive;
@@ -4237,7 +4274,7 @@ function updateEnemies(dt){
         animSpeed = dt > 0 ? last.distanceTo(ePos) / dt : 0;
         enemy._lastAnimPos = ePos.clone();
       }
-      animateSoldierRig(enemy.mesh, dt, animSpeed);
+      animateSoldierRig(enemy.mesh, dt, animSpeed, enemy.targetCrouching);
     }
     if (enemy.isRemote) return; // driven entirely by network state in applyRemoteState, not local AI
     if (enemy.isStatic) return; // practice-mode target dummy - doesn't move, aim, or shoot back
@@ -4525,6 +4562,7 @@ function updatePlayer(dt){
   if (mouseLocked && mouseDown && fireCooldown <= 0) fireWeapon();
 
   updateReloadAnimation(dt);
+  updateWeaponRecoil(dt);
   updateBoltCycle(dt);
   updateKnifeFlip(dt);
   updateKnifeSwing(dt);
