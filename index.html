@@ -142,6 +142,42 @@
   .wPrice{font-size:13px;color:#e5473c;}
   #closeBuyMenu{margin-top:26px;padding:10px 30px;background:#4a1414;color:#fee;border:2px solid #e5473c;cursor:pointer;border-radius:4px;letter-spacing:2px;}
   canvas{display:block;}
+
+  /* Landing: cinematic tactical brief */
+  #startScreen{isolation:isolate;position:fixed;}
+  #startScreen::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:
+    linear-gradient(90deg,transparent 0 49.8%,rgba(255,72,61,.08) 50%,transparent 50.2%),
+    linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+    background-size:100% 100%,56px 56px,56px 56px;mask-image:linear-gradient(to bottom,rgba(0,0,0,.7),transparent 82%);}
+  #startScreen::after{content:"";position:absolute;z-index:0;width:620px;height:620px;top:-290px;left:50%;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,rgba(205,34,26,.28),transparent 67%);filter:blur(12px);pointer-events:none;}
+  #startScreen > *{position:relative;z-index:1;}
+  #landingRail{position:absolute!important;top:18px;left:28px;right:28px;display:flex;justify-content:space-between;align-items:center;color:rgba(226,231,233,.48);font:600 10px/1 Inter,'Segoe UI',sans-serif;letter-spacing:2.5px;text-transform:uppercase;}
+  #landingRail::after{content:"";position:absolute;left:0;right:0;top:24px;height:1px;background:linear-gradient(90deg,rgba(255,73,61,.6),transparent 35%,transparent 65%,rgba(255,73,61,.35));}
+  #logo{width:300px;max-width:68vw;margin-top:28px;filter:drop-shadow(0 0 10px rgba(255,55,45,.45)) drop-shadow(0 18px 36px rgba(0,0,0,.7));animation:logoPulse 4s ease-in-out infinite;}
+  @keyframes logoPulse{50%{filter:drop-shadow(0 0 24px rgba(255,55,45,.62)) drop-shadow(0 18px 36px rgba(0,0,0,.7));transform:translateY(-2px);}}
+  #startScreen h2{font-size:14px;letter-spacing:7px;color:#d7b66c;text-shadow:0 0 18px rgba(215,182,108,.25);margin:12px 0 24px;}
+  #startScreen p{margin:0 0 8px;color:#e5e7e8;font-size:11px;letter-spacing:3px;text-transform:uppercase;}
+  #mapSelect{gap:18px;margin-top:14px;}
+  .mapCard{width:248px;min-height:238px;padding:0 16px 16px;overflow:hidden;border-color:rgba(255,255,255,.14);border-radius:12px;background:linear-gradient(155deg,rgba(31,34,37,.92),rgba(12,14,16,.9));box-shadow:0 22px 50px rgba(0,0,0,.36),inset 0 1px rgba(255,255,255,.08);}
+  .mapCard::before{content:"";display:block;height:4px;margin:0 -16px 14px;background:linear-gradient(90deg,transparent,#8e2a24,transparent);opacity:.55;}
+  .mapCard:hover{transform:translateY(-7px);border-color:rgba(255,105,91,.7);box-shadow:0 28px 60px rgba(0,0,0,.45),0 0 28px rgba(220,45,36,.12);}
+  .mapCard.selected{border-color:#ff5145;background:linear-gradient(155deg,rgba(73,22,21,.96),rgba(20,11,12,.94));box-shadow:0 20px 55px rgba(0,0,0,.42),0 0 32px rgba(229,71,60,.2);}
+  .mapCard img{height:112px;object-fit:cover;border-radius:6px;filter:saturate(.85) contrast(1.08);}
+  .mapCard h3{margin:14px 0 7px;font-size:19px;letter-spacing:1.5px;}
+  .mapCard p{font-size:12px!important;line-height:1.45!important;letter-spacing:0!important;text-transform:none!important;color:#b9bec1!important;}
+  #modeSelect{gap:14px;margin-top:20px;}
+  .modeCard{width:272px;min-height:94px;padding:17px 20px;text-align:left;border-radius:10px;background:rgba(20,22,24,.72);box-shadow:inset 0 1px rgba(255,255,255,.06);}
+  .modeCard h3{margin:0 0 7px;font-size:17px;letter-spacing:1px;}
+  .modeCard p{font-size:11px!important;line-height:1.45!important;letter-spacing:0!important;text-transform:none!important;color:#aeb2b4!important;}
+  .modeCard.selected{background:linear-gradient(135deg,rgba(91,25,22,.82),rgba(28,14,15,.88));box-shadow:0 0 26px rgba(229,71,60,.12),inset 0 1px rgba(255,150,140,.12);}
+  #pvpPanel{margin-top:20px;padding:18px 22px;border:1px solid rgba(215,182,108,.34);border-radius:12px;background:linear-gradient(145deg,rgba(24,22,22,.9),rgba(12,13,14,.82));box-shadow:0 18px 50px rgba(0,0,0,.28);}
+  #pvpPanel::before{content:"ROOM CONTROL";align-self:stretch;margin-bottom:2px;color:#d7b66c;font:700 10px/1 Inter,'Segoe UI',sans-serif;letter-spacing:3px;text-align:left;}
+  #startBtn{margin-top:24px;padding:17px 64px;border-radius:7px;background:linear-gradient(135deg,#e9473c,#8c1816);box-shadow:0 14px 34px rgba(197,38,31,.27),inset 0 1px rgba(255,255,255,.3);transition:transform .16s,box-shadow .16s,filter .16s;}
+  #startBtn:not(:disabled):hover{transform:translateY(-3px);filter:brightness(1.12);box-shadow:0 19px 42px rgba(197,38,31,.4),inset 0 1px rgba(255,255,255,.35);}
+  #startBtn:disabled{filter:saturate(.45);opacity:.72;}
+  #loadingNote{color:rgba(201,205,207,.5);font-size:10px;letter-spacing:1.5px;}
+  @media(max-width:760px){#landingRail{left:14px;right:14px;font-size:8px}#landingRail span:last-child{display:none}#logo{width:240px}.mapCard{width:min(92vw,340px);min-height:0}.mapCard img{height:92px}.modeCard{width:min(92vw,340px)}#startScreen{padding-top:46px}}
 </style>
 </head>
 <body>
@@ -164,9 +200,10 @@
 <div id="socialNotice" role="status" hidden></div>
 
 <div id="startScreen">
+  <div id="landingRail"><span>LAST ROUND // TACTICAL ARENA</span><span>BUILD 0.2 // ONLINE</span></div>
   <img id="logo" src="assets/logo.png" alt="LAST ROUND">
   <h2>No second chances</h2>
-  <p></p>
+  <p>Choose your battlefield</p>
   <div id="mapSelect">
     <div class="mapCard selected" data-map="arena">
       <div class="swatch arena"></div>
