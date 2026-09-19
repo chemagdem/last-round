@@ -449,60 +449,6 @@ function softDiscTexture(color = 'rgba(255,255,255,1)'){
   return new THREE.CanvasTexture(c);
 }
 
-function sandTexture(){
-  const size = 512;
-  const { c, ctx } = makeCanvas(size);
-  const base = ctx.createLinearGradient(0, 0, size, size);
-  base.addColorStop(0, '#c9ac7a');
-  base.addColorStop(1, '#bfa070');
-  ctx.fillStyle = base; ctx.fillRect(0, 0, size, size);
-
-  // large dune-scale tonal variation
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * size, y = Math.random() * size, r = size * (0.05 + Math.random() * 0.12);
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, Math.random() > 0.5 ? 'rgba(230,205,150,0.22)' : 'rgba(120,95,55,0.18)');
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  }
-
-  // fine grain speckle
-  for (let i = 0; i < 9000; i++) {
-    const x = Math.random() * size, y = Math.random() * size;
-    const shade = Math.random();
-    ctx.fillStyle = shade > 0.5 ? 'rgba(230,205,150,0.35)' : 'rgba(150,120,75,0.35)';
-    ctx.fillRect(x, y, 2, 2);
-  }
-
-  // small dark pebbles
-  for (let i = 0; i < 260; i++) {
-    ctx.fillStyle = `rgba(70,55,35,${0.15 + Math.random() * 0.2})`;
-    ctx.beginPath(); ctx.arc(Math.random() * size, Math.random() * size, 1 + Math.random() * 1.6, 0, Math.PI * 2); ctx.fill();
-  }
-
-  ctx.strokeStyle = 'rgba(90,70,40,0.15)'; ctx.lineWidth = 1;
-  for (let i = 0; i < 24; i++) {
-    ctx.beginPath();
-    let x = Math.random() * size, y = Math.random() * size;
-    ctx.moveTo(x, y);
-    for (let j = 0; j < 4; j++) { x += (Math.random() - 0.5) * 80; y += (Math.random() - 0.5) * 80; ctx.lineTo(x, y); }
-    ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(26, 26);
-  tex.anisotropy = maxAnisotropy;
-  return tex;
-}
-
-function sandBumpTexture(){
-  const tex = bumpNoiseTexture(256, 300, 0.22);
-  tex.repeat.set(26, 26);
-  return tex;
-}
-
 function desertSkyGradientTexture(){
   const c = document.createElement('canvas'); c.width = 2; c.height = 256;
   const ctx = c.getContext('2d');
@@ -514,96 +460,6 @@ function desertSkyGradientTexture(){
   ctx.fillStyle = grad; ctx.fillRect(0, 0, 2, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function sandstoneTexture(baseColor = '#c9a876', withWindows = true){
-  const size = 512;
-  const { c, ctx } = makeCanvas(size);
-  ctx.fillStyle = baseColor; ctx.fillRect(0, 0, size, size);
-
-  // stucco surface noise (fine grain, gives the plaster-like roughness)
-  for (let i = 0; i < 3000; i++) {
-    const shade = Math.random();
-    ctx.fillStyle = shade > 0.5 ? `rgba(255,240,210,${Math.random() * 0.08})` : `rgba(60,40,20,${Math.random() * 0.1})`;
-    ctx.fillRect(Math.random() * size, Math.random() * size, 2, 2);
-  }
-
-  // subtle large mortar-block lines (kept faint so they read as wall seams, not stripes)
-  ctx.strokeStyle = 'rgba(70,50,25,0.22)'; ctx.lineWidth = 2;
-  const rows = 3, cols = 2;
-  for (let r = 0; r <= rows; r++) {
-    const y = r * (size / rows);
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size, y); ctx.stroke();
-  }
-  for (let r = 0; r < rows; r++) {
-    const y = r * (size / rows);
-    const offset = (r % 2) * (size / cols / 2);
-    for (let cI = 0; cI <= cols; cI++) {
-      const x = cI * (size / cols) + offset;
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + size / rows); ctx.stroke();
-    }
-  }
-
-  // a couple of recessed windows with frames (adobe-building look)
-  if (withWindows) {
-    const windows = [[size * 0.18, size * 0.2, size * 0.16, size * 0.3], [size * 0.62, size * 0.42, size * 0.14, size * 0.24]];
-    windows.forEach(([x, y, w, h]) => {
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
-      ctx.fillRect(x - 6, y - 6, w + 12, h + 12); // light frame
-      const grad = ctx.createLinearGradient(x, y, x, y + h);
-      grad.addColorStop(0, 'rgba(15,20,25,0.9)');
-      grad.addColorStop(1, 'rgba(35,40,45,0.85)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, y, w, h); // dark recessed opening
-      ctx.strokeStyle = 'rgba(90,70,40,0.6)'; ctx.lineWidth = 3;
-      ctx.strokeRect(x, y, w, h);
-    });
-  }
-
-  // faint weathering streaks (reduced so they don't dominate at a distance)
-  for (let i = 0; i < 3; i++) {
-    const x = Math.random() * size;
-    const grad = ctx.createLinearGradient(x, 0, x, size);
-    grad.addColorStop(0, 'rgba(60,45,25,0.16)');
-    grad.addColorStop(1, 'rgba(60,45,25,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(x - 8, 0, 14 + Math.random() * 10, size);
-  }
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1.5, 1);
-  tex.anisotropy = maxAnisotropy;
-  return tex;
-}
-
-function sandstoneBumpTexture(){
-  const size = 512;
-  const { c, ctx } = makeCanvas(size);
-  ctx.fillStyle = '#808080'; ctx.fillRect(0, 0, size, size);
-  ctx.strokeStyle = 'rgba(0,0,0,0.7)'; ctx.lineWidth = 3;
-  const rows = 3, cols = 2;
-  for (let r = 0; r <= rows; r++) {
-    const y = r * (size / rows);
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(size, y); ctx.stroke();
-  }
-  for (let r = 0; r < rows; r++) {
-    const y = r * (size / rows);
-    const offset = (r % 2) * (size / cols / 2);
-    for (let cI = 0; cI <= cols; cI++) {
-      const x = cI * (size / cols) + offset;
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + size / rows); ctx.stroke();
-    }
-  }
-  for (let i = 0; i < 2000; i++) {
-    ctx.fillStyle = `rgba(${Math.random() > 0.5 ? 255 : 0},${Math.random() > 0.5 ? 255 : 0},${Math.random() > 0.5 ? 255 : 0},${Math.random() * 0.06})`;
-    ctx.fillRect(Math.random() * size, Math.random() * size, 2, 2);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1.5, 1);
   return tex;
 }
 
@@ -936,6 +792,18 @@ function applyDesertAtmosphere(){
 let WORLD_SIZE = 220;
 let groundHeightAt = (x, z) => 0;
 
+// real photo/render textures for the arena map (assets/textures/), tiled since they're not
+// procedurally generated to an exact size like the rest of this file's canvas-based textures
+const textureLoader = new THREE.TextureLoader();
+function loadTiledTexture(url, repeatX, repeatY){
+  const tex = textureLoader.load(url);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX, repeatY);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
 // smooth raised (positive height) or sunken (negative height) rectangular platform,
 // with a ramp-like falloff of `margin` units around its edges - used to give maps real verticality
 function plateau(x, z, cx, cz, halfW, halfD, height, margin){
@@ -1050,17 +918,16 @@ function buildArenaMap(){
     gPos.setY(i, groundHeightAt(gPos.getX(i), gPos.getZ(i)));
   }
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshStandardMaterial({ map: sandTexture(), bumpMap: sandBumpTexture(), bumpScale: 0.03, roughness: 1 });
+  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/sand.jpg', 16, 16), roughness: 1 });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const wallMat = new THREE.MeshStandardMaterial({ map: sandstoneTexture('#c2a276', false), bumpMap: sandstoneBumpTexture(), bumpScale: 0.03, roughness: 1 });
-  const crateWoodTex = woodGrainTexture('#7a5a34', 3); crateWoodTex.repeat.set(2, 2);
-  const crateMat = new THREE.MeshStandardMaterial({ map: crateWoodTex, bumpMap: woodBumpTexture(), bumpScale: 0.02, roughness: 0.9 });
+  const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/wall.jpg', 6, 1.5), roughness: 1 });
+  const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 });
   crateMat.userData.penetrable = true;
   crateMat.userData.minimapProp = true;
-  const lowWallMat = new THREE.MeshStandardMaterial({ map: sandstoneTexture('#a88a5c', false), bumpMap: sandstoneBumpTexture(), bumpScale: 0.025, roughness: 1 });
+  const lowWallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/wall.jpg', 1.5, 0.6), roughness: 1 });
   lowWallMat.userData.minimapProp = true;
 
   // visible boundary all the way round - addPerimeterWalls() alone is invisible collision-only,
@@ -1094,8 +961,7 @@ function buildArenaMap(){
   const rowXs = [-11, -7.55, -4.1, -0.65];
   rowXs.forEach(x => { makeBoxProp(x, -15, 1.7, 1.7, 1.7, crateMat); makeBoxProp(x, 15, 1.7, 1.7, 1.7, crateMat); });
 
-  const barrelMetalTex = metalScratchTexture('#9a9a9a'); barrelMetalTex.repeat.set(1, 2);
-  const barrelMat = new THREE.MeshStandardMaterial({ map: barrelMetalTex, bumpMap: metalBumpTexture(), bumpScale: 0.02, roughness: 0.3, metalness: 0.85 });
+  const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
   barrelMat.userData.minimapProp = true;
   function addBarrel(x, z){
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 12), barrelMat);
