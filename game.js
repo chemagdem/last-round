@@ -1274,7 +1274,27 @@ function buildWeaponVisual(id){
       muzzle = null;
       break;
     }
-    case 'glock': pistolModel(pistolMat, 0.32, 0.16, false); break;
+    case 'glock': {
+      pistolModel(pistolMat, 0.32, 0.16, false);
+      // front/rear sights
+      const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.018, 0.012), gunMatLight);
+      frontSight.position.set(0.22, -0.16, -0.5);
+      const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.018, 0.015), gunMatLight);
+      rearSight.position.set(0.22, -0.16, -0.21);
+      group.add(frontSight, rearSight);
+      // rear-slide grip serrations, striker-fired pistols' signature vertical grooves
+      for (let i = 0; i < 5; i++) {
+        const groove = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.1, 0.01), gunMatLight);
+        groove.position.set(0.185, -0.22, -0.24 - i * 0.014);
+        group.add(groove);
+      }
+      // trigger guard loop
+      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.005, 6, 10, Math.PI * 1.3), pistolMat);
+      triggerGuard.rotation.z = Math.PI * 0.35;
+      triggerGuard.position.set(0.22, -0.29, -0.28);
+      group.add(triggerGuard);
+      break;
+    }
     case 'deagle': {
       pistolModel(deagleMat, 0.42, 0.22, true);
       const rail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.3), deagleMat);
@@ -1292,7 +1312,29 @@ function buildWeaponVisual(id){
       group.add(hammer);
       break;
     }
-    case 'tec9': pistolModel(pistolMat, 0.36, 0.22, false); break;
+    case 'tec9': {
+      pistolModel(pistolMat, 0.36, 0.22, false);
+      // the Tec-9's signature chunky, ventilated barrel shroud extending past the slide
+      const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.26, 10), pistolMat);
+      shroud.rotation.x = Math.PI / 2;
+      shroud.position.set(0.22, -0.22, -0.66);
+      group.add(shroud);
+      for (let i = 0; i < 4; i++) { // vent holes along the top of the shroud
+        const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.01, 8), gunMat);
+        hole.rotation.x = Math.PI / 2;
+        hole.position.set(0.22, -0.175, -0.58 - i * 0.05);
+        group.add(hole);
+      }
+      const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.018, 0.015), gunMatLight);
+      rearSight.position.set(0.22, -0.16, -0.2);
+      group.add(rearSight);
+      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.005, 6, 10, Math.PI * 1.3), pistolMat);
+      triggerGuard.rotation.z = Math.PI * 0.35;
+      triggerGuard.position.set(0.22, -0.3, -0.28);
+      group.add(triggerGuard);
+      muzzle.z -= 0.26;
+      break;
+    }
     case 'duals': {
       // one pistol on each side of the screen (mirrored across center) instead of both
       // clustered together on the usual single-weapon right-hand offset
