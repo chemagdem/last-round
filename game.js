@@ -1667,7 +1667,6 @@ camera.fov = baseFov;
 let shakeIntensity = 0;
 let recoilKick = 0; // additive pitch kick (radians), decays
 let recoilYaw = 0; // additive horizontal kick (radians), decays
-let deagleRecoilKick = 0; // dedicated upward camera impulse for the heavy Desert Eagle
 let sprayIndex = 0;
 let lastFireTime = -999;
 
@@ -2534,6 +2533,28 @@ function updateBoltCycle(dt){
 function updateWeaponRecoil(dt){
   if (!currentVisual || weaponRecoilT < 0) return;
   weaponRecoilT += dt;
+  const isDeagle = currentSlot === 'secondary' && inventory.secondary === 'deagle';
+  if (isDeagle) {
+    // Positive X rotation lifts a muzzle pointing along local -Z.
+    // Reach the peak in 35 ms, then settle before the next 300 ms shot.
+    const p = Math.min(1, weaponRecoilT / 0.28);
+    const rise = 0.125;
+    const kick = p < rise ? Math.sin((p / rise) * Math.PI / 2)
+      : Math.pow(1 - (p - rise) / (1 - rise), 2);
+    const tilt = kick * 0.38;
+    currentVisual.group.rotation.x = tilt;
+    // Rotate around the grip at y=-0.34, z=-0.20 rather than the camera origin.
+    const gripY = -0.34, gripZ = -0.20;
+    currentVisual.group.position.y = gripY - (Math.cos(tilt) * gripY - Math.sin(tilt) * gripZ);
+    currentVisual.group.position.z = gripZ - (Math.sin(tilt) * gripY + Math.cos(tilt) * gripZ) + kick * 0.045;
+    if (p >= 1) {
+      weaponRecoilT = -1;
+      currentVisual.group.rotation.x = 0;
+      currentVisual.group.position.y = 0;
+      currentVisual.group.position.z = 0;
+    }
+    return;
+  }
   const duration = currentWeaponDef().boltAction ? 0.34 : 0.16;
   const p = Math.min(1, weaponRecoilT / duration);
   const impulse = p < 0.16 ? p / 0.16 : 1 - ((p - 0.16) / 0.84);
@@ -2685,18 +2706,18 @@ function fireWeapon(){
   const sprayStep = pattern[Math.min(sprayIndex, pattern.length - 1)] || { dy: 0.02, dx: 0 };
   sprayIndex++;
   const adsMul = player.ads ? 0.45 : 1;
-  recoilKick += sprayStep.dy * adsMul;
-  recoilYaw += sprayStep.dx * adsMul;
-  if (weaponId === 'deagle') {
-    // Negative camera pitch is an upward kick in Three.js' YXZ view convention. Keep this
-    // separate from the learnable spray pattern so the pistol snaps upward and then settles.
-    deagleRecoilKick += (player.ads ? 0.075 : 0.12);
+  if (weaponId !== 'deagle') {
+    recoilKick += sprayStep.dy * adsMul;
+    recoilYaw += sprayStep.dx * adsMul;
+    shakeIntensity = Math.min(shakeIntensity + (player.ads ? 0.15 : 0.28), 1.2);
   }
-  shakeIntensity = Math.min(shakeIntensity + (player.ads ? 0.15 : 0.28), 1.2);
   // per-weapon visual kick on the gun model itself - snappy shove back + muzzle-up tilt, both
   // spring back to rest via the existing lerps in updatePlayer (AWP kicks by far the hardest)
-  weaponGroup.position.z += def.kickPush ?? 0.06;
-  weaponGroup.rotation.x -= def.kickTilt ?? 0.05;
+  // The Deagle uses its grip-pivot animation only, without a second downward tilt.
+  if (weaponId !== 'deagle') {
+    weaponGroup.position.z += def.kickPush ?? 0.06;
+    weaponGroup.rotation.x -= def.kickTilt ?? 0.05;
+  }
   weaponRecoilT = 0;
 
   spawnMuzzleSmoke();
@@ -4584,8 +4605,7 @@ function updatePlayer(dt){
 
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw + recoilYaw + shakeX;
-  deagleRecoilKick += (0 - deagleRecoilKick) * Math.min(1, dt * 11);
-  camera.rotation.x = player.pitch + recoilKick - deagleRecoilKick + shakeY;
+  camera.rotation.x = player.pitch + recoilKick + shakeY;
 
   // ADS fov transition - each weapon zooms to its own zoomFov (AWP zooms in much further than iron
   // sights); a scoped weapon at scope level 2 zooms in further still via scopeFov2
