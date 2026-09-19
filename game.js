@@ -1296,20 +1296,39 @@ function buildWeaponVisual(id){
       break;
     }
     case 'deagle': {
-      pistolModel(deagleMat, 0.42, 0.22, true);
+      // built from scratch instead of the shared pistolModel() box - the real Desert Eagle's
+      // silhouette is a distinct two-tier stack (a slim lower frame + a taller, wider slide sitting
+      // above it), which a single flat box can never read as no matter what's bolted onto it
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.09, 0.4), deagleMat);
+      frame.position.set(0.22, -0.245, -0.34);
+      const slide = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.065, 0.44), deagleMat);
+      slide.position.set(0.22, -0.17, -0.35);
+      const gripM = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.075), handleMat);
+      gripM.position.set(0.22, -0.34, -0.2);
+      gripM.rotation.x = 0.18;
+      magazine = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.22, 0.055), deagleMat);
+      magazine.position.set(0.22, -0.42, -0.22);
+      group.add(frame, slide, gripM, magazine);
+      muzzle.set(0.22, -0.17, -0.57);
+
       const rail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.3), deagleMat);
-      rail.position.set(0.22, -0.155, -0.35);
+      rail.position.set(0.22, -0.133, -0.35);
       group.add(rail);
       // slide venting ribs, the Deagle's signature top-slide serrations
       for (let i = 0; i < 4; i++) {
-        const vent = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.008, 0.015), gunMat);
-        vent.position.set(0.22, -0.166, -0.24 - i * 0.03);
+        const vent = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.008, 0.015), gunMat);
+        vent.position.set(0.22, -0.144, -0.24 - i * 0.03);
         group.add(vent);
       }
       // exposed hammer at the rear of the slide
       const hammer = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.03, 0.018), gunMat);
-      hammer.position.set(0.22, -0.155, -0.185);
+      hammer.position.set(0.22, -0.15, -0.15);
       group.add(hammer);
+      // trigger guard loop
+      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.032, 0.006, 6, 10, Math.PI * 1.3), deagleMat);
+      triggerGuard.rotation.z = Math.PI * 0.35;
+      triggerGuard.position.set(0.22, -0.3, -0.27);
+      group.add(triggerGuard);
       break;
     }
     case 'tec9': {
