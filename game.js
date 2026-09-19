@@ -39,6 +39,7 @@ class SoundEngine {
     this.loadSample('smg', 'assets/wpn_45_smg_2d_01.mp3');
     this.loadSample('knifeSlash', 'assets/knife-slashing.mp3');
     this.loadSample('knifeStab', 'assets/knife-stab.mp3');
+    this.loadSample('subwayAmbience', 'assets/subway.mp3');
   }
   resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
@@ -218,7 +219,7 @@ class SoundEngine {
     noise.start(t); noise.stop(t + 0.2);
   }
 
-  startAmbience(){
+  startAmbience(mapId){
     if (!this.ctx) return;
     const ctx = this.ctx;
     const noise = ctx.createBufferSource(); noise.buffer = this.noiseBuffer(4); noise.loop = true;
@@ -227,10 +228,17 @@ class SoundEngine {
     noise.connect(lp); lp.connect(g); g.connect(this.master);
     noise.start();
     this._ambienceLoop();
+    if (mapId === 'subway') this._subwayAmbienceLoop();
   }
   _ambienceLoop(){
     const delay = 7000 + Math.random() * 10000;
     setTimeout(() => { this.distantExplosion(); this._ambienceLoop(); }, delay);
+  }
+  // distant train rumble/announcement loop for the Subway map - quiet background flavor,
+  // roughly once a minute, not gated to the other (much more frequent) combat ambience above
+  _subwayAmbienceLoop(){
+    const delay = 50000 + Math.random() * 20000;
+    setTimeout(() => { this.playSample('subwayAmbience', 0.22); this._subwayAmbienceLoop(); }, delay);
   }
   distantExplosion(){
     if (!this.ctx) return;
@@ -800,6 +808,18 @@ function applyIndustrialAtmosphere(){
   fillLight.color.set(0x606060); fillLight.intensity = 0.3;
 }
 
+// cool, fluorescent-lit subway station - kept as bright as the (already-corrected) Warehouse
+// pass from the first version, rather than risk the same "too dark" mistake
+function applySubwayAtmosphere(){
+  sky.material.map = desertSkyGradientTexture(); // barely visible under a roof, just needs to not be blank
+  sky.material.needsUpdate = true;
+  scene.fog.color.set(0x30343a);
+  scene.fog.density = 0.009;
+  hemi.color.set(0x8fa4b8); hemi.groundColor.set(0x2a2c30); hemi.intensity = 1.0;
+  sun.color.set(0xcfe4f5); sun.intensity = 0.5;
+  fillLight.color.set(0x7a8a96); fillLight.intensity = 0.35;
+}
+
 // ---------- World / Map system ----------
 let WORLD_SIZE = 220;
 let groundHeightAt = (x, z) => 0;
@@ -1151,6 +1171,123 @@ function buildWarehouseMap(){
   };
 }
 
+// ---------- Map: Subway (abandoned station platform) ----------
+// Same layout again (see buildWarehouseMap's comment) - tiled station floor/walls, a flat
+// concrete ceiling and a row of fluorescent tube fixtures instead of warm hanging bulbs.
+function buildSubwayMap(){
+  WORLD_SIZE = 60;
+  applySubwayAtmosphere();
+
+  const ELEV_CX = -17, ELEV_HALF_W = 3.5, ELEV_HALF_D = 20, ELEV_HEIGHT = 2.0;
+  groundHeightAt = (x, z) => plateau(x, z, ELEV_CX, 0, ELEV_HALF_W, ELEV_HALF_D, ELEV_HEIGHT, 6);
+
+  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 60, 60);
+  groundGeo.rotateX(-Math.PI / 2);
+  const gPos = groundGeo.attributes.position;
+  for (let i = 0; i < gPos.count; i++) {
+    gPos.setY(i, groundHeightAt(gPos.getX(i), gPos.getZ(i)));
+  }
+  groundGeo.computeVertexNormals();
+  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_floor.webp', 12, 12), roughness: 0.85 });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_walls.jpg', 6, 1.6), roughness: 0.8 });
+  const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 }); // same crate look as Desert/Warehouse
+  crateMat.userData.penetrable = true;
+  crateMat.userData.minimapProp = true;
+  const lowWallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_walls.jpg', 1.6, 0.6), roughness: 0.8 });
+  lowWallMat.userData.minimapProp = true;
+
+  const halfArenaZ = 27, eastX = 27, westX = ELEV_CX - ELEV_HALF_W - 0.5, wallThk = 2;
+  const wallCx = (eastX + westX) / 2, wallSpanX = (eastX - westX) + wallThk * 2;
+  const wallBaseY = -1, wallH = 10;
+  [[wallCx, -halfArenaZ, wallSpanX, wallH, wallThk], [wallCx, halfArenaZ, wallSpanX, wallH, wallThk],
+   [westX, 0, wallThk, wallH, halfArenaZ * 2 + wallThk * 2], [eastX, 0, wallThk, wallH, halfArenaZ * 2 + wallThk * 2]]
+    .forEach(([x, z, w, h, d]) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      mesh.position.set(x, wallBaseY + h / 2, z);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      scene.add(mesh);
+      addBox(mesh);
+    });
+  addPerimeterWalls();
+
+  // a flat concrete ceiling closing the station off
+  const ceilingTex = metalScratchTexture('#3a3d42'); ceilingTex.repeat.set(10, 10);
+  const ceilingMat = new THREE.MeshStandardMaterial({ map: ceilingTex, roughness: 1, side: THREE.DoubleSide });
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(wallSpanX, halfArenaZ * 2 + wallThk * 2), ceilingMat);
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set(wallCx, wallBaseY + wallH, 0);
+  ceiling.receiveShadow = true;
+  scene.add(ceiling);
+
+  // fluorescent tube fixtures - a dense grid (matches Warehouse's already-corrected brightness
+  // lesson) but cool white instead of warm bulbs
+  const tubeFixtureMat = new THREE.MeshStandardMaterial({ color: 0xe8f0f5, roughness: 0.3, metalness: 0.1, emissive: 0xdfeeff, emissiveIntensity: 0.6 });
+  const lampXs = [-15, -1, 13, 24], lampZs = [-22, -8, 8, 22];
+  lampXs.forEach(x => lampZs.forEach(z => {
+    const lampY = 6.5;
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.14, 0.3), tubeFixtureMat);
+    tube.position.set(x, lampY, z);
+    scene.add(tube);
+    const light = new THREE.PointLight(0xdfeeff, 7, 26, 1.7);
+    light.position.set(x, lampY - 0.3, z);
+    scene.add(light);
+  }));
+
+  // crate/barrel positions randomized like Warehouse, mirrored north/south
+  const jit = n => (Math.random() - 0.5) * n;
+
+  const rowXs = [-11, -7.55, -4.1, -0.65].map(x => x + jit(1.2));
+  rowXs.forEach(x => {
+    const zj = jit(2);
+    makeBoxProp(x, -15 + zj, 1.7, 1.7, 1.7, crateMat);
+    makeBoxProp(x, 15 - zj, 1.7, 1.7, 1.7, crateMat);
+  });
+
+  const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
+  barrelMat.userData.minimapProp = true;
+  function addBarrel(x, z){
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 12), barrelMat);
+    barrel.position.set(x, groundHeightAt(x, z) + 0.8, z);
+    barrel.castShadow = true; barrel.receiveShadow = true;
+    scene.add(barrel);
+    addBox(barrel);
+  }
+
+  const entryRowXs = [-9, -5, -1, 3, 7, 11].map(x => x + jit(1.4));
+  entryRowXs.forEach(x => {
+    const zj = jit(1.5);
+    makeBoxProp(x, -18.5 + zj, 1.6, 1.6, 1.6, crateMat);
+    makeBoxProp(x, 18.5 - zj, 1.6, 1.6, 1.6, crateMat);
+  });
+  [[14, -19], [14, 19]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(1.5)));
+
+  makeBoxProp(-3 + jit(2.5), -4 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
+  makeBoxProp(7 + jit(2.5), 3 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
+  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(2)));
+
+  makeBoxProp(ELEV_CX, -10 + jit(3), 1.5, 1.5, 1.5, crateMat);
+  makeBoxProp(ELEV_CX, 3 + jit(3), 1.5, 1.5, 1.5, crateMat);
+
+  makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, -17, 2.6, 1.05, 1.1, lowWallMat);
+  makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, 17, 2.6, 1.05, 1.1, lowWallMat);
+
+  const spawnZoneA = { xMin: -11, xMax: 18, zMin: -26, zMax: -20 };
+  const spawnZoneB = { xMin: -11, xMax: 18, zMin: 20, zMax: 26 };
+
+  return {
+    spawn: new THREE.Vector3(0, 2, -23),
+    tSpawn: new THREE.Vector3(0, 2, -23),
+    ctSpawn: new THREE.Vector3(0, 2, 23),
+    tSpawnZone: spawnZoneA,
+    ctSpawnZone: spawnZoneB,
+    sites: []
+  };
+}
+
 // picks a random point inside a map's spawn zone when one is defined (arena), otherwise falls
 // back to the fixed spawn point every other map still uses
 function getTeamSpawnPos(meta, team){
@@ -1173,7 +1310,8 @@ function getSpawnYaw(team){
 
 const MAPS = {
   arena: { name: 'Desert', build: buildArenaMap },
-  warehouse: { name: 'Warehouse', build: buildWarehouseMap }
+  warehouse: { name: 'Warehouse', build: buildWarehouseMap },
+  subway: { name: 'Subway', build: buildSubwayMap }
 };
 let selectedMap = 'arena';
 
@@ -4098,6 +4236,8 @@ document.querySelector('.mapCard[data-map="arena"] .swatch').style.backgroundIma
   `url(${renderMapThumbnail({ bg: '#c9ac7a', elevated: '#a9884f', wall: '#5a3d20', crate: '#5a3d24', spawn: 'rgba(229,71,60,0.18)' })})`;
 document.querySelector('.mapCard[data-map="warehouse"] .swatch').style.backgroundImage =
   `url(${renderMapThumbnail({ bg: '#26262a', elevated: '#38383e', wall: '#0d0d0d', crate: '#5c4428', spawn: 'rgba(229,71,60,0.22)' })})`;
+document.querySelector('.mapCard[data-map="subway"] .swatch').style.backgroundImage =
+  `url(${renderMapThumbnail({ bg: '#d8d2c4', elevated: '#b8b0a0', wall: '#8a7a50', crate: '#5c4428', spawn: 'rgba(229,71,60,0.2)' })})`;
 
 document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
@@ -4155,7 +4295,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   if (document.getElementById('startBtn').disabled) return;
   audio.init();
   audio.resume();
-  audio.startAmbience();
+  audio.startAmbience(selectedMap);
   buildMap(selectedMap);
   document.getElementById('startScreen').style.display = 'none';
   document.getElementById('hud').style.display = 'block';
