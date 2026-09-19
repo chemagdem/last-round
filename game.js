@@ -1293,7 +1293,14 @@ function buildSubwayMap(){
   columnMat.userData.minimapProp = true;
   const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
   barrelMat.userData.minimapProp = true;
-  const trainMat = new THREE.MeshStandardMaterial({ color: 0x455966, roughness: 0.55, metalness: 0.3, emissive: 0x0d1418, emissiveIntensity: 0.4 });
+  const trainSideTex = loadTiledTexture('assets/textures/train.png', 6, 1);
+  const trainSideMat = new THREE.MeshStandardMaterial({ map: trainSideTex, roughness: 0.5, metalness: 0.3 });
+  const trainRoofTex = loadTiledTexture('assets/textures/metal.jpg', 2, 6);
+  const trainRoofMat = new THREE.MeshStandardMaterial({ map: trainRoofTex, roughness: 0.4, metalness: 0.6 });
+  const trainFrontTex = textureLoader.load('assets/textures/trainfront.png');
+  trainFrontTex.colorSpace = THREE.SRGBColorSpace;
+  trainFrontTex.anisotropy = maxAnisotropy;
+  const trainFrontMat = new THREE.MeshStandardMaterial({ map: trainFrontTex, roughness: 0.45, metalness: 0.3, transparent: true, alphaTest: 0.5 });
 
   const wallBaseY = -2, wallH = 11;
   const wallCx = (westX + eastX) / 2;
@@ -1357,8 +1364,18 @@ function buildSubwayMap(){
     makeColumn(bucket % 2 === 0 ? -1.8 : 1.8, z);
   });
 
-  // parked train car in the pit, centered so both spawns have equal access to it as pit cover
-  makeBoxProp(13, 0, 5.2, 3.0, 34, trainMat);
+  // parked train car in the pit, centered so both spawns have equal access to it as pit cover -
+  // built directly rather than through makeBoxProp since each face needs its own texture: tiled
+  // door/window side panels on the long faces, brushed metal on the roof, and the real train-front
+  // render capping both ends (both ends get the same front render - it reads as a stopped unit
+  // blocking the track in both directions, not a single car with one modeled end)
+  const trainW = 5.2, trainH = 3.0, trainD = 34;
+  const trainGeo = new THREE.BoxGeometry(trainW, trainH, trainD);
+  const trainMesh = new THREE.Mesh(trainGeo, [trainSideMat, trainSideMat, trainRoofMat, trainRoofMat, trainFrontMat, trainFrontMat]);
+  trainMesh.position.set(13, groundHeightAt(13, 0) + trainH / 2, 0);
+  trainMesh.castShadow = true; trainMesh.receiveShadow = true;
+  scene.add(trainMesh);
+  addBox(trainMesh);
 
   // wall benches, mirrored north/south - backX is the backrest's position, flush against the
   // west wall's inner face; the bench's long axis runs along z (parallel to the wall) since that's
