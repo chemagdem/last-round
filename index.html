@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>LAST ROUND</title>
+<link rel="icon" type="image/png" href="assets/logo.png">
+<style>
+  @font-face{font-family:'Baserona';src:url('assets/fonts/Baserona.ttf') format('truetype');font-display:swap;}
+  html,body{margin:0;padding:0;overflow:hidden;background:#0a0a0a;font-family:'Segoe UI',Arial,sans-serif;}
+  h1,h2,h3,#startBtn,#closeBuyMenu,#pvpHostBtn,#pvpJoinBtn,.teamSizeBtn,#restartBtn,#deathScreen h1{font-family:'Baserona','Segoe UI',Arial,sans-serif;}
+  #hud{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;color:#ddd;z-index:10;}
+  #crosshair{position:absolute;top:50%;left:50%;width:22px;height:22px;transform:translate(-50%,-50%);transition:opacity .12s;}
+  #crosshair:before,#crosshair:after{content:'';position:absolute;background:#e5473c;}
+  #crosshair:before{left:50%;top:0;width:2px;height:100%;transform:translateX(-50%);}
+  #crosshair:after{top:50%;left:0;height:2px;width:100%;transform:translateY(-50%);}
+  #hitmarker{position:absolute;top:50%;left:50%;width:26px;height:26px;transform:translate(-50%,-50%) rotate(45deg);opacity:0;pointer-events:none;}
+  #hitmarker:before,#hitmarker:after{content:'';position:absolute;background:#aaaaaa;}
+  #hitmarker.kill:before,#hitmarker.kill:after{background:#ff3333;}
+  #hitmarker:before{left:50%;top:0;width:3px;height:100%;transform:translateX(-50%);}
+  #hitmarker:after{top:50%;left:0;height:3px;width:100%;transform:translateY(-50%);}
+  #adsDot{position:fixed;top:50%;left:50%;width:6px;height:6px;background:#e5473c;border-radius:50%;transform:translate(-50%,-50%);display:none;box-shadow:0 0 4px rgba(0,0,0,0.9);z-index:12;}
+  #scopeOverlay{position:fixed;top:50%;left:50%;width:82vmin;height:82vmin;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 9999px #000;display:none;z-index:11;background:radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 60%,rgba(0,0,0,0.55) 100%);}
+  #scopeOverlay .reticleV{position:absolute;left:50%;top:0;width:2px;height:100%;background:#000;transform:translateX(-50%);}
+  #scopeOverlay .reticleH{position:absolute;top:50%;left:0;height:2px;width:100%;background:#000;transform:translateY(-50%);}
+  #scopeOverlay .tick{position:absolute;background:#000;}
+  #scopeOverlay .tick-top{left:50%;top:16%;width:2px;height:16px;transform:translateX(-50%);}
+  #scopeOverlay .tick-bottom{left:50%;bottom:16%;width:2px;height:16px;transform:translateX(-50%);}
+  #scopeOverlay .tick-left{top:50%;left:16%;height:2px;width:16px;transform:translateY(-50%);}
+  #scopeOverlay .tick-right{top:50%;right:16%;height:2px;width:16px;transform:translateY(-50%);}
+  #healthbar{position:absolute;bottom:30px;left:30px;width:220px;}
+  #healthbar .label{font-size:12px;letter-spacing:2px;color:#c66;margin-bottom:4px;}
+  #healthOuter{width:220px;height:22px;border:2px solid #442;background:rgba(0,0,0,0.5);}
+  #healthInner{height:100%;background:linear-gradient(90deg,#7a1414,#e5473c);width:100%;transition:width .15s;}
+  #ammo{position:absolute;bottom:30px;right:30px;text-align:right;font-size:34px;color:#eee;text-shadow:0 0 6px #000;}
+  #ammo span{font-size:16px;color:#b88;}
+  #reloadLabel{position:absolute;bottom:78px;right:30px;text-align:right;font-size:14px;letter-spacing:3px;color:#fc6;opacity:0;text-shadow:0 0 6px #000;}
+  #stats{position:absolute;top:20px;left:30px;font-size:14px;color:#ccc;line-height:1.6;text-shadow:0 0 4px #000;}
+  #bombStatusLabel{color:#f66;}
+  #centerMessage{position:fixed;top:38%;left:50%;transform:translate(-50%,-50%);font-family:'Baserona','Segoe UI',Arial,sans-serif;font-size:48px;color:#fff;text-shadow:0 3px 12px rgba(0,0,0,0.8);letter-spacing:2px;text-align:center;pointer-events:none;z-index:20;}
+  #defuseBar{position:absolute;bottom:160px;left:50%;transform:translateX(-50%);width:220px;height:12px;border:2px solid #653;background:rgba(0,0,0,0.5);display:none;}
+  #scoreboardBar{position:fixed;top:0;left:50%;transform:translateX(-50%);display:flex;align-items:stretch;font-family:'Baserona','Segoe UI',Arial,sans-serif;text-shadow:0 1px 3px rgba(0,0,0,0.6);z-index:11;}
+  #scoreboardBar .sbTeam{padding:6px 18px;font-size:14px;letter-spacing:1px;display:flex;align-items:center;color:#fff;}
+  #scoreboardBar .sbTeamA{background:#5a1414;}
+  #scoreboardBar .sbTeamB{background:#8a2a1f;}
+  #scoreboardBar .sbScore{background:#111;color:#fff;font-size:20px;font-weight:bold;padding:6px 14px;display:flex;align-items:center;}
+  #scoreboardBar .sbTimer{background:#000;color:#ddd;padding:4px 14px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:60px;}
+  #scoreboardBar .sbPhase{font-size:10px;letter-spacing:2px;color:#a66;}
+  #scoreboardBar .sbTimerNum{font-size:16px;font-weight:bold;}
+  #defuseFill{height:100%;width:0%;background:linear-gradient(90deg,#7a1414,#e5473c);}
+  #minimap{position:absolute;top:20px;right:20px;width:170px;height:170px;border:2px solid #733;background:rgba(20,0,0,0.55);border-radius:6px;}
+  #waveBanner{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-size:46px;color:#fff;text-shadow:0 0 20px #f33;letter-spacing:6px;opacity:0;transition:opacity .5s;font-weight:bold;font-family:'Baserona','Segoe UI',Arial,sans-serif;}
+  #hitFlash{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.0);pointer-events:none;transition:background .1s;}
+  #smokeOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(210,212,208,0.88);pointer-events:none;opacity:0;transition:opacity .6s;z-index:9;}
+  #vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;box-shadow:inset 0 0 0 0 rgba(160,0,0,0);transition:box-shadow .3s;}
+  #startScreen{position:fixed;top:0;left:0;width:100%;height:100%;overflow-y:auto;background:radial-gradient(circle at 50% 30%,#2a0808,#050505 80%);color:#ddd;display:flex;flex-direction:column;align-items:center;padding:24px 0 50px;box-sizing:border-box;}
+  #startScreen h1{font-size:64px;letter-spacing:10px;color:#e5473c;text-shadow:0 0 30px #a00;margin-bottom:0;}
+  #logo{width:240px;max-width:60vw;filter:drop-shadow(0 0 20px rgba(255,60,60,0.35));margin-top:6px;}
+  #startScreen h2{font-weight:normal;letter-spacing:4px;color:#996;margin-top:4px;}
+  #startScreen p{max-width:600px;text-align:center;line-height:1.6;color:#bba;}
+  #startBtn{margin-top:24px;padding:16px 50px;font-size:22px;letter-spacing:3px;background:#4a1414;color:#fee;border:2px solid #e5473c;cursor:pointer;border-radius:4px;}
+  #startBtn:hover:not(:disabled){background:#6a1a1a;}
+  #startBtn:disabled{opacity:0.4;cursor:not-allowed;}
+  #loadingNote{margin-top:14px;margin-bottom:10px;font-size:12px;color:#875;letter-spacing:1px;}
+  #mapSelect{display:flex;gap:20px;margin-top:22px;flex-wrap:wrap;justify-content:center;}
+  .mapCard{width:220px;padding:16px;border:2px solid #443;border-radius:6px;background:rgba(255,255,255,0.03);cursor:pointer;transition:border-color .15s,background .15s;}
+  .mapCard:hover{border-color:#a55;}
+  .mapCard.selected{border-color:#e5473c;background:rgba(229,71,60,0.1);}
+  #modeSelect{display:flex;gap:20px;margin-top:16px;flex-wrap:wrap;justify-content:center;}
+  .modeCard{width:260px;padding:14px;border:2px solid #443;border-radius:6px;background:rgba(255,255,255,0.03);cursor:pointer;transition:border-color .15s,background .15s,opacity .15s;}
+  .modeCard:hover{border-color:#a55;}
+  .modeCard.selected{border-color:#e5473c;background:rgba(229,71,60,0.1);}
+  .modeCard.disabled{opacity:0.35;cursor:not-allowed;pointer-events:none;}
+  .modeCard h3{margin:0 0 6px;font-size:15px;letter-spacing:2px;color:#ddd;}
+  .modeCard p{margin:0;font-size:11px;color:#a88;line-height:1.4;text-align:left;}
+  .mapCard h3{margin:0 0 6px;font-size:16px;letter-spacing:2px;color:#ddd;}
+  .mapCard p{margin:0;font-size:12px;color:#a88;line-height:1.4;text-align:left;}
+  .mapCard .swatch{width:100%;height:60px;border-radius:4px;margin-bottom:10px;}
+  .swatch.battlefield{background:linear-gradient(135deg,#4a2222,#8a7a63);}
+  .swatch.dust{background:linear-gradient(135deg,#c2a878,#7d6743);}
+  .swatch.mirage{background:linear-gradient(135deg,#d9bc8c,#6b3d3d);}
+  .swatch.arena{background:linear-gradient(135deg,#8a4a4a,#4e2222);}
+  #pvpPanel{margin-top:14px;padding:14px 20px;border:2px solid #443;border-radius:6px;background:rgba(255,255,255,0.03);display:flex;flex-direction:column;align-items:center;gap:10px;}
+  #playerNameInput{padding:9px 10px;background:rgba(0,0,0,0.4);border:2px solid #443;color:#ddd;border-radius:4px;letter-spacing:1px;width:200px;text-align:center;}
+  #pvpEntryChoice{display:flex;gap:10px;}
+  .pvpChoiceBtn{padding:8px 20px;background:rgba(255,255,255,0.04);border:2px solid #443;color:#ddd;cursor:pointer;border-radius:4px;letter-spacing:1px;}
+  .pvpChoiceBtn.selected{border-color:#e5473c;background:rgba(229,71,60,0.12);}
+  #pvpHostSection{display:flex;flex-direction:column;align-items:center;gap:10px;}
+  #pvpTeamSize{display:flex;gap:10px;}
+  .teamSizeBtn{padding:8px 20px;background:rgba(255,255,255,0.04);border:2px solid #443;color:#ddd;cursor:pointer;border-radius:4px;letter-spacing:1px;}
+  .teamSizeBtn.selected{border-color:#e5473c;background:rgba(229,71,60,0.12);}
+  #pvpActions{display:flex;gap:20px;align-items:center;}
+  #pvpHostBtn{padding:10px 22px;background:#4a1414;color:#fee;border:2px solid #e5473c;cursor:pointer;border-radius:4px;letter-spacing:1px;}
+  #pvpJoinRow{display:flex;gap:8px;}
+  #pvpJoinCode{padding:9px 10px;background:rgba(0,0,0,0.4);border:2px solid #443;color:#ddd;border-radius:4px;letter-spacing:2px;width:150px;}
+  #pvpJoinBtn{padding:10px 18px;background:#4a1414;color:#fee;border:2px solid #e5473c;cursor:pointer;border-radius:4px;letter-spacing:1px;}
+  #pvpStatus{font-size:13px;color:#a88;min-height:18px;}
+  #deathScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(20,0,0,0.85);color:#fdd;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
+  #deathScreen h1{font-size:60px;letter-spacing:8px;color:#f55;}
+  #killfeed{position:absolute;top:200px;right:20px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
+  .killEntry{display:flex;align-items:center;gap:8px;background:#000;border:2px solid #b02020;border-radius:22px;padding:6px 18px;white-space:nowrap;opacity:1;transition:opacity .4s;}
+  .killEntry.fade{opacity:0;}
+  .kfKiller{color:#e5473c;font-size:16px;font-weight:bold;letter-spacing:.5px;}
+  .kfWeapon{color:#fff;font-size:13px;font-weight:bold;letter-spacing:1px;display:flex;align-items:center;gap:4px;}
+  .kfWeapon:before{content:'🔫';font-size:14px;}
+  .kfSkull{color:#e33;font-size:14px;}
+  .kfVictim{color:#ddd;font-size:16px;font-weight:bold;letter-spacing:.5px;}
+  #buyHint{position:absolute;bottom:110px;right:30px;font-size:12px;letter-spacing:2px;color:#a66;text-shadow:0 0 4px #000;}
+  #buyMenu{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,5,5,0.92);color:#ddd;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:all;}
+  #tabScoreboard{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:rgba(10,5,5,0.92);border:2px solid #653;border-radius:6px;padding:16px 20px;color:#ddd;display:none;z-index:55;pointer-events:none;font-family:'Segoe UI',Arial,sans-serif;min-width:340px;}
+  #tabScoreboard h3{font-family:'Baserona','Segoe UI',Arial,sans-serif;letter-spacing:3px;color:#e5473c;margin:0 0 10px;text-align:center;}
+  #tabScoreboard table{width:100%;border-collapse:collapse;font-size:13px;}
+  #tabScoreboard th{text-align:left;color:#a88;font-weight:normal;letter-spacing:1px;padding:4px 10px;border-bottom:1px solid #443;}
+  #tabScoreboard td{padding:5px 10px;border-bottom:1px solid #2a1a1a;}
+  #tabScoreboard td.num{text-align:center;}
+  #buyMenu h2{letter-spacing:4px;color:#e5473c;margin-bottom:4px;}
+  #pauseMenu{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,5,5,0.92);color:#ddd;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:60;pointer-events:all;font-family:'Segoe UI',Arial,sans-serif;}
+  #pauseMenu h2{font-family:'Baserona','Segoe UI',Arial,sans-serif;letter-spacing:6px;color:#e5473c;margin-bottom:20px;}
+  #pauseMenu .pauseSection{width:340px;margin-bottom:22px;}
+  #pauseMenu .pauseLabel{font-size:12px;letter-spacing:2px;color:#a88;margin-bottom:8px;}
+  #pauseMenu input[type=range]{width:100%;}
+  #pauseMenu .bindRow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #332;font-size:13px;}
+  #pauseMenu .bindKeyBtn{background:#1a0d0d;color:#ddd;border:2px solid #653;border-radius:4px;padding:4px 12px;min-width:90px;cursor:pointer;letter-spacing:1px;font-size:12px;}
+  #pauseMenu .bindKeyBtn.listening{border-color:#e5473c;color:#e5473c;}
+  #pauseMenu .pauseBtnRow{display:flex;gap:14px;margin-top:6px;}
+  #pauseMenu button.pauseBtn{padding:12px 28px;font-size:14px;letter-spacing:2px;background:#4a1414;color:#fee;border:2px solid #e5473c;cursor:pointer;border-radius:4px;font-family:'Baserona','Segoe UI',Arial,sans-serif;}
+  #pauseMenu button.pauseBtn:hover{background:#6a1a1a;}
+  #pauseMenu #sensValue{color:#e5473c;font-weight:bold;}
+  #buyMoney{font-size:20px;color:#fc6;margin-bottom:20px;}
+  #buyColumns{display:flex;gap:40px;}
+  .buyColumn{width:260px;}
+  .buyColumn h3{font-size:14px;letter-spacing:3px;color:#a88;border-bottom:1px solid #443;padding-bottom:6px;}
+  .weaponCard{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:6px 0;background:rgba(255,255,255,0.04);border:1px solid #443;border-radius:4px;cursor:pointer;transition:background .15s;}
+  .weaponCard:hover{background:rgba(229,71,60,0.12);}
+  .weaponCard.owned{border-color:#e5473c;cursor:default;background:rgba(229,71,60,0.08);}
+  .wName{font-size:14px;}
+  .wPrice{font-size:13px;color:#e5473c;}
+  #closeBuyMenu{margin-top:26px;padding:10px 30px;background:#4a1414;color:#fee;border:2px solid #e5473c;cursor:pointer;border-radius:4px;letter-spacing:2px;}
+  canvas{display:block;}
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <img id="logo" src="assets/logo.png" alt="LAST ROUND">
+  <h2>No second chances</h2>
+  <p></p>
+  <div id="mapSelect">
+    <div class="mapCard selected" data-map="arena">
+      <div class="swatch arena"></div>
+      <h3>DESERT</h3>
+      <p>Symmetric square with crate cover in the middle. Built for 1v1 / 2v2 rounds.</p>
+    </div>
+  </div>
+  <div id="modeSelect">
+    <div class="modeCard selected" data-mode="pvp">
+      <h3>MULTIPLAYER (PVP)</h3>
+      <p>1v1 or 2v2 against a friend via room code. Each round forces a different weapon - the team that wipes the other wins.</p>
+    </div>
+    <div class="modeCard" data-mode="practice">
+      <h3>PRACTICE</h3>
+      <p>Static targets to work on your aim. Unlimited budget for weapons, and a 60-minute session.</p>
+    </div>
+  </div>
+  <div id="pvpPanel">
+    <input id="playerNameInput" placeholder="YOUR NAME" maxlength="16">
+    <div id="pvpEntryChoice">
+      <button class="pvpChoiceBtn selected" data-choice="host">HOST A GAME</button>
+      <button class="pvpChoiceBtn" data-choice="join">JOIN WITH CODE</button>
+    </div>
+    <div id="pvpHostSection">
+      <div id="pvpTeamSize">
+        <button class="teamSizeBtn selected" data-size="1">1v1</button>
+        <button class="teamSizeBtn" data-size="2">2v2</button>
+      </div>
+      <button id="pvpHostBtn">CREATE ROOM</button>
+    </div>
+    <div id="pvpJoinSection" style="display:none;">
+      <div id="pvpJoinRow">
+        <input id="pvpJoinCode" placeholder="ROOM CODE" maxlength="12">
+        <button id="pvpJoinBtn">JOIN</button>
+      </div>
+    </div>
+    <div id="pvpStatus"></div>
+  </div>
+  <button id="startBtn" disabled>I'M READY</button>
+  <div id="loadingNote">Turn on your device's sound for the full experience.</div>
+</div>
+
+<div id="deathScreen">
+  <h1>YOU DIED</h1>
+  <p id="finalScore" style="font-size:24px;"></p>
+  <button id="restartBtn" style="margin-top:20px;padding:14px 40px;font-size:18px;background:#733;color:#fee;border:2px solid #f88;cursor:pointer;">RETRY</button>
+</div>
+
+<div id="hud" style="display:none;">
+  <div id="scoreboardBar" style="display:none;">
+    <div class="sbTeam sbTeamA"><span id="sbNameA">TEAM A</span></div>
+    <div class="sbScore sbScoreA"><span id="tWins">0</span></div>
+    <div class="sbTimer">
+      <div id="roundPhaseLabel" class="sbPhase">BUY</div>
+      <div id="roundTimer" class="sbTimerNum">0:08</div>
+      <span id="roundNum" style="display:none;">1</span>
+    </div>
+    <div class="sbScore sbScoreB"><span id="ctWins">0</span></div>
+    <div class="sbTeam sbTeamB"><span id="sbNameB">TEAM B</span></div>
+  </div>
+  <div id="crosshair"></div>
+  <div id="adsDot"></div>
+  <div id="scopeOverlay">
+    <div class="reticleV"></div>
+    <div class="reticleH"></div>
+    <div class="tick tick-top"></div>
+    <div class="tick tick-bottom"></div>
+    <div class="tick tick-left"></div>
+    <div class="tick tick-right"></div>
+  </div>
+  <div id="hitmarker"></div>
+  <div id="hitFlash"></div>
+  <div id="vignette"></div>
+  <div id="centerMessage"></div>
+  <div id="healthbar">
+    <div class="label">HEALTH</div>
+    <div id="healthOuter"><div id="healthInner"></div></div>
+  </div>
+  <div id="ammo"><span id="ammoLabel">MAG</span><br><span id="ammoCount">30</span> / <span id="ammoReserve">120</span></div>
+  <div id="reloadLabel">RELOADING...</div>
+  <div id="stats">
+    <div id="hordeStats">
+      WAVE: <span id="waveNum">1</span><br>
+      ENEMIES: <span id="enemyCount">0</span><br>
+      KILLS: <span id="killCount">0</span><br>
+      SCORE: <span id="score">0</span><br>
+    </div>
+    <div id="roundStats" style="display:none;">
+      <span id="bombStatusLabel"></span>
+    </div>
+    <div style="display:none;">
+      <span id="moneyDisplay">$0</span>
+      <span id="grenadeCount">0</span>
+      <span id="smokeCount">0</span>
+    </div>
+  </div>
+  <div id="smokeOverlay"></div>
+  <canvas id="minimap" width="170" height="170"></canvas>
+  <div id="waveBanner"></div>
+  <div id="killfeed"></div>
+  <div id="defuseBar"><div id="defuseFill"></div></div>
+  <div id="buyHint">[B] SHOP · [1][2][3][4][5] / [Q] / WHEEL SWITCH WEAPON · [F] KNIFE · [E] DEFUSE</div>
+</div>
+
+<div id="pauseMenu">
+  <h2>PAUSED</h2>
+  <div class="pauseSection">
+    <div class="pauseLabel">MOUSE SENSITIVITY: <span id="sensValue">1.0</span></div>
+    <input type="range" id="sensSlider" min="0.2" max="3" step="0.1" value="1">
+  </div>
+  <div class="pauseSection">
+    <div class="pauseLabel">KEY BINDINGS (click a key, then press a new one)</div>
+    <div id="bindList"></div>
+  </div>
+  <div class="pauseBtnRow">
+    <button class="pauseBtn" id="resumeBtn">RESUME</button>
+    <button class="pauseBtn" id="mainMenuBtn">MAIN MENU</button>
+  </div>
+</div>
+
+<div id="tabScoreboard">
+  <h3>SCOREBOARD</h3>
+  <table>
+    <thead><tr><th>PLAYER</th><th>TEAM</th><th class="num">K</th><th class="num">A</th><th class="num">D</th></tr></thead>
+    <tbody id="tabScoreboardBody"></tbody>
+  </table>
+</div>
+
+<div id="buyMenu">
+  <h2>SHOP</h2>
+  <div id="buyMoney"></div>
+  <div id="buyColumns">
+    <div class="buyColumn">
+      <h3>PRIMARY WEAPONS</h3>
+      <div id="primaryList"></div>
+    </div>
+    <div class="buyColumn">
+      <h3>SECONDARY WEAPONS</h3>
+      <div id="secondaryList"></div>
+    </div>
+    <div class="buyColumn">
+      <h3>GRENADES</h3>
+      <div id="grenadeList"></div>
+    </div>
+  </div>
+  <button id="closeBuyMenu">CLOSE [B]</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="module" src="game.js"></script>
+</body>
+</html>
