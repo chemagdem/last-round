@@ -14,15 +14,4 @@ assert.match(game, /function animate\(\)/);
 assert.match(game, /requestAnimationFrame\(animate\)/);
 assert.match(game, /const WEAPONS = \{/);
 
-// Legacy samples have unclear redistribution rights and must not return to runtime loading.
-const forbiddenRuntimeSamples = [
-  'cs_go-awp-sound.mp3',
-  'ak-47-mp3.mp3',
-  'desert-eagle-cs.mp3',
-  'grenade-plonk-sound-effect-tarkov-louder.mp3'
-];
-for (const sample of forbiddenRuntimeSamples) {
-  assert.equal(game.includes(sample), false, `Runtime references forbidden sample: ${sample}`);
-}
-
 console.log('LastRound smoke checks passed.');

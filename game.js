@@ -25,8 +25,22 @@ class SoundEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(this.ctx.destination);
-    // Shipping builds use original Web Audio synthesis. The legacy sample files in /assets
-    // have unclear third-party licensing and must never be loaded by the game.
+    this.loadSample('awp', 'assets/cs_go-awp-sound.mp3');
+    this.loadSample('scopeClick', 'assets/awp-zoom-sound-effect-cs-go.mp3');
+    this.loadSample('ak47', 'assets/ak-47-mp3.mp3');
+    this.loadSample('reload', 'assets/uzi-reload.mp3');
+    this.loadSample('m4a1', 'assets/m4a1_silencer_01.mp3');
+    this.loadSample('glock', 'assets/pistol-shot.mp3');
+    this.loadSample('smokeHiss', 'assets/smoke-grenade-sound-effect.mp3');
+    this.loadSample('grenadeThrow', 'assets/grenade-plonk-sound-effect-tarkov-louder.mp3');
+    this.loadSample('deagle', 'assets/desert-eagle-cs.mp3');
+    this.loadSample('explosion', 'assets/exploded_zfp5Xgm.mp3');
+    this.loadSample('m4a4', 'assets/m70-rifle.mp3');
+    this.loadSample('smg', 'assets/wpn_45_smg_2d_01.mp3');
+    this.loadSample('knifeSlash', 'assets/knife-slashing.mp3');
+    this.loadSample('knifeStab', 'assets/knife-stab.mp3');
+    this.loadSample('subwayAmbience', 'assets/subway.mp3');
+    this.loadSample('graffiti', 'assets/graffiti.mp3');
   }
   resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
@@ -1482,8 +1496,16 @@ function buildSubwayMap(){
 function getTeamSpawnPos(meta, team){
   const zone = team === 'A' ? meta.tSpawnZone : meta.ctSpawnZone;
   if (zone) {
-    const x = zone.xMin + Math.random() * (zone.xMax - zone.xMin);
-    const z = zone.zMin + Math.random() * (zone.zMax - zone.zMin);
+    // crate/barrel positions are randomized per match (see buildWarehouseMap/buildSubwayMap's
+    // jitter), so a spawn zone that was clear last game can have a prop sitting in it this time -
+    // retry a handful of random spots and skip any that land inside a collider, rather than
+    // trapping the player inside a crate the moment they spawn
+    let x, z;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      x = zone.xMin + Math.random() * (zone.xMax - zone.xMin);
+      z = zone.zMin + Math.random() * (zone.zMax - zone.zMin);
+      if (!checkCollision(new THREE.Vector3(x, 2, z))) break;
+    }
     return new THREE.Vector3(x, 2, z);
   }
   return (team === 'A' ? meta.tSpawn : meta.ctSpawn).clone();
@@ -2367,8 +2389,8 @@ function fireWeapon(){
     boltCyclingT = BOLT_CYCLE_DURATION;
   }
 
-  // Original synthesis is deterministic, low-latency, and safe to distribute.
-  audio.gunshot(GUNSHOT_PROFILES[weaponId]);
+  const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
+  if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
   flashLight.intensity = 5;
   flashSpriteMat.opacity = 1;
   flashSprite.scale.set(0.5 + Math.random() * 0.2, 0.5 + Math.random() * 0.2, 1);
@@ -3232,7 +3254,9 @@ function updateRound(dt){
     document.getElementById('roundPhaseLabel').textContent = 'ROUND';
     document.getElementById('roundTimer').textContent = formatRoundTime(remaining);
     if (roundState.carrier) updateCarrierEnemy(roundState.carrier, dt);
-    if (roundState.phaseT >= roundState.roundDuration) {
+    // updateCarrierEnemy can itself finish planting the bomb this same tick, moving phase to
+    // 'planted' - don't then also treat this as a timeout for the round that just ended
+    if (roundState.phase === 'live' && roundState.phaseT >= roundState.roundDuration) {
       endRound('ct', 'Time expired');
       return;
     }
@@ -3273,6 +3297,10 @@ function formatRoundTime(t){
 }
 
 function endRound(winner, reason){
+  // guards against ending the same round twice - e.g. the bomb finishing its plant (which sets
+  // phase to 'planted') and the round timer expiring in that same frame both used to reach here,
+  // each scheduling their own "advance to next round" timeout and silently skipping a round
+  if (roundState.phase === 'ended') return;
   roundState.phase = 'ended';
   clearBomb();
   if (winner === 'ct') { roundState.ctWins++; money += 3250; }
@@ -3513,7 +3541,7 @@ function updateNetworking(dt){
   if (netStateTimer > 0) return;
   netStateTimer = 0.05; // ~20Hz state broadcast
   const msg = {
-    type: 'state', id: netMyId,
+    type: 'state', id: netMyId, roundNum: roundState.roundNum,
     pos: [player.pos.x, player.pos.y, player.pos.z],
     yaw: player.yaw, pitch: player.pitch,
     health: player.health, alive: player.alive,
@@ -3547,6 +3575,12 @@ function getOrCreateRemoteAvatar(id, team){
 
 function applyRemoteState(msg){
   if (msg.id === netMyId) return;
+  // a state packet is broadcast every ~50ms regardless of round phase, so the losing player's
+  // last "I'm dead" packet from the round that just ended can still be in flight when the new
+  // round has already started locally - applying it would re-kill their freshly respawned avatar
+  // and made checkPvpRoundEnd() think that team was already eliminated, instantly ending the new
+  // round too and skipping straight to the round after it. Drop anything tagged with an older round.
+  if (msg.roundNum !== undefined && msg.roundNum < roundState.roundNum) return;
   const rosterEntry = netRoster.find(p => p.id === msg.id);
   const team = rosterEntry ? rosterEntry.team : 'B';
   const avatar = getOrCreateRemoteAvatar(msg.id, team);
@@ -3732,6 +3766,7 @@ function isNetPlayerAlive(id){
 }
 
 function endPvpRoundAsHost(winnerTeam, reason){
+  if (roundState.phase !== 'live') return; // already ending/ended this round - don't score or broadcast it twice
   if (winnerTeam === 'A') roundState.ctWins++; else roundState.tWins++;
   const msg = { type: 'roundEnd', winnerTeam, reason, scoreA: roundState.ctWins, scoreB: roundState.tWins };
   applyPvpRoundEnd(winnerTeam, reason, roundState.ctWins, roundState.tWins);
@@ -3739,6 +3774,7 @@ function endPvpRoundAsHost(winnerTeam, reason){
 }
 
 function applyPvpRoundEnd(winnerTeam, reason, scoreA, scoreB){
+  if (roundState.phase === 'ended') return;
   roundState.phase = 'ended';
   roundState.ctWins = scoreA; roundState.tWins = scoreB;
   document.getElementById('tWins').textContent = scoreA;

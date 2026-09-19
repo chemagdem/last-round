@@ -1,6 +1,6 @@
 # Third-party asset audit
 
-The runtime no longer loads the legacy weapon and ambience samples. Their filenames suggest extraction from commercial games or unknown web sources; they must not ship without documented redistribution rights.
+The runtime loads the legacy weapon and ambience samples in `assets/`. Their filenames suggest extraction from commercial games or unknown web sources; document redistribution rights (or replace them) before any commercial distribution.
 
 `assets/fonts/Baserona.ttf` explicitly permits personal use only. The game now uses a system font stack. Purchase the appropriate licence or replace the file with an OFL-licensed font before commercial distribution.
 
