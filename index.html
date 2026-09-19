@@ -102,14 +102,19 @@
   #pvpStatus{font-size:13px;color:#a88;min-height:18px;}
   #deathScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(20,0,0,0.85);color:#fdd;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:100;}
   #deathScreen h1{font-size:60px;letter-spacing:8px;color:#f55;}
-  #killfeed{position:absolute;top:200px;right:20px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;}
-  .killEntry{display:flex;align-items:center;gap:8px;background:#000;border:2px solid #b02020;border-radius:22px;padding:6px 18px;white-space:nowrap;opacity:1;transition:opacity .4s;}
-  .killEntry.fade{opacity:0;}
-  .kfKiller{color:#e5473c;font-size:16px;font-weight:bold;letter-spacing:.5px;}
-  .kfWeapon{color:#fff;font-size:13px;font-weight:bold;letter-spacing:1px;display:flex;align-items:center;gap:4px;}
-  .kfWeapon:before{content:'🔫';font-size:14px;}
-  .kfSkull{color:#e33;font-size:14px;}
-  .kfVictim{color:#ddd;font-size:16px;font-weight:bold;letter-spacing:.5px;}
+  #killfeed{position:absolute;top:108px;right:26px;width:min(390px,calc(100vw - 32px));display:flex;flex-direction:column;gap:6px;align-items:stretch;z-index:18;pointer-events:none;}
+  .killEntry{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 58px minmax(0,1fr);align-items:center;gap:10px;min-height:42px;padding:8px 13px 8px 15px;overflow:hidden;white-space:nowrap;background:linear-gradient(100deg,rgba(12,16,20,.94),rgba(18,21,25,.78));border:1px solid rgba(255,255,255,.14);border-right:3px solid #e5473c;clip-path:polygon(0 0,100% 0,100% 78%,94% 100%,0 100%);box-shadow:0 10px 22px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.08);opacity:1;transform:translateX(0);animation:killIn .24s cubic-bezier(.2,.8,.2,1);transition:opacity .35s,transform .35s;}
+  .killEntry::before{content:"COMBAT LOG";position:absolute;top:3px;left:15px;color:rgba(255,255,255,.28);font:700 7px/1 Inter,'Segoe UI',sans-serif;letter-spacing:1.8px;}
+  .killEntry::after{content:"";position:absolute;left:0;bottom:0;width:34%;height:2px;background:#e5473c;box-shadow:0 0 10px rgba(229,71,60,.8);}
+  .killEntry.fade{opacity:0;transform:translateX(20px);}
+  @keyframes killIn{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:translateX(0)}}
+  .kfKiller,.kfVictim{min-width:0;overflow:hidden;text-overflow:ellipsis;font:800 13px/1 'Baserona','Arial Narrow',sans-serif;letter-spacing:1.2px;text-transform:uppercase;padding-top:7px;}
+  .kfKiller{color:#ff6257;text-align:right;text-shadow:0 0 12px rgba(255,73,61,.32);}
+  .kfVictim{color:#d8dde0;text-align:left;}
+  .kfWeapon{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#aab3b9;font:700 8px/1 Inter,'Segoe UI',sans-serif;letter-spacing:.7px;text-transform:uppercase;padding-top:7px;}
+  .kfWeapon::before{content:"";display:block;width:30px;height:3px;background:linear-gradient(90deg,transparent,#d7b66c 22%,#d7b66c 78%,transparent);transform:skewX(-28deg);box-shadow:0 0 8px rgba(215,182,108,.45);}
+  .kfSkull{display:inline-flex;align-items:center;justify-content:center;margin-left:5px;width:15px;height:15px;color:#fff;background:#b62d28;border-radius:3px;font:700 10px/1 Inter,'Segoe UI',sans-serif;vertical-align:middle;box-shadow:0 0 10px rgba(229,71,60,.55);}
+  @media(max-width:760px){#killfeed{top:74px;right:12px;width:min(330px,calc(100vw - 24px));}.killEntry{grid-template-columns:minmax(0,1fr) 48px minmax(0,1fr);padding-left:10px;padding-right:10px}.kfKiller,.kfVictim{font-size:11px}.kfWeapon{font-size:7px}}
   #buyHint{position:absolute;bottom:110px;right:30px;font-size:12px;letter-spacing:2px;color:#a66;text-shadow:0 0 4px #000;}
   #buyMenu{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,5,5,0.92);color:#ddd;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:all;}
   #tabScoreboard{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:rgba(10,5,5,0.92);border:2px solid #653;border-radius:6px;padding:16px 20px;color:#ddd;display:none;z-index:55;pointer-events:none;font-family:'Segoe UI',Arial,sans-serif;min-width:340px;}

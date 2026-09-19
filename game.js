@@ -7,9 +7,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { SocialUI } from './social-ui.js';
 import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
 
@@ -2906,160 +2904,222 @@ const goggleMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0
 const vestFabricMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#2f3a1e', '#5a6b34', '#1c2412', '#0d0d0d']), roughness: 0.85 });
 const pouchMat = new THREE.MeshStandardMaterial({ color: 0x23231c, roughness: 0.9 });
 
-// tactical helmet + goggles - a fixed-offset prop on the character's outer group, the same
-// proven pattern the rifle prop below already uses. Bone-attaching this to the skeleton was
-// tried first but CesiumMan's joints carry non-uniform scale, which blew the gear up into a
-// distorted blob - a fixed offset on the outer (unscaled-by-bones) group avoids that entirely.
-// -Z is forward on this group (matches the rifle prop's muzzle direction and the AI's own
-// facing convention), so anything that should face front gets a negative Z offset.
+// tactical helmet + goggles - fully encloses the skull (no bare-sphere-head gap underneath) and
+// is parented directly to the head joint below, so it turns and nods with the neck/head instead
+// of sitting at a fixed offset from the whole character.
 function buildHelmetGear(){
   const g = new THREE.Group();
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.215, 16, 12, 0, Math.PI * 2, 0, Math.PI / 1.75), helmetMat);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.135, 16, 12, 0, Math.PI * 2, 0, Math.PI / 1.55), helmetMat);
+  dome.position.y = 0.015;
   dome.castShadow = true;
   g.add(dome);
+  const brim = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.013, 8, 20, Math.PI * 1.15), helmetMat);
+  brim.rotation.x = Math.PI / 2; brim.rotation.y = Math.PI * 0.08; brim.position.set(0, -0.025, -0.01);
+  g.add(brim);
   [-1, 1].forEach(side => { // NVG-style side rail nubs
-    const nub = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 0.05), helmetMat);
-    nub.position.set(side * 0.145, 0.01, -0.03);
+    const nub = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.02, 0.035), helmetMat);
+    nub.position.set(side * 0.1, 0.03, -0.065);
     g.add(nub);
   });
-  const faceCover = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.12, 6, 12), vestFabricMat);
-  faceCover.rotation.x = Math.PI / 2; faceCover.position.set(0, -0.085, -0.095); faceCover.scale.set(1, 0.75, 0.45); g.add(faceCover);
-  const goggles = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.035), goggleMat);
-  goggles.position.set(0, -0.025, -0.18);
+  const faceCover = new THREE.Mesh(new THREE.CapsuleGeometry(0.075, 0.05, 4, 10), vestFabricMat);
+  faceCover.rotation.x = Math.PI / 2; faceCover.position.set(0, -0.06, -0.075); faceCover.scale.set(1, 0.7, 0.4); g.add(faceCover);
+  const goggles = new THREE.Mesh(new RoundedBoxGeometry(0.19, 0.045, 0.032, 2, 0.012), goggleMat);
+  goggles.position.set(0, -0.028, -0.12);
   goggles.castShadow = true;
   g.add(goggles);
-  // Front shroud, ear protection and a small side-mounted light make the silhouette read as a
-  // modern combat helmet instead of a sphere floating above the civilian rig.
-  const shroud = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.08, 0.05, 3, 0.012), helmetMat);
-  shroud.position.set(0, 0.01, -0.11); g.add(shroud);
+  // front shroud, ear protection and side rails so the silhouette reads as a modern combat
+  // helmet rather than a bare dome
+  const shroud = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.055, 0.035, 3, 0.01), helmetMat);
+  shroud.position.set(0, 0.015, -0.08); g.add(shroud);
   [-1, 1].forEach(side => {
-    const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.035, 12), helmetMat);
-    ear.rotation.z = Math.PI / 2; ear.position.set(side * 0.145, -0.03, 0); g.add(ear);
-    const rail = new THREE.Mesh(new RoundedBoxGeometry(0.025, 0.05, 0.11, 3, 0.008), helmetMat);
-    rail.position.set(side * 0.14, 0.02, 0.015); g.add(rail);
+    const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.026, 12), helmetMat);
+    ear.rotation.z = Math.PI / 2; ear.position.set(side * 0.1, -0.025, 0.01); g.add(ear);
+    const rail = new THREE.Mesh(new RoundedBoxGeometry(0.017, 0.035, 0.078, 3, 0.006), helmetMat);
+    rail.position.set(side * 0.098, 0.02, 0.02); g.add(rail);
   });
-  g.position.set(0, soldierHeight * 0.9, 0);
   return g;
 }
 
-// plate carrier vest with front pouches - same fixed-offset approach as the helmet above
+// plate carrier vest with front pouches, shoulder armor, radio and antenna - parented to the
+// torso/chest joint below (local coordinates), so it moves and turns with the chest instead of
+// sitting at a fixed world offset from the root.
 function buildVestGear(){
   const g = new THREE.Group();
-  const plate = new THREE.Mesh(new RoundedBoxGeometry(0.32, 0.26, 0.08, 3, 0.018), vestFabricMat);
+  const plate = new THREE.Mesh(new RoundedBoxGeometry(0.32, 0.34, 0.1, 3, 0.02), vestFabricMat);
   plate.position.set(0, 0, -0.1);
   plate.castShadow = true;
   g.add(plate);
   [-1, 1].forEach(side => {
-    const pouch = new THREE.Mesh(new RoundedBoxGeometry(0.09, 0.1, 0.06, 3, 0.012), pouchMat);
-    pouch.position.set(side * 0.12, -0.06, -0.135);
+    const pouch = new THREE.Mesh(new RoundedBoxGeometry(0.086, 0.1, 0.06, 3, 0.012), pouchMat);
+    pouch.position.set(side * 0.11, -0.09, -0.135);
     pouch.castShadow = true;
     g.add(pouch);
-    const shoulder = new THREE.Mesh(new RoundedBoxGeometry(0.13, 0.07, 0.13, 3, 0.018), vestFabricMat);
-    shoulder.position.set(side * 0.25, 0.13, 0); shoulder.rotation.z = side * 0.12; shoulder.castShadow = true; g.add(shoulder);
+    const shoulder = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.065, 0.13, 3, 0.016), vestFabricMat);
+    shoulder.position.set(side * 0.2, 0.2, -0.02); shoulder.rotation.z = side * 0.15; shoulder.castShadow = true; g.add(shoulder);
   });
-  const radio = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.13, 0.05, 3, 0.01), pouchMat);
-  radio.position.set(-0.19, 0.08, 0.04); radio.castShadow = true; g.add(radio);
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.16, 8), goggleMat);
-  antenna.position.set(-0.21, 0.21, 0.04); antenna.rotation.z = -0.12; g.add(antenna);
-  g.position.set(0, soldierHeight * 0.62, 0);
+  const radio = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.12, 0.05, 3, 0.01), pouchMat);
+  radio.position.set(-0.17, 0.11, 0.05); radio.castShadow = true; g.add(radio);
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.15, 8), goggleMat);
+  antenna.position.set(-0.19, 0.24, 0.05); antenna.rotation.z = -0.12; g.add(antenna);
   return g;
 }
 
-// ---------- Real animated soldier model (glTF, loaded once and cloned per enemy) ----------
-// CesiumMan (Khronos glTF-Sample-Assets, CC0) is the only freely-hosted rigged+animated human
-// model reachable over the same CDN this project already depends on for three.js itself -
-// recolored to a drab uniform tone since it ships in civilian clothing.
-const SOLDIER_MODEL_URL = 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/CesiumMan/glTF-Binary/CesiumMan.glb';
-let soldierTemplate = null;
-let soldierClip = null;
-let soldierScale = 1;
-let soldierHeight = 1.8;
-let soldierAssetsReady = false;
+// ---------- Procedural tactical soldier ----------
+// Replaces the old CesiumMan clone entirely: a chain of pivot groups (hip -> knee,
+// shoulder -> elbow) rather than a borrowed civilian rig. A prop parented to a hand/head/torso
+// joint inherits every ancestor rotation automatically, so gear and weapons move as one piece
+// with the body instead of sitting at a fixed offset that only ever looked right in a T-pose.
+const soldierHeight = 1.8;
+const soldierAssetsReady = true; // fully procedural now - nothing to load or wait on
+const soldierReadyPromise = Promise.resolve();
 
-function preloadSoldierModel(){
-  const loader = new GLTFLoader();
-  return loader.loadAsync(SOLDIER_MODEL_URL).then(gltf => {
-    const model = gltf.scene;
-    model.traverse(o => {
-      if (o.isMesh) {
-        o.castShadow = true;
-        o.receiveShadow = true;
-        o.raycast = () => {}; // hit detection uses separate invisible proxies, never the animated mesh itself
-        if (o.material) {
-          o.material = o.material.clone();
-          // Do not expose the blue/white CesiumMan demo texture in the game. It is a CC0 rig,
-          // not a finished soldier asset; keeping its texture makes every enemy read as a toy
-          // mannequin. A uniform tactical base plus our helmet/plate-carrier layers gives the
-          // rig a coherent military silhouette until a production character asset is installed.
-          o.material.map = null;
-          o.material.color.set(0x465047);
-          o.material.roughness = 0.88;
-          o.material.metalness = 0.05;
-        }
-      }
-    });
-    model.updateMatrixWorld(true); // bake the source file's corrective root rotation before measuring - otherwise the box reads the wrong axis and the model scales in giant
-    const box = new THREE.Box3().setFromObject(model);
-    const rawHeight = box.max.y - box.min.y;
-    soldierScale = 1.82 / rawHeight; // normalize to the game's ~1.8 unit human height
-    soldierHeight = 1.82;
-    soldierTemplate = model;
-    soldierClip = gltf.animations[0] || null;
-    soldierAssetsReady = true;
-  }).catch(err => {
-    console.warn('No se pudo cargar el modelo de soldado, usando geometría de repuesto:', err);
-    soldierAssetsReady = true; // don't block the game forever - fall back to the boxy model below
-  });
+const uniformMat = new THREE.MeshStandardMaterial({ color: 0x3c4030, roughness: 0.85, metalness: 0.04 });
+const uniformDarkMat = new THREE.MeshStandardMaterial({ color: 0x24251d, roughness: 0.88, metalness: 0.03 });
+const soldierSkinMat = new THREE.MeshStandardMaterial({ color: 0xc79a70, roughness: 0.75 });
+const bootMat = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.7, metalness: 0.12 });
+const gloveMat = new THREE.MeshStandardMaterial({ color: 0x1c1c19, roughness: 0.8, metalness: 0.05 });
+
+const THIGH_LEN = 0.42, THIGH_R = 0.095, SHIN_LEN = 0.4, SHIN_R = 0.075;
+const UPPER_ARM_LEN = 0.28, UPPER_ARM_R = 0.062, FOREARM_LEN = 0.26, FOREARM_R = 0.05;
+const HIP_TO_GROUND = THIGH_LEN + SHIN_LEN + 0.12;
+// the gun-holding (right) arm's rest pose is built from pure X-axis joint rotations only, so the
+// two angles compose by simple addition (rotating about a shared axis commutes) - a weapon socket
+// on the hand can then cancel that exact sum and always point forward, whatever the pose is.
+// Shoulder and elbow must lean the SAME direction here (not oppose each other) - that's what
+// extends the arm forward-and-up to chest height; opposing signs fold it back down near the knee.
+const RIGHT_SHOULDER_REST_X = 1.0, RIGHT_ELBOW_REST_X = 0.5;
+
+// one "joint" is a pivot Group at the hinge with the limb mesh hanging beyond it - rotating the
+// pivot swings the whole limb from that hinge, the same idea a bone would give
+function makeJointLimb(radius, length, mat){
+  const pivot = new THREE.Group();
+  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, length, 4, 8), mat);
+  mesh.position.y = -(length / 2 + radius * 0.35);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  pivot.add(mesh);
+  return pivot;
 }
-const soldierReadyPromise = preloadSoldierModel();
 
-function makeBoxSoldierFallback(){
-  const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x5a3d2b, roughness: 0.8 });
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xc79a70, roughness: 0.7 });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.0, 0.4), bodyMat);
-  torso.position.y = 1.1; torso.castShadow = true;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 10), headMat);
-  head.position.y = 1.75; head.castShadow = true;
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8, 0, Math.PI * 2, 0, Math.PI / 1.7), helmetMat);
-  helmet.position.y = 1.78; helmet.castShadow = true;
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.9, 0.3), bodyMat);
-  legL.position.set(-0.18, 0.45, 0); legL.castShadow = true;
-  const legR = legL.clone(); legR.position.x = 0.18;
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 0.25), bodyMat);
-  armL.position.set(-0.5, 1.15, 0); armL.castShadow = true;
-  const armR = armL.clone(); armR.position.x = 0.5;
-  g.add(torso, head, helmet, legL, legR, armL, armR);
-  return g;
+// builds one full tactical soldier as a hierarchy of pivot groups and capsule/cylinder meshes -
+// never a single mesh, never a raw unrounded box for the body. Returns { root, rig } where rig
+// exposes the joints animateSoldierRig() drives every frame and the socket weapons attach to.
+function createTacticalSoldier(){
+  const root = new THREE.Group();
+  const rig = { legs: {}, arms: {} };
+
+  const hips = new THREE.Group();
+  hips.position.y = HIP_TO_GROUND;
+  root.add(hips);
+  rig.hips = hips;
+
+  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.12, 4, 8), uniformDarkMat);
+  pelvis.castShadow = true;
+  hips.add(pelvis);
+
+  [-1, 1].forEach(side => {
+    const key = side < 0 ? 'L' : 'R';
+    const hip = makeJointLimb(THIGH_R, THIGH_LEN, uniformDarkMat);
+    hip.position.set(side * 0.11, -0.02, 0);
+    const knee = makeJointLimb(SHIN_R, SHIN_LEN, uniformDarkMat);
+    knee.position.y = -THIGH_LEN;
+    const kneepad = new THREE.Mesh(new RoundedBoxGeometry(0.1, 0.08, 0.07, 2, 0.018), pouchMat);
+    kneepad.position.set(0, -0.05, 0.06); kneepad.castShadow = true;
+    knee.add(kneepad);
+    const boot = new THREE.Mesh(new RoundedBoxGeometry(0.095, 0.09, 0.22, 2, 0.02), bootMat);
+    boot.position.set(0, -SHIN_LEN - 0.02, 0.04); boot.castShadow = true;
+    knee.add(boot);
+    hip.add(knee);
+    hips.add(hip);
+    rig.legs[key] = { hip, knee };
+  });
+
+  const torso = new THREE.Group();
+  torso.position.y = 0.02;
+  hips.add(torso);
+  rig.torso = torso;
+
+  const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.19, 0.36, 4, 10), uniformMat);
+  chest.position.y = 0.33;
+  chest.castShadow = true; chest.receiveShadow = true;
+  torso.add(chest);
+
+  const vest = buildVestGear();
+  vest.position.y = 0.34;
+  torso.add(vest);
+
+  const neck = new THREE.Group();
+  neck.position.y = 0.63;
+  torso.add(neck);
+
+  const neckMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.07, 10), soldierSkinMat);
+  neckMesh.position.y = 0.03; neck.add(neckMesh);
+
+  const head = new THREE.Group();
+  head.position.y = 0.1;
+  neck.add(head);
+  rig.head = head;
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 10), soldierSkinMat);
+  skull.castShadow = true;
+  head.add(skull);
+  const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.085, 10, 8), soldierSkinMat);
+  jaw.position.set(0, -0.055, 0.025); jaw.scale.set(1, 0.7, 0.85);
+  head.add(jaw);
+  head.add(buildHelmetGear());
+
+  let weaponSocket = null;
+  [-1, 1].forEach(side => {
+    const key = side < 0 ? 'L' : 'R';
+    const shoulder = new THREE.Group();
+    shoulder.position.set(side * 0.22, 0.56, 0);
+    torso.add(shoulder);
+    const shoulderCap = new THREE.Mesh(new RoundedBoxGeometry(0.11, 0.09, 0.11, 3, 0.02), vestFabricMat);
+    shoulderCap.castShadow = true;
+    shoulder.add(shoulderCap);
+    const upperArm = makeJointLimb(UPPER_ARM_R, UPPER_ARM_LEN, uniformMat);
+    shoulder.add(upperArm);
+    const elbow = new THREE.Group();
+    elbow.position.y = -UPPER_ARM_LEN;
+    upperArm.add(elbow);
+    const forearm = makeJointLimb(FOREARM_R, FOREARM_LEN, uniformDarkMat);
+    elbow.add(forearm);
+    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), gloveMat);
+    glove.position.y = -FOREARM_LEN - 0.04;
+    glove.castShadow = true;
+    forearm.add(glove);
+    const hand = new THREE.Group();
+    hand.position.y = -FOREARM_LEN - 0.05;
+    forearm.add(hand);
+
+    if (key === 'R') {
+      // primary grip hand: rest pose is pure-X so the compensating socket rotation below exactly
+      // cancels it, keeping the weapon pointed forward (-Z) regardless of the arm's own angle
+      shoulder.rotation.x = RIGHT_SHOULDER_REST_X;
+      elbow.rotation.x = RIGHT_ELBOW_REST_X;
+      weaponSocket = new THREE.Object3D();
+      weaponSocket.rotation.x = -(RIGHT_SHOULDER_REST_X + RIGHT_ELBOW_REST_X);
+      hand.add(weaponSocket);
+    } else {
+      // support hand: reaches in toward the handguard, doesn't need to be exact since nothing
+      // else attaches to it - same same-direction shoulder/elbow compounding as the gun arm
+      shoulder.rotation.x = 1.0;
+      shoulder.rotation.z = -0.35;
+      elbow.rotation.x = 0.45;
+    }
+    rig.arms[key] = { shoulder, elbow, hand };
+  });
+  rig.weaponSocket = weaponSocket;
+
+  return { root, rig };
 }
 
 function makeEnemySoldier(){
-  const g = new THREE.Group();
+  const { root: g, rig } = createTacticalSoldier();
+  g.userData.rig = rig;
+  g.userData.animPhase = Math.random() * Math.PI * 2; // desync identical bots' walk cycles
 
-  if (soldierTemplate) {
-    const model = cloneSkeleton(soldierTemplate);
-    model.scale.setScalar(soldierScale);
-    // SkeletonUtils.clone() rebuilds fresh mesh instances, so the raycast override applied to the
-    // template's meshes at load time does not carry over - it has to be re-applied on every clone
-    model.traverse(o => { if (o.isMesh) o.raycast = () => {}; });
-    g.add(model);
-    g.add(buildHelmetGear());
-    g.add(buildVestGear());
-    const mixer = new THREE.AnimationMixer(model);
-    let action = null;
-    if (soldierClip) {
-      action = mixer.clipAction(soldierClip);
-      action.play();
-    }
-    g.userData.mixer = mixer;
-    g.userData.action = action;
-  } else {
-    g.add(makeBoxSoldierFallback());
-  }
-
-  // invisible hit-detection proxies - kept independent of the animated mesh so damage never
-  // depends on skinned-mesh raycasting (which three.js tests against the bind pose, not the
-  // live animated pose, and would make hits feel disconnected from what's on screen)
+  // invisible hit-detection proxies - independent of the visible rig so damage never depends on
+  // raycasting the animated meshes themselves (which would test whatever pose happened to be
+  // current, making hits feel disconnected from what's on screen)
   const hitboxMat = new THREE.MeshBasicMaterial({ visible: false });
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.4), hitboxMat);
   torso.position.y = soldierHeight * 0.68;
@@ -3083,8 +3143,9 @@ function makeEnemySoldier(){
   g.add(torso, head, legs, armL, armR);
   g.userData.parts = { torso, head, legs, armL, armR };
 
-  // rifle prop at roughly hand height - not bone-attached (the source model has no gun bone),
-  // so it stays at a fixed offset rather than swinging with the arm animation
+  // rifle prop attached to the weapon socket on the right hand - it now inherits every joint
+  // rotation the arm has, so it moves and turns with the body instead of floating at a fixed
+  // offset from the root
   const gunProp = new THREE.Group();
   const gunBody = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.08, 0.5, 3, 0.014), enemyGunMat);
   const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.28, 12), enemyGunMat);
@@ -3095,10 +3156,12 @@ function makeEnemySoldier(){
   gunStock.position.z = 0.27;
   const gunSight = new THREE.Mesh(new RoundedBoxGeometry(0.02, 0.025, 0.14, 3, 0.006), helmetMat);
   gunSight.position.set(0, 0.052, -0.08);
-  gunProp.add(gunBody, gunBarrel, gunStock, gunSight);
-  gunProp.position.set(0.34, soldierHeight * 0.6, -0.2);
-  gunProp.rotation.y = -0.15;
-  g.add(gunProp);
+  const gunMag = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.16, 0.075, 2, 0.012), enemyGunMat);
+  gunMag.position.set(0, -0.13, -0.15); gunMag.rotation.x = -0.2;
+  gunMag.castShadow = true;
+  gunProp.add(gunBody, gunBarrel, gunStock, gunSight, gunMag);
+  gunProp.position.set(0.02, -0.02, -0.32); // small local grip adjustment relative to the hand socket
+  rig.weaponSocket.add(gunProp);
 
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, 0, -0.55); // barrel tip, local to gunProp so it tracks its orientation
@@ -3106,6 +3169,34 @@ function makeEnemySoldier(){
   g.userData.muzzle = muzzle;
 
   return g;
+}
+
+// procedurally poses the rig every frame - idle breathing sway plus, when actually moving, a
+// walk-cycle swing of the hips/knees driven by phase. The gun-holding arm keeps its steady
+// "ready" pose (see createTacticalSoldier) rather than swinging like a free limb, which reads far
+// more like a soldier carrying a weapon than a loose walking animation would.
+function animateSoldierRig(mesh, dt, speed){
+  const rig = mesh.userData.rig;
+  if (!rig) return;
+  const t = performance.now() * 0.001;
+  const moving = speed > 0.05;
+  if (moving) mesh.userData.animPhase += dt * speed * 3.2;
+  const phase = mesh.userData.animPhase;
+
+  const strideAmp = moving ? Math.min(0.55, 0.18 + speed * 0.12) : 0;
+  rig.legs.L.hip.rotation.x = Math.sin(phase) * strideAmp;
+  rig.legs.R.hip.rotation.x = -Math.sin(phase) * strideAmp;
+  rig.legs.L.knee.rotation.x = Math.max(0, -Math.sin(phase + 0.6)) * strideAmp * 1.3;
+  rig.legs.R.knee.rotation.x = Math.max(0, Math.sin(phase - 0.6)) * strideAmp * 1.3;
+
+  // idle breathing (always) + a walking bob layered on top (only while moving)
+  const breathe = Math.sin(t * 1.6) * 0.006;
+  const stepBob = moving ? Math.abs(Math.sin(phase)) * 0.02 : 0;
+  rig.torso.position.y = 0.02 + breathe + stepBob;
+
+  // a small counter-sway on the support arm only - the gun-holding arm stays put so the weapon
+  // doesn't wobble around while walking
+  rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0);
 }
 
 const BOT_NAMES = ['Tom', 'Mike', 'Matt', 'Jason', 'Jon', 'Chris', 'Steve', 'Alex', 'Dave', 'Nick'];
@@ -3374,17 +3465,16 @@ function updateCarrierEnemy(enemy, dt){
   const toSite = new THREE.Vector3().subVectors(site.pos, ePos);
   toSite.y = 0;
   const dist = toSite.length();
-  const mixer = enemy.mesh.userData.mixer;
   if (dist > site.radius * 0.5) {
     toSite.normalize();
     enemy.mesh.rotation.y = Math.atan2(toSite.x, toSite.z);
     ePos.x += toSite.x * enemy.speed * dt;
     ePos.z += toSite.z * enemy.speed * dt;
     ePos.y = groundHeightAt(ePos.x, ePos.z);
-    if (mixer) { const action = enemy.mesh.userData.action; if (action) action.timeScale = enemy.speed / 2.2; mixer.update(dt); }
+    animateSoldierRig(enemy.mesh, dt, enemy.speed);
     roundState.plantProgress = 0;
   } else {
-    if (mixer) mixer.update(dt * 0.1); // mostly still while planting, a little idle motion
+    animateSoldierRig(enemy.mesh, dt, 0); // mostly still while planting, a little idle motion
     roundState.plantProgress += dt;
     if (roundState.plantProgress >= roundState.plantDuration) {
       plantBomb(enemy, site);
@@ -4112,21 +4202,14 @@ function updateEnemies(dt){
     // local "speed" value (they're driven entirely by position snapshots from the network), so
     // their animation speed is estimated from how far they actually moved since the last frame.
     if (!enemy.isStatic) {
-      const mixer = enemy.mesh.userData.mixer;
-      if (mixer) {
-        const action = enemy.mesh.userData.action;
-        if (action) {
-          let animSpeed = enemy.speed;
-          if (enemy.isRemote) {
-            const ePos = enemy.mesh.position;
-            const last = enemy._lastAnimPos || ePos.clone();
-            animSpeed = dt > 0 ? last.distanceTo(ePos) / dt : 0;
-            enemy._lastAnimPos = ePos.clone();
-          }
-          action.timeScale = Math.min(2, animSpeed / 2.2);
-        }
-        mixer.update(dt);
+      let animSpeed = enemy.speed;
+      if (enemy.isRemote) {
+        const ePos = enemy.mesh.position;
+        const last = enemy._lastAnimPos || ePos.clone();
+        animSpeed = dt > 0 ? last.distanceTo(ePos) / dt : 0;
+        enemy._lastAnimPos = ePos.clone();
       }
+      animateSoldierRig(enemy.mesh, dt, animSpeed);
     }
     if (enemy.isRemote) return; // driven entirely by network state in applyRemoteState, not local AI
     if (enemy.isStatic) return; // practice-mode target dummy - doesn't move, aim, or shoot back
@@ -4952,14 +5035,9 @@ function spawnPracticeTarget(pos){
   const enemy = spawnEnemy(pos);
   enemy.isStatic = true;
   enemy.spawnPos = pos.clone();
-  // pose it partway through the walk cycle once instead of leaving it at frame 0, which is the
-  // raw T-pose bind pose - a static target should look like it's standing, not broken
-  const action = enemy.mesh.userData.action;
-  if (action) {
-    action.play();
-    action.time = 0.25 * action.getClip().duration;
-    enemy.mesh.userData.mixer.update(0);
-  }
+  // the rig's rest pose is already a natural standing pose (not a T-pose), so a static target
+  // just needs one idle-pose update rather than any special mid-stride handling
+  animateSoldierRig(enemy.mesh, 0, 0);
   return enemy;
 }
 
