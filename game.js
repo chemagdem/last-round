@@ -793,11 +793,11 @@ function applyDesertAtmosphere(){
 function applyIndustrialAtmosphere(){
   sky.material.map = desertSkyGradientTexture(); // barely visible under a roof, just needs to not be blank
   sky.material.needsUpdate = true;
-  scene.fog.color.set(0x1c1c1c);
-  scene.fog.density = 0.028;
-  hemi.color.set(0x3a3a42); hemi.groundColor.set(0x131311); hemi.intensity = 0.3;
-  sun.color.set(0x9aa0a8); sun.intensity = 0.15;
-  fillLight.color.set(0x505050); fillLight.intensity = 0.12;
+  scene.fog.color.set(0x2a2a2a);
+  scene.fog.density = 0.01;
+  hemi.color.set(0x5a5a66); hemi.groundColor.set(0x232320); hemi.intensity = 0.9;
+  sun.color.set(0xaab0b8); sun.intensity = 0.45;
+  fillLight.color.set(0x606060); fillLight.intensity = 0.3;
 }
 
 // ---------- World / Map system ----------
@@ -1078,26 +1078,37 @@ function buildWarehouseMap(){
   ceiling.receiveShadow = true;
   scene.add(ceiling);
 
-  // hanging lamps - the only real light sources indoors (see applyIndustrialAtmosphere, which
-  // keeps the general ambient/sun very dim), giving the floor uneven pools of light and shadow
+  // hanging lamps - a denser grid covering the whole floor (including the spawn zones and the
+  // east side, which a sparser 6-lamp layout left almost completely black) plus much brighter
+  // general lighting above (see applyIndustrialAtmosphere) - the very first pass here was so dim
+  // it was nearly unplayable
   const lampFixtureMat = new THREE.MeshStandardMaterial({ color: 0x0d0d0d, roughness: 0.5, metalness: 0.6 });
-  const lampBulbMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
-  [[-8, -16], [-8, 0], [-8, 16], [10, -16], [10, 0], [10, 16]].forEach(([x, z]) => {
+  const lampBulbMat = new THREE.MeshBasicMaterial({ color: 0xffe0b0 });
+  const lampXs = [-15, -1, 13, 24], lampZs = [-22, -8, 8, 22];
+  lampXs.forEach(x => lampZs.forEach(z => {
     const lampY = 6.5;
     const fixture = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.3, 10), lampFixtureMat);
     fixture.position.set(x, lampY, z);
     scene.add(fixture);
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), lampBulbMat);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), lampBulbMat);
     bulb.position.set(x, lampY - 0.25, z);
     scene.add(bulb);
-    const light = new THREE.PointLight(0xffcf9a, 3, 16, 2);
+    const light = new THREE.PointLight(0xffd9a0, 7, 26, 1.7);
     light.position.set(x, lampY - 0.3, z);
     scene.add(light);
-  });
+  }));
 
-  // crate rows screening each spawn zone's exit into the main area - identical layout to Desert
-  const rowXs = [-11, -7.55, -4.1, -0.65];
-  rowXs.forEach(x => { makeBoxProp(x, -15, 1.7, 1.7, 1.7, crateMat); makeBoxProp(x, 15, 1.7, 1.7, 1.7, crateMat); });
+  // crate/barrel positions are randomized (within safe, non-overlapping bounds) every time this
+  // map builds, rather than reusing Desert's exact coordinates - jitter is mirrored north/south
+  // so the two spawns still get equivalent cover, just laid out differently each match
+  const jit = n => (Math.random() - 0.5) * n;
+
+  const rowXs = [-11, -7.55, -4.1, -0.65].map(x => x + jit(1.2));
+  rowXs.forEach(x => {
+    const zj = jit(2);
+    makeBoxProp(x, -15 + zj, 1.7, 1.7, 1.7, crateMat);
+    makeBoxProp(x, 15 - zj, 1.7, 1.7, 1.7, crateMat);
+  });
 
   const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
   barrelMat.userData.minimapProp = true;
@@ -1109,16 +1120,20 @@ function buildWarehouseMap(){
     addBox(barrel);
   }
 
-  const entryRowXs = [-9, -5, -1, 3, 7, 11];
-  entryRowXs.forEach(x => { makeBoxProp(x, -18.5, 1.6, 1.6, 1.6, crateMat); makeBoxProp(x, 18.5, 1.6, 1.6, 1.6, crateMat); });
-  [[14, -19], [14, 19]].forEach(([x, z]) => addBarrel(x, z));
+  const entryRowXs = [-9, -5, -1, 3, 7, 11].map(x => x + jit(1.4));
+  entryRowXs.forEach(x => {
+    const zj = jit(1.5);
+    makeBoxProp(x, -18.5 + zj, 1.6, 1.6, 1.6, crateMat);
+    makeBoxProp(x, 18.5 - zj, 1.6, 1.6, 1.6, crateMat);
+  });
+  [[14, -19], [14, 19]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(1.5)));
 
-  makeBoxProp(-3, -4, 1.6, 1.6, 1.6, crateMat);
-  makeBoxProp(7, 3, 1.6, 1.6, 1.6, crateMat);
-  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x, z));
+  makeBoxProp(-3 + jit(2.5), -4 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
+  makeBoxProp(7 + jit(2.5), 3 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
+  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(2)));
 
-  makeBoxProp(ELEV_CX, -10, 1.5, 1.5, 1.5, crateMat);
-  makeBoxProp(ELEV_CX, 3, 1.5, 1.5, 1.5, crateMat);
+  makeBoxProp(ELEV_CX, -10 + jit(3), 1.5, 1.5, 1.5, crateMat);
+  makeBoxProp(ELEV_CX, 3 + jit(3), 1.5, 1.5, 1.5, crateMat);
 
   makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, -17, 2.6, 1.05, 1.1, lowWallMat);
   makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, 17, 2.6, 1.05, 1.1, lowWallMat);
