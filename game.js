@@ -8,6 +8,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 import { SocialUI } from './social-ui.js';
 import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
@@ -1534,20 +1535,26 @@ function buildSkylineMap(){
 
   const half = 33, wallH = 2.4, wallThk = 1.1;
   groundHeightAt = () => 0;
-  const floorMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_floor.avif', 18, 18), roughness: 0.92, color: 0x9ba0a2 });
+  // Keep Skyline self-contained: canvas textures work even on browsers that reject AVIF/JPG
+  // decoding or when the game is opened directly from a local file instead of a web server.
+  const floorTex = metalScratchTexture('#737d83'); floorTex.repeat.set(18, 18);
+  const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.92, color: 0xb0b5b5 });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(half * 2, half * 2), floorMat);
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); floorMeshes.push(floor);
 
-  const parapetMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_wall.avif', 10, 1), roughness: 0.86, color: 0x6c7479 });
+  const parapetTex = metalScratchTexture('#4f5b63'); parapetTex.repeat.set(10, 1);
+  const parapetMat = new THREE.MeshStandardMaterial({ map: parapetTex, roughness: 0.86, color: 0xa5afb5 });
   [[0, -half, half * 2, wallH, wallThk], [0, half, half * 2, wallH, wallThk], [-half, 0, wallThk, wallH, half * 2], [half, 0, wallThk, wallH, half * 2]].forEach(([x, z, w, h, d]) => {
     const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), parapetMat);
     wall.position.set(x, h / 2, z); wall.castShadow = true; wall.receiveShadow = true; scene.add(wall); addBox(wall);
   });
   addPerimeterWalls();
 
-  const concreteMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 3, 2), roughness: 0.74, color: 0x70777b });
+  const concreteTex = metalScratchTexture('#59636a'); concreteTex.repeat.set(3, 2);
+  const concreteMat = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.74, color: 0xb3bbc0 });
   const hazardMat = new THREE.MeshStandardMaterial({ map: hazardStripeTexture(), roughness: 0.9 });
-  const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 });
+  const crateTex = woodGrainTexture('#8b5f38', 3); crateTex.repeat.set(1, 1);
+  const crateMat = new THREE.MeshStandardMaterial({ map: crateTex, roughness: 0.9, color: 0xd0a06d });
   crateMat.userData.penetrable = true; crateMat.userData.minimapProp = true;
   concreteMat.userData.minimapProp = true;
 
@@ -1733,25 +1740,34 @@ flashSprite.scale.set(0.4, 0.4, 1);
 
 let currentVisual = null; // { group, magazine, chargingHandle, magRestY, chargeRestX, muzzle, knifeParts }
 
+// Weapon silhouettes are read at a few centimetres from the camera. Rounded receivers and
+// stocks remove the toy-like CAD look of raw BoxGeometry while keeping the models procedural,
+// lightweight and license-independent.
+function weaponBox(width, height, depth, material, radius = 0.018){
+  const mesh = new THREE.Mesh(new RoundedBoxGeometry(width, height, depth, 3, Math.min(radius, width / 3, height / 3, depth / 3)), material);
+  mesh.castShadow = true;
+  return mesh;
+}
+
 function buildWeaponVisual(id){
   const group = new THREE.Group();
   let magazine = null, chargingHandle = null, muzzle = new THREE.Vector3(0.24, -0.185, -1.0), knifeParts = null, boltHandle = null;
 
   function rifleModel(magLen, stockLen, barrelLen, mat){
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.5), gunMat);
+    const receiver = weaponBox(0.09, 0.11, 0.5, gunMat, 0.018);
     receiver.position.set(0.24, -0.2, -0.42);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, barrelLen, 8), gunMatLight);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, barrelLen, 16), gunMatLight);
     barrel.rotation.x = Math.PI / 2;
     barrel.position.set(0.24, -0.185, -0.55 - barrelLen / 2);
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, stockLen), mat);
+    const stock = weaponBox(0.08, 0.09, stockLen, mat, 0.02);
     stock.position.set(0.24, -0.23, -0.05);
-    magazine = new THREE.Mesh(new THREE.BoxGeometry(0.055, magLen, 0.09), gunMat);
+    magazine = weaponBox(0.055, magLen, 0.09, gunMat, 0.014);
     magazine.position.set(0.24, -0.2 - magLen / 2, -0.42);
     const sightPost = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.05, 0.015), gunMatLight);
     sightPost.position.set(0.24, -0.13, -0.55 - barrelLen * 0.7);
     chargingHandle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.06), gunMatLight);
     chargingHandle.position.set(0.19, -0.19, -0.3);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.06), gunMat);
+    const grip = weaponBox(0.06, 0.16, 0.06, gunMat, 0.016);
     grip.position.set(0.24, -0.32, -0.2);
     grip.rotation.x = 0.2;
     group.add(receiver, barrel, stock, magazine, sightPost, chargingHandle, grip);
@@ -1759,12 +1775,12 @@ function buildWeaponVisual(id){
   }
 
   function pistolModel(mat, bodyLen, magLen, big){
-    const body = new THREE.Mesh(new THREE.BoxGeometry(big ? 0.1 : 0.07, 0.13, bodyLen), mat);
+    const body = weaponBox(big ? 0.1 : 0.07, 0.13, bodyLen, mat, 0.02);
     body.position.set(0.22, -0.22, -0.35);
-    const gripM = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.07), handleMat);
+    const gripM = weaponBox(0.06, 0.16, 0.07, handleMat, 0.018);
     gripM.position.set(0.22, -0.34, -0.22);
     gripM.rotation.x = 0.15;
-    magazine = new THREE.Mesh(new THREE.BoxGeometry(0.04, magLen, 0.05), mat);
+    magazine = weaponBox(0.04, magLen, 0.05, mat, 0.012);
     magazine.position.set(0.22, -0.38, -0.24);
     group.add(body, gripM, magazine);
     muzzle.set(0.22, -0.22, -0.35 - bodyLen / 2);
@@ -1773,11 +1789,11 @@ function buildWeaponVisual(id){
   // Beretta-style pistol: dark frame, a bright chrome slide, wood grip panels and an exposed
   // hammer - used for the duals (each one cloned and mirrored onto the other hand)
   function berettaModel(bodyLen, magLen){
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.11, bodyLen), gunMat);
+    const frame = weaponBox(0.062, 0.11, bodyLen, gunMat, 0.016);
     frame.position.set(0.22, -0.225, -0.34);
-    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.055, bodyLen + 0.04), chromeMat);
+    const slide = weaponBox(0.058, 0.055, bodyLen + 0.04, chromeMat, 0.014);
     slide.position.set(0.22, -0.165, -0.36);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.058, 0.155, 0.075), woodMat);
+    const grip = weaponBox(0.058, 0.155, 0.075, woodMat, 0.016);
     grip.position.set(0.22, -0.335, -0.2);
     grip.rotation.x = 0.15;
     const hammer = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.03, 0.02), gunMat);
@@ -1789,7 +1805,7 @@ function buildWeaponVisual(id){
     const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.006, 6, 10, Math.PI * 1.3), gunMat);
     triggerGuard.rotation.z = Math.PI * 0.35;
     triggerGuard.position.set(0.22, -0.27, -0.29);
-    magazine = new THREE.Mesh(new THREE.BoxGeometry(0.04, magLen, 0.05), gunMat);
+    magazine = weaponBox(0.04, magLen, 0.05, gunMat, 0.012);
     magazine.position.set(0.22, -0.335 - magLen / 2 + 0.08, -0.24);
     group.add(frame, slide, grip, hammer, frontSight, rearSight, triggerGuard, magazine);
     muzzle.set(0.22, -0.195, -0.34 - bodyLen / 2 - 0.02);
@@ -1854,14 +1870,14 @@ function buildWeaponVisual(id){
       // built from scratch instead of the shared pistolModel() box - the real Desert Eagle's
       // silhouette is a distinct two-tier stack (a slim lower frame + a taller, wider slide sitting
       // above it), which a single flat box can never read as no matter what's bolted onto it
-      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.09, 0.4), deagleMat);
+      const frame = weaponBox(0.085, 0.09, 0.4, deagleMat, 0.02);
       frame.position.set(0.22, -0.245, -0.34);
-      const slide = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.065, 0.44), deagleMat);
+      const slide = weaponBox(0.1, 0.065, 0.44, deagleMat, 0.018);
       slide.position.set(0.22, -0.17, -0.35);
-      const gripM = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.075), handleMat);
+      const gripM = weaponBox(0.06, 0.16, 0.075, handleMat, 0.018);
       gripM.position.set(0.22, -0.34, -0.2);
       gripM.rotation.x = 0.18;
-      magazine = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.22, 0.055), deagleMat);
+      magazine = weaponBox(0.045, 0.22, 0.055, deagleMat, 0.012);
       magazine.position.set(0.22, -0.42, -0.22);
       group.add(frame, slide, gripM, magazine);
       muzzle.set(0.22, -0.17, -0.57);
@@ -1969,7 +1985,7 @@ function buildWeaponVisual(id){
       // sight on the top rail, a collapsible carbine stock and a birdcage flash hider
       rifleModel(0.24, 0.1, 0.42, gunMat);
       magazine.material = gunMat;
-      const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.32), gunMat);
+      const handguard = weaponBox(0.09, 0.09, 0.32, gunMat, 0.018);
       handguard.position.set(0.24, -0.185, -0.68);
       group.add(handguard);
       for (let i = 0; i < 6; i++) {
@@ -2006,7 +2022,7 @@ function buildWeaponVisual(id){
       // reflex sight, a collapsible carbine stock, and a long, prominent suppressor
       rifleModel(0.2, 0.1, 0.32, gunMat);
       magazine.material = gunMat;
-      const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.28), gunMat);
+      const handguard = weaponBox(0.09, 0.09, 0.28, gunMat, 0.018);
       handguard.position.set(0.24, -0.185, -0.58);
       group.add(handguard);
       for (let i = 0; i < 5; i++) {
@@ -2057,7 +2073,7 @@ function buildWeaponVisual(id){
       const mountB = mountA.clone(); mountB.position.z = -0.48;
       group.add(mountRail, scopeBody, scopeLensFront, scopeLensBack, mountA, mountB);
       // thick angular handguard, longer than the standard rifle model, matching the AWP's bull barrel look
-      const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.55), awpStockMat);
+      const handguard = weaponBox(0.1, 0.1, 0.55, awpStockMat, 0.022);
       handguard.position.set(0.24, -0.185, -0.85);
       group.add(handguard);
       // bolt handle sticking out the side of the receiver
@@ -2132,13 +2148,13 @@ weaponGroup.add(currentVisual.group);
 
 // forearm + hand holding the grip, so the weapon isn't a disembodied floating prop
 const armGroup = new THREE.Group();
-const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.4, 8), skinMat);
+const forearm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.3, 6, 12), skinMat);
 forearm.rotation.z = Math.PI / 2.3;
 forearm.position.set(0.16, -0.32, 0.05);
-const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.16, 8), sleeveMat);
+const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.08, 5, 10), sleeveMat);
 sleeve.rotation.z = Math.PI / 2.3;
 sleeve.position.set(0.1, -0.29, 0.14);
-const hand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.09), skinMat);
+const hand = new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 8), skinMat);
 hand.position.set(0.235, -0.32, -0.12);
 armGroup.add(forearm, sleeve, hand);
 weaponGroup.add(armGroup);
@@ -2875,6 +2891,16 @@ function buildHelmetGear(){
   goggles.position.set(0, -0.04, -0.13);
   goggles.castShadow = true;
   g.add(goggles);
+  // Front shroud, ear protection and a small side-mounted light make the silhouette read as a
+  // modern combat helmet instead of a sphere floating above the civilian rig.
+  const shroud = new THREE.Mesh(new RoundedBoxGeometry(0.16, 0.08, 0.05, 3, 0.012), helmetMat);
+  shroud.position.set(0, 0.01, -0.11); g.add(shroud);
+  [-1, 1].forEach(side => {
+    const ear = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.035, 12), helmetMat);
+    ear.rotation.z = Math.PI / 2; ear.position.set(side * 0.145, -0.03, 0); g.add(ear);
+    const rail = new THREE.Mesh(new RoundedBoxGeometry(0.025, 0.05, 0.11, 3, 0.008), helmetMat);
+    rail.position.set(side * 0.14, 0.02, 0.015); g.add(rail);
+  });
   g.position.set(0, soldierHeight * 0.9, 0);
   return g;
 }
@@ -2882,16 +2908,22 @@ function buildHelmetGear(){
 // plate carrier vest with front pouches - same fixed-offset approach as the helmet above
 function buildVestGear(){
   const g = new THREE.Group();
-  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.26, 0.08), vestFabricMat);
+  const plate = new THREE.Mesh(new RoundedBoxGeometry(0.32, 0.26, 0.08, 3, 0.018), vestFabricMat);
   plate.position.set(0, 0, -0.1);
   plate.castShadow = true;
   g.add(plate);
   [-1, 1].forEach(side => {
-    const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.06), pouchMat);
+    const pouch = new THREE.Mesh(new RoundedBoxGeometry(0.09, 0.1, 0.06, 3, 0.012), pouchMat);
     pouch.position.set(side * 0.12, -0.06, -0.135);
     pouch.castShadow = true;
     g.add(pouch);
+    const shoulder = new THREE.Mesh(new RoundedBoxGeometry(0.13, 0.07, 0.13, 3, 0.018), vestFabricMat);
+    shoulder.position.set(side * 0.25, 0.13, 0); shoulder.rotation.z = side * 0.12; shoulder.castShadow = true; g.add(shoulder);
   });
+  const radio = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.13, 0.05, 3, 0.01), pouchMat);
+  radio.position.set(-0.19, 0.08, 0.04); radio.castShadow = true; g.add(radio);
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.16, 8), goggleMat);
+  antenna.position.set(-0.21, 0.21, 0.04); antenna.rotation.z = -0.12; g.add(antenna);
   g.position.set(0, soldierHeight * 0.62, 0);
   return g;
 }
@@ -3016,12 +3048,16 @@ function makeEnemySoldier(){
   // rifle prop at roughly hand height - not bone-attached (the source model has no gun bone),
   // so it stays at a fixed offset rather than swinging with the arm animation
   const gunProp = new THREE.Group();
-  const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.5), enemyGunMat);
-  const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.28, 6), enemyGunMat);
+  const gunBody = new THREE.Mesh(new RoundedBoxGeometry(0.08, 0.08, 0.5, 3, 0.014), enemyGunMat);
+  const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.28, 12), enemyGunMat);
   gunBarrel.rotation.x = Math.PI / 2;
   gunBarrel.position.z = -0.39;
   gunBody.castShadow = gunBarrel.castShadow = true;
-  gunProp.add(gunBody, gunBarrel);
+  const gunStock = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.07, 0.2, 3, 0.014), enemyGunMat);
+  gunStock.position.z = 0.27;
+  const gunSight = new THREE.Mesh(new RoundedBoxGeometry(0.02, 0.025, 0.14, 3, 0.006), helmetMat);
+  gunSight.position.set(0, 0.052, -0.08);
+  gunProp.add(gunBody, gunBarrel, gunStock, gunSight);
   gunProp.position.set(0.34, soldierHeight * 0.6, -0.2);
   gunProp.rotation.y = -0.15;
   g.add(gunProp);
