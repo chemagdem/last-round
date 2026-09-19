@@ -3032,7 +3032,8 @@ function getOrCreateRemoteAvatar(id, team){
   const rosterEntry = netRoster.find(p => p.id === id);
   avatar = {
     mesh, health: 100, maxHealth: 100, speed: 0, fireCooldown: 0, alive: true, dying: false, deathT: 0,
-    name: (rosterEntry && rosterEntry.name) || 'Player', isRemote: true, netId: id, team
+    name: (rosterEntry && rosterEntry.name) || 'Player', isRemote: true, netId: id, team,
+    targetPos: new THREE.Vector3(), targetYaw: 0, interpStarted: false
   };
   mesh.traverse(o => { if (o.isMesh) o.userData.enemyRef = avatar; });
   enemies.push(avatar);
@@ -3045,8 +3046,12 @@ function applyRemoteState(msg){
   const team = rosterEntry ? rosterEntry.team : 'B';
   const avatar = getOrCreateRemoteAvatar(msg.id, team);
   if (rosterEntry) avatar.name = rosterEntry.name;
-  avatar.mesh.position.set(msg.pos[0], msg.pos[1] - player.height, msg.pos[2]);
-  avatar.mesh.rotation.y = msg.yaw;
+  // position/rotation snapshots only arrive ~20 times/sec over the network - snapping straight to
+  // each one made remote players look jerky/stepped between updates. updateEnemies() now smoothly
+  // interpolates the mesh toward this target every render frame instead of jumping to it directly.
+  avatar.targetPos.set(msg.pos[0], msg.pos[1] - player.height, msg.pos[2]);
+  avatar.targetYaw = msg.yaw;
+  if (!avatar.interpStarted) { avatar.mesh.position.copy(avatar.targetPos); avatar.mesh.rotation.y = avatar.targetYaw; avatar.interpStarted = true; }
   avatar.health = msg.health;
   avatar.alive = msg.alive;
   if (!msg.alive && !avatar.dying) {
@@ -3290,6 +3295,15 @@ function updateEnemies(dt){
   const playerPos = camera.getWorldPosition(new THREE.Vector3());
   enemies.forEach(enemy => {
     if (!enemy.alive || enemy.dying) return;
+    if (enemy.isRemote) {
+      // smoothly close the gap to the latest network snapshot instead of snapping straight to it -
+      // snapshots only arrive ~20 times/sec, so without this the avatar visibly teleports each time
+      const smoothing = 1 - Math.pow(0.0001, dt);
+      enemy.mesh.position.lerp(enemy.targetPos, smoothing);
+      let yawDiff = enemy.targetYaw - enemy.mesh.rotation.y;
+      yawDiff = ((yawDiff + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; // shortest path, avoids a spin on wraparound
+      enemy.mesh.rotation.y += yawDiff * smoothing;
+    }
     // walk-cycle animation is tied to actually moving through space - static practice-mode
     // targets never move, so they're frozen once on a natural mid-stride pose (seeded when they
     // spawn, see spawnPracticeTarget) rather than either the raw T-pose bind pose or endlessly
