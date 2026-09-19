@@ -2839,21 +2839,32 @@ function generateRoomCode(){
 // PeerJS defaults to Google's public STUN servers only, with no TURN relay - that's enough for
 // two peers on the same machine/LAN, but two real friends on separate home networks routinely sit
 // behind NATs that STUN alone can't punch through, so the connection just silently never
-// completes on either side ("host" and "join" both look broken - this is why). Open Relay
-// Project's free public TURN servers give WebRTC a relay fallback for exactly that case.
-const ICE_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ]
-};
+// completes on either side ("host" and "join" both look broken - this is why a TURN relay is
+// required, not optional). Fetched fresh from elixir-webrtc's free, no-signup TURN credential
+// endpoint (valid for ~28 minutes, plenty for setting up one match) rather than hardcoded, since
+// a previous attempt using Open Relay Project's commonly-cited "static" demo credentials turned
+// out to be stale - they now require a signup + API key, so those credentials silently did nothing.
+let iceConfigPromise = null;
+function getIceConfig(){
+  if (!iceConfigPromise) {
+    iceConfigPromise = fetch('https://turn.elixir-webrtc.org/?service=turn&username=lastround', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => ({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: data.uris, username: data.username, credential: data.password }
+        ]
+      }))
+      .catch(() => ({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })); // TURN fetch itself failed - fall back to STUN-only rather than block hosting/joining entirely
+  }
+  return iceConfigPromise;
+}
 
-function hostRoom(teamSize){
+async function hostRoom(teamSize){
   netTeamSize = teamSize;
   netRole = 'host';
-  netPeer = new Peer('lr-' + generateRoomCode(), { config: ICE_CONFIG });
+  const config = await getIceConfig();
+  netPeer = new Peer('lr-' + generateRoomCode(), { config });
   netPeer.on('open', id => {
     netMyId = id;
     const shortCode = id.replace('lr-', '');
@@ -2882,9 +2893,10 @@ function hostRoom(teamSize){
   netPeer.on('error', err => { document.getElementById('pvpStatus').textContent = 'Network error: ' + err.type; });
 }
 
-function joinRoom(code){
+async function joinRoom(code){
   netRole = 'client';
-  netPeer = new Peer(undefined, { config: ICE_CONFIG });
+  const config = await getIceConfig();
+  netPeer = new Peer(undefined, { config });
   netPeer.on('open', id => {
     netMyId = id;
     document.getElementById('pvpStatus').textContent = 'Connecting...';
@@ -3966,11 +3978,12 @@ document.getElementById('playerNameInput').addEventListener('input', e => {
 });
 
 document.getElementById('pvpHostBtn').addEventListener('click', () => {
+  document.getElementById('pvpStatus').textContent = 'Setting up...';
   hostRoom(netTeamSize);
 });
 document.getElementById('pvpJoinBtn').addEventListener('click', () => {
   const code = document.getElementById('pvpJoinCode').value;
-  if (code.trim()) joinRoom(code);
+  if (code.trim()) { document.getElementById('pvpStatus').textContent = 'Setting up...'; joinRoom(code); }
 });
 
 document.getElementById('startBtn').addEventListener('click', () => {
