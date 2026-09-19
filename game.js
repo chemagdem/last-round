@@ -2295,7 +2295,7 @@ let kills = 0;
 let score = 0;
 let localDeaths = 0; // horde/practice - PvP tracks per-player stats in netStats instead
 
-const enemyGunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.5, metalness: 0.6 });
+const enemyGunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#613333'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.5, metalness: 0.6 });
 const helmetMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#3a3a30'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.6 });
 const goggleMat = new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.2, metalness: 0.4 });
 const vestFabricMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#2f3a1e', '#5a6b34', '#1c2412', '#0d0d0d']), roughness: 0.85 });
@@ -2364,7 +2364,11 @@ function preloadSoldierModel(){
         o.raycast = () => {}; // hit detection uses separate invisible proxies, never the animated mesh itself
         if (o.material) {
           o.material = o.material.clone();
-          o.material.color.set(0x5a5f47); // recolor the civilian outfit to a drab uniform tone
+          // CesiumMan is a single mesh with one shared texture for the whole body, face included -
+          // a flat color tint here multiplies over the entire texture with no way to spare the
+          // face, which is why it came out the same drab olive as the clothes. Leaving the
+          // original texture alone keeps a natural skin tone; the helmet/vest gear (see
+          // buildHelmetGear/buildVestGear) is what actually reads as "soldier" now anyway.
           o.material.roughness = 0.85;
           o.material.metalness = 0.05;
         }
