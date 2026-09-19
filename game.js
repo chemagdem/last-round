@@ -1559,17 +1559,17 @@ const SPRAY_PATTERNS = {
 
 // ---------- Weapon system: definitions, inventory, per-weapon visuals ----------
 const WEAPONS = {
-  knife:  { name: 'Cuchillo Mariposa', slot: 'melee', price: 0, dmg: 55, range: 2.4, fireRate: 0.45 },
-  glock:  { name: 'Glock-18', slot: 'secondary', price: 200, dmg: 17, mag: 20, reserve: 60, fireRate: 0.15, range: 100, reloadDuration: 1.3, zoomFov: 55, kickPush: 0.035, kickTilt: 0.05 },
+  knife:  { name: 'Knife', slot: 'melee', price: 0, dmg: 55, range: 2.4, fireRate: 0.45 },
+  glock:  { name: 'Glock-18', slot: 'secondary', price: 250, dmg: 17, mag: 20, reserve: 60, fireRate: 0.15, range: 100, reloadDuration: 1.3, zoomFov: 55, kickPush: 0.035, kickTilt: 0.05 },
   deagle: { name: 'Desert Eagle', slot: 'secondary', price: 650, dmg: 42, mag: 7, reserve: 35, fireRate: 0.3, range: 130, reloadDuration: 1.6, zoomFov: 52, kickPush: 0.07, kickTilt: 0.09 },
   tec9:   { name: 'Tec-9', slot: 'secondary', price: 450, dmg: 19, mag: 18, reserve: 72, fireRate: 0.11, range: 90, reloadDuration: 1.4, zoomFov: 58, kickPush: 0.03, kickTilt: 0.045 },
-  duals:  { name: 'Duales Beretta', slot: 'secondary', price: 750, dmg: 16, mag: 30, reserve: 120, fireRate: 0.08, range: 90, reloadDuration: 1.7, zoomFov: 60, kickPush: 0.03, kickTilt: 0.045 },
+  duals:  { name: 'Duales Beretta', slot: 'secondary', price: 750, dmg: 16, mag: 30, reserve: 120, fireRate: 0.12, range: 90, reloadDuration: 1.7, zoomFov: 60, kickPush: 0.03, kickTilt: 0.045 },
   ak47:   { name: 'AK-47', slot: 'primary', price: 2500, dmg: 34, mag: 30, reserve: 90, fireRate: 0.1, range: 150, reloadDuration: 1.7, zoomFov: 48, kickPush: 0.05, kickTilt: 0.07 },
   m4a4:   { name: 'M4A4', slot: 'primary', price: 2900, dmg: 31, mag: 30, reserve: 90, fireRate: 0.095, range: 150, reloadDuration: 1.65, zoomFov: 48, kickPush: 0.045, kickTilt: 0.06 },
   m4a1:   { name: 'M4A1-S', slot: 'primary', price: 2750, dmg: 35, mag: 20, reserve: 80, fireRate: 0.11, range: 150, reloadDuration: 1.6, zoomFov: 45, kickPush: 0.04, kickTilt: 0.055 },
   awp:    { name: 'AWP', slot: 'primary', price: 4500, dmg: 115, mag: 5, reserve: 30, fireRate: 1.35, range: 320, reloadDuration: 2.4, zoomFov: 12, scope: true, scopeFov2: 5, kickPush: 0.15, kickTilt: 0.2, boltAction: true },
-  grenade:{ name: 'Grenade', slot: 'grenade', price: 300, dmg: 130, radius: 7, fireRate: 0.8 },
-  smoke:  { name: 'Smoke Grenade', slot: 'smoke', price: 400, radius: 9, duration: 14, fireRate: 0.8 }
+  grenade:{ name: 'Grenade', slot: 'grenade', price: 350, dmg: 130, radius: 9, fireRate: 0.8 },
+  smoke:  { name: 'Smoke Grenade', slot: 'smoke', price: 300, radius: 10, duration: 14, fireRate: 0.8 }
 };
 
 // per-weapon gunshot timbre for the synthesized audio engine (see SoundEngine.gunshot)
