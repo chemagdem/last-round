@@ -814,7 +814,7 @@ function applySubwayAtmosphere(){
   sky.material.map = desertSkyGradientTexture(); // barely visible under a roof, just needs to not be blank
   sky.material.needsUpdate = true;
   scene.fog.color.set(0x30343a);
-  scene.fog.density = 0.009;
+  scene.fog.density = 0; // enclosed corridor map - the fog read as a haze right in front of the player, not distance atmosphere
   hemi.color.set(0x8fa4b8); hemi.groundColor.set(0x2a2c30); hemi.intensity = 1.0;
   sun.color.set(0xcfe4f5); sun.intensity = 0.5;
   fillLight.color.set(0x7a8a96); fillLight.intensity = 0.35;
@@ -1293,7 +1293,7 @@ function buildSubwayMap(){
   columnMat.userData.minimapProp = true;
   const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
   barrelMat.userData.minimapProp = true;
-  const trainMat = new THREE.MeshStandardMaterial({ color: 0x2c3e46, roughness: 0.5, metalness: 0.4 });
+  const trainMat = new THREE.MeshStandardMaterial({ color: 0x455966, roughness: 0.55, metalness: 0.3, emissive: 0x0d1418, emissiveIntensity: 0.4 });
 
   const wallBaseY = -2, wallH = 11;
   [[0, -halfLen - wallThk / 2, eastX - westX, wallH, wallThk], [0, halfLen + wallThk / 2, eastX - westX, wallH, wallThk],
@@ -1328,6 +1328,14 @@ function buildSubwayMap(){
     const light = new THREE.PointLight(0xdfeeff, 8, 24, 1.7);
     light.position.set(0, lampY - 0.3, z);
     scene.add(light);
+  });
+
+  // the centerline tubes alone are 13 units from the pit/train car and fall off well before
+  // reaching it - dedicated pit lights so the track area doesn't read as unlit black
+  [-25, -5, 15, 35].forEach(z => {
+    const pitLight = new THREE.PointLight(0xcfe0ee, 5, 20, 1.7);
+    pitLight.position.set(12, wallBaseY + wallH - 2.5, z);
+    scene.add(pitLight);
   });
 
   // support columns down the platform centerline, offset by distance-from-center bucket (so the
