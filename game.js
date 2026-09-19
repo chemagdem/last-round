@@ -1236,27 +1236,38 @@ function buildSubwayMap(){
     return -PIT_DEPTH * s;
   };
 
-  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 100, 100);
-  groundGeo.rotateX(-Math.PI / 2);
-  const gPos = groundGeo.attributes.position;
-  for (let i = 0; i < gPos.count; i++) {
-    gPos.setY(i, groundHeightAt(gPos.getX(i), gPos.getZ(i)));
+  // platform floor and track-bed floor are two separate, non-overlapping planes (rather than one
+  // full-width plane plus a flat overlay dropped on top of it) - the previous overlapping version
+  // z-fought with the ground right at the platform/pit boundary, showing up as a hazy flicker there
+  const platformW = PIT_X0 - (westX + wallThk / 2);
+  const platformGeo = new THREE.PlaneGeometry(platformW, halfLen * 2, 20, 100);
+  platformGeo.rotateX(-Math.PI / 2);
+  const platformCx = westX + wallThk / 2 + platformW / 2;
+  const pfPos = platformGeo.attributes.position;
+  for (let i = 0; i < pfPos.count; i++) {
+    pfPos.setY(i, groundHeightAt(pfPos.getX(i) + platformCx, pfPos.getZ(i)));
   }
-  groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_floor.webp', 18, 18), roughness: 0.85 });
-  const ground = new THREE.Mesh(groundGeo, groundMat);
-  ground.receiveShadow = true;
-  scene.add(ground);
+  platformGeo.computeVertexNormals();
+  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_floor.webp', 12, 18), roughness: 0.85 });
+  const platformFloor = new THREE.Mesh(platformGeo, groundMat);
+  platformFloor.position.x = platformCx;
+  platformFloor.receiveShadow = true;
+  scene.add(platformFloor);
 
-  // dark ballast/track-bed overlay dropped into the pit - a flat plate is close enough since the
-  // curb transition is only 1.4 units wide, and it reads as a distinct trackbed against the tiled floor
-  const pitTex = loadTiledTexture('assets/textures/metal.jpg', 3, 30);
-  const pitMat = new THREE.MeshStandardMaterial({ map: pitTex, color: 0x555555, roughness: 0.7, metalness: 0.3 });
-  const pit = new THREE.Mesh(new THREE.PlaneGeometry(16 - PIT_X0, halfLen * 2), pitMat);
-  pit.rotation.x = -Math.PI / 2;
-  pit.position.set((PIT_X0 + 16) / 2, -PIT_DEPTH + 0.03, 0);
-  pit.receiveShadow = true;
-  scene.add(pit);
+  const pitW = (eastX - wallThk / 2) - PIT_X0;
+  const pitGeo = new THREE.PlaneGeometry(pitW, halfLen * 2, 10, 100);
+  pitGeo.rotateX(-Math.PI / 2);
+  const pitCx = PIT_X0 + pitW / 2;
+  const ptPos = pitGeo.attributes.position;
+  for (let i = 0; i < ptPos.count; i++) {
+    ptPos.setY(i, groundHeightAt(ptPos.getX(i) + pitCx, ptPos.getZ(i)));
+  }
+  pitGeo.computeVertexNormals();
+  const pitMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 3, 30), color: 0x555555, roughness: 0.7, metalness: 0.3 });
+  const pitFloor = new THREE.Mesh(pitGeo, pitMat);
+  pitFloor.position.x = pitCx;
+  pitFloor.receiveShadow = true;
+  scene.add(pitFloor);
 
   // rails
   const railMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.8 });
@@ -1337,27 +1348,30 @@ function buildSubwayMap(){
   // parked train car in the pit, centered so both spawns have equal access to it as pit cover
   makeBoxProp(13, 0, 5.2, 3.0, 34, trainMat);
 
-  // wall benches, mirrored north/south
-  function makeBench(x, z){
+  // wall benches, mirrored north/south - backX is the backrest's position, flush against the
+  // west wall's inner face; the bench's long axis runs along z (parallel to the wall) since that's
+  // the direction the wall itself runs, not along x
+  function makeBench(backX, z){
     const seatMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.85 });
     const legMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.5, metalness: 0.6 });
-    const baseY = groundHeightAt(x, z);
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.12, 0.7), seatMat);
-    seat.position.set(x, baseY + 0.5, z);
+    const seatX = backX + 0.35;
+    const baseY = groundHeightAt(seatX, z);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.12, 2.6), seatMat);
+    seat.position.set(seatX, baseY + 0.5, z);
     seat.castShadow = true; seat.receiveShadow = true;
     scene.add(seat); addBox(seat);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.6, 0.1), seatMat);
-    back.position.set(x, baseY + 0.85, z - 0.32);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 2.6), seatMat);
+    back.position.set(backX, baseY + 0.85, z);
     back.castShadow = true;
     scene.add(back); addBox(back);
-    [[-1.15, -0.25], [1.15, -0.25], [-1.15, 0.25], [1.15, 0.25]].forEach(([dx, dz]) => {
+    [[-0.25, -1.15], [-0.25, 1.15], [0.25, -1.15], [0.25, 1.15]].forEach(([dx, dz]) => {
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), legMat);
-      leg.position.set(x + dx, baseY + 0.25, z + dz);
+      leg.position.set(seatX + dx, baseY + 0.25, z + dz);
       scene.add(leg);
     });
-    addContactShadow(x, z, 1.8);
+    addContactShadow(seatX, z, 1.8);
   }
-  [-30, -12, 12, 30].forEach(z => makeBench(westX + 1.5, z));
+  [-30, -12, 12, 30].forEach(z => makeBench(westX + wallThk / 2 + 0.05, z));
 
   // station name plates on the west wall, and hanging exit signs above each spawn end
   const signMat = new THREE.MeshStandardMaterial({ map: stationSignTexture('SUBWAY'), roughness: 0.6 });
