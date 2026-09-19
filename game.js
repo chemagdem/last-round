@@ -9,6 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SocialUI } from './social-ui.js';
+import { mountAccount } from './account.js';
 import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
 
 // ============================================================
@@ -1757,6 +1758,8 @@ const SKIN_CATALOG = {
   crimson: { name: 'Crimson Core', meta: 'Red alloy · prototype finish', preview: 'crimson', owned: true, color: 0xd23a32, roughness: 0.34, metalness: 0.84 }
 };
 const PROFILE_STORAGE_KEY = 'lastRoundProfile';
+let cloudAccount = null;
+let cloudProfileActive = false;
 const DEFAULT_PROFILE = { name: 'Player', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
 let playerProfile = { ...DEFAULT_PROFILE };
 try {
@@ -1765,7 +1768,10 @@ try {
 } catch (err) { /* local storage can be disabled in private browsing */ }
 if (!SKIN_CATALOG[playerProfile.equippedSkin]) playerProfile.equippedSkin = 'gold';
 function savePlayerProfile(){
-  try { localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(playerProfile)); } catch (err) { /* keep this session usable */ }
+  if (!cloudProfileActive) {
+    try { localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(playerProfile)); } catch (err) { /* keep this session usable */ }
+  }
+  cloudAccount?.save();
 }
 function profileRank(rating){
   if (rating >= 1800) return 'ELITE';
@@ -5209,6 +5215,20 @@ document.getElementById('playerNameInput').addEventListener('input', e => {
   renderProfileUI();
 });
 document.getElementById('playerNameInput').value = playerProfile.name === 'Player' ? '' : playerProfile.name;
+mountAccount({
+  readProfile: () => playerProfile,
+  isPlaying: () => gameStarted,
+  applyProfile: profile => {
+    cloudProfileActive = true;
+    playerProfile = { ...DEFAULT_PROFILE, ...profile };
+    localPlayerName = playerProfile.name;
+    document.getElementById('playerNameInput').value = localPlayerName;
+    document.querySelector('#profileDock .profileEyebrow').textContent = 'CLOUD PROFILE · PROVISIONAL';
+    applyEquippedSkin();
+    renderProfileUI();
+    renderInventory();
+  }
+}).then(account => { cloudAccount = account; });
 
 document.getElementById('pvpHostBtn').addEventListener('click', () => {
   document.getElementById('pvpStatus').textContent = 'Setting up...';

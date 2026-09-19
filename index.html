@@ -5,6 +5,7 @@
 <title>LAST ROUND</title>
 <link rel="icon" type="image/png" href="assets/logo.png">
 <link rel="stylesheet" href="social.css">
+<link rel="stylesheet" href="account.css">
 <style>
   @font-face{font-family:'Baserona';src:url('assets/fonts/Baserona.ttf') format('truetype');font-display:swap;}
   :root{--accent:#ff493d;--panel:rgba(8,10,12,.88);--line:rgba(255,255,255,.12);--crosshair-gap:5px;--crosshair-size:8px;}
@@ -243,6 +244,8 @@
     <div class="profileMain"><strong id="profileName">PLAYER</strong><span id="profileRank">ROOKIE<br><b id="profileRating">1000</b> ELO</span></div>
     <div id="profileRecord">0W — 0L · 0 MATCHES</div>
     <button id="inventoryBtn" type="button">INVENTORY <span aria-hidden="true">↗</span></button>
+    <button id="accountButton" type="button">ACCOUNT / SIGN IN</button>
+    <span id="accountState">Guest · saved on this device</span>
   </section>
   <img id="logo" src="assets/logo.png" alt="LAST ROUND">
   <h2>No second chances</h2>
@@ -313,6 +316,20 @@
     <div id="inventoryGrid"></div>
   </section>
 </div>
+
+<dialog id="accountDialog" aria-labelledby="accountTitle">
+  <h2 id="accountTitle">PLAYER ACCOUNT</h2>
+  <p id="accountStatus" role="status">Sign in to save your profile across devices. Statistics are unverified.</p>
+  <form id="accountForm">
+    <label for="accountEmail">EMAIL</label><input id="accountEmail" type="email" autocomplete="email" required>
+    <label for="accountPassword">PASSWORD</label><input id="accountPassword" type="password" autocomplete="current-password" minlength="12" required>
+    <button value="signin">SIGN IN</button><button value="signup">REGISTER</button>
+    <button value="reset" formnovalidate>RESET PASSWORD</button>
+    <button value="signout" formnovalidate>SIGN OUT</button>
+    <button value="retry" formnovalidate>RETRY SYNC</button>
+  </form>
+  <button id="accountClose" type="button">CLOSE</button>
+</dialog>
 
 <div id="deathScreen">
   <h1>YOU DIED</h1>
