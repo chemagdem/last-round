@@ -35,10 +35,12 @@
   #scopeOverlay .tick-bottom{left:50%;bottom:16%;width:2px;height:16px;transform:translateX(-50%);}
   #scopeOverlay .tick-left{top:50%;left:16%;height:2px;width:16px;transform:translateY(-50%);}
   #scopeOverlay .tick-right{top:50%;right:16%;height:2px;width:16px;transform:translateY(-50%);}
-  #healthbar{position:absolute;bottom:30px;left:30px;width:220px;}
-  #healthbar .label{font-size:12px;letter-spacing:2px;color:#c66;margin-bottom:4px;}
-  #healthOuter{width:220px;height:22px;border:2px solid #442;background:rgba(0,0,0,0.5);}
-  #healthInner{height:100%;background:linear-gradient(90deg,#7a1414,#e5473c);width:100%;transition:width .15s;}
+  #healthbar{position:absolute;bottom:28px;left:28px;width:238px;padding:10px 12px 12px;background:linear-gradient(135deg,rgba(10,12,15,.92),rgba(18,11,13,.76));border:1px solid rgba(255,255,255,.14);border-left:3px solid #e5473c;box-shadow:0 10px 28px rgba(0,0,0,.3),inset 0 1px rgba(255,255,255,.08);clip-path:polygon(0 0,100% 0,100% 84%,94% 100%,0 100%);}
+  #healthbar .healthTop{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:7px;}
+  #healthbar .label{font-size:10px;font-weight:800;letter-spacing:2.5px;color:#aeb5ba;}
+  #healthValue{font:800 18px/1 'Baserona','Arial Narrow',sans-serif;letter-spacing:1px;color:#f4f5f5;text-shadow:0 0 8px rgba(229,71,60,.35);}
+  #healthOuter{position:relative;width:100%;height:9px;overflow:hidden;background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.17);}
+  #healthInner{height:100%;background:linear-gradient(90deg,#9f211e 0%,#e5473c 72%,#ffb15b 100%);width:100%;transition:width .15s;box-shadow:0 0 12px rgba(229,71,60,.55);}
   #ammo{position:absolute;bottom:30px;right:30px;text-align:right;font-size:34px;color:#eee;text-shadow:0 0 6px #000;}
   #ammo span{font-size:16px;color:#b88;}
   #reloadLabel{position:absolute;bottom:78px;right:30px;text-align:right;font-size:14px;letter-spacing:3px;color:#fc6;opacity:0;text-shadow:0 0 6px #000;}
@@ -115,7 +117,9 @@
   .kfWeapon::before{content:"";display:block;width:30px;height:3px;background:linear-gradient(90deg,transparent,#d7b66c 22%,#d7b66c 78%,transparent);transform:skewX(-28deg);box-shadow:0 0 8px rgba(215,182,108,.45);}
   .kfSkull{display:inline-flex;align-items:center;justify-content:center;margin-left:5px;width:15px;height:15px;color:#fff;background:#b62d28;border-radius:3px;font:700 10px/1 Inter,'Segoe UI',sans-serif;vertical-align:middle;box-shadow:0 0 10px rgba(229,71,60,.55);}
   @media(max-width:760px){#killfeed{top:74px;right:12px;width:min(330px,calc(100vw - 24px));}.killEntry{grid-template-columns:minmax(0,1fr) 48px minmax(0,1fr);padding-left:10px;padding-right:10px}.kfKiller,.kfVictim{font-size:11px}.kfWeapon{font-size:7px}}
-  #buyHint{position:absolute;bottom:110px;right:30px;font-size:12px;letter-spacing:2px;color:#a66;text-shadow:0 0 4px #000;}
+  #buyHint{position:absolute;bottom:106px;right:28px;display:flex;align-items:center;gap:7px;padding:8px 11px;background:rgba(10,12,15,.78);border:1px solid rgba(255,255,255,.12);border-right:2px solid #d7b66c;color:#aeb5ba;font-size:10px;font-weight:700;letter-spacing:1.3px;text-shadow:0 1px 4px #000;box-shadow:0 8px 22px rgba(0,0,0,.25);}
+  #buyHint .hudKey{display:inline-flex;align-items:center;justify-content:center;min-width:21px;height:19px;padding:0 5px;color:#f2f3f4;background:linear-gradient(180deg,#30353a,#171a1e);border:1px solid rgba(255,255,255,.28);border-bottom-color:#d7b66c;border-radius:3px;font-size:9px;letter-spacing:.5px;}
+  #buyHint .hudAction{color:#7f898f;margin-right:3px;}
   #buyMenu{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(10,5,5,0.92);color:#ddd;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:50;pointer-events:all;}
   #tabScoreboard{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:rgba(10,5,5,0.92);border:2px solid #653;border-radius:6px;padding:16px 20px;color:#ddd;display:none;z-index:55;pointer-events:none;font-family:'Segoe UI',Arial,sans-serif;min-width:340px;}
   #tabScoreboard h3{font-family:'Arial Narrow',Inter,'Segoe UI',Arial,sans-serif;letter-spacing:3px;color:#e5473c;margin:0 0 10px;text-align:center;}
@@ -299,7 +303,7 @@
   <div id="vignette"></div>
   <div id="centerMessage"></div>
   <div id="healthbar">
-    <div class="label">HEALTH</div>
+    <div class="healthTop"><span class="label">VITALS</span><span id="healthValue">100</span></div>
     <div id="healthOuter"><div id="healthInner"></div></div>
   </div>
   <div id="ammo"><span id="ammoLabel">MAG</span><br><span id="ammoCount">30</span> / <span id="ammoReserve">120</span></div>
@@ -325,7 +329,12 @@
   <div id="waveBanner"></div>
   <div id="killfeed"></div>
   <div id="defuseBar"><div id="defuseFill"></div></div>
-  <div id="buyHint">[B] SHOP · [1][2][3][4][5] / [Q] / WHEEL SWITCH WEAPON · [F] KNIFE · [E] DEFUSE</div>
+  <div id="buyHint" aria-label="Gameplay controls">
+    <span class="hudKey">B</span><span class="hudAction">SHOP</span>
+    <span class="hudKey">1–5</span><span class="hudAction">WEAPON</span>
+    <span class="hudKey">F</span><span class="hudAction">INSPECT</span>
+    <span class="hudKey">E</span><span class="hudAction">DEFUSE</span>
+  </div>
 </div>
 
 <div id="pauseMenu">

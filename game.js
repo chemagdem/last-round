@@ -4657,6 +4657,7 @@ function updateMoneyHUD(){
 function updateHealthHUD(){
   const pct = Math.max(0, player.health / player.maxHealth * 100);
   document.getElementById('healthInner').style.width = pct + '%';
+  document.getElementById('healthValue').textContent = `${Math.ceil(Math.max(0, player.health))}`;
   const danger = 1 - pct / 100;
   document.getElementById('vignette').style.boxShadow = `inset 0 0 ${120 * danger}px ${40 * danger}px rgba(160,0,0,${0.55 * danger})`;
 }
