@@ -25,22 +25,8 @@ class SoundEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(this.ctx.destination);
-    this.loadSample('awp', 'assets/cs_go-awp-sound.mp3');
-    this.loadSample('scopeClick', 'assets/awp-zoom-sound-effect-cs-go.mp3');
-    this.loadSample('ak47', 'assets/ak-47-mp3.mp3');
-    this.loadSample('reload', 'assets/uzi-reload.mp3');
-    this.loadSample('m4a1', 'assets/m4a1_silencer_01.mp3');
-    this.loadSample('glock', 'assets/pistol-shot.mp3');
-    this.loadSample('smokeHiss', 'assets/smoke-grenade-sound-effect.mp3');
-    this.loadSample('grenadeThrow', 'assets/grenade-plonk-sound-effect-tarkov-louder.mp3');
-    this.loadSample('deagle', 'assets/desert-eagle-cs.mp3');
-    this.loadSample('explosion', 'assets/exploded_zfp5Xgm.mp3');
-    this.loadSample('m4a4', 'assets/m70-rifle.mp3');
-    this.loadSample('smg', 'assets/wpn_45_smg_2d_01.mp3');
-    this.loadSample('knifeSlash', 'assets/knife-slashing.mp3');
-    this.loadSample('knifeStab', 'assets/knife-stab.mp3');
-    this.loadSample('subwayAmbience', 'assets/subway.mp3');
-    this.loadSample('graffiti', 'assets/graffiti.mp3');
+    // Shipping builds use original Web Audio synthesis. The legacy sample files in /assets
+    // have unclear third-party licensing and must never be loaded by the game.
   }
   resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
@@ -729,6 +715,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
+renderer.info.autoReset = true;
 document.body.appendChild(renderer.domElement);
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 
@@ -750,6 +737,32 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// Dynamic resolution keeps input latency stable on integrated GPUs. It changes slowly to avoid
+// visible oscillation and never exceeds the display's native pixel density.
+const renderQuality = {
+  scale: Math.min(window.devicePixelRatio, 1.5),
+  min: 0.75,
+  max: Math.min(window.devicePixelRatio, 1.75),
+  sampleTime: 0,
+  frameCount: 0
+};
+function updateRenderQuality(dt){
+  renderQuality.sampleTime += dt;
+  renderQuality.frameCount++;
+  if (renderQuality.sampleTime < 2) return;
+  const fps = renderQuality.frameCount / renderQuality.sampleTime;
+  const previous = renderQuality.scale;
+  if (fps < 50) renderQuality.scale = Math.max(renderQuality.min, renderQuality.scale - 0.1);
+  else if (fps > 58) renderQuality.scale = Math.min(renderQuality.max, renderQuality.scale + 0.05);
+  if (Math.abs(previous - renderQuality.scale) > 0.001) {
+    renderer.setPixelRatio(renderQuality.scale);
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+    composer.setSize(window.innerWidth, window.innerHeight);
+  }
+  renderQuality.sampleTime = 0;
+  renderQuality.frameCount = 0;
+}
 
 // ---------- Sky ----------
 const skyGeo = new THREE.SphereGeometry(400, 24, 16);
@@ -1524,6 +1537,8 @@ const player = {
   scopeLevel: 0, // 0 = hip, 1 = scoped, 2 = scoped + extra zoom (sniper click-cycle, not hold)
   footstepTimer: 0
 };
+const movementVelocity = new THREE.Vector3();
+let jumpWasDown = false;
 camera.position.copy(player.pos);
 camera.fov = baseFov;
 
@@ -2352,8 +2367,8 @@ function fireWeapon(){
     boltCyclingT = BOLT_CYCLE_DURATION;
   }
 
-  const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
-  if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
+  // Original synthesis is deterministic, low-latency, and safe to distribute.
+  audio.gunshot(GUNSHOT_PROFILES[weaponId]);
   flashLight.intensity = 5;
   flashSpriteMat.opacity = 1;
   flashSprite.scale.set(0.5 + Math.random() * 0.2, 0.5 + Math.random() * 0.2, 1);
@@ -2377,7 +2392,11 @@ function fireWeapon(){
   spawnMuzzleSmoke();
   spawnShellCasing();
 
-  const spread = player.ads ? 0.004 : 0.015;
+  const horizontalSpeed = Math.hypot(movementVelocity.x, movementVelocity.z);
+  const movementPenalty = THREE.MathUtils.clamp(horizontalSpeed / (player.speed * player.sprintMul), 0, 1);
+  const stanceMultiplier = player.crouching ? 0.72 : 1;
+  const baseSpread = player.ads ? 0.0024 : 0.011;
+  const spread = baseSpread * stanceMultiplier + movementPenalty * (player.ads ? 0.006 : 0.018);
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   dir.x += (Math.random() - 0.5) * spread;
   dir.y += (Math.random() - 0.5) * spread;
@@ -4031,14 +4050,26 @@ function updatePlayer(dt){
   if (player.crouching) speed *= player.crouchMul;
   if (player.ads) speed *= 0.6;
 
-  const newPos = player.pos.clone().addScaledVector(move, speed * dt);
+  // Acceleration and friction remove the weightless start/stop feel while preserving responsive
+  // counter-strafing. Air control is intentionally weaker than ground control.
+  const desiredVelocity = move.multiplyScalar(speed);
+  const response = player.onGround ? (move.lengthSq() > 0 ? 16 : 22) : 4.5;
+  const blend = 1 - Math.exp(-response * dt);
+  movementVelocity.x = THREE.MathUtils.lerp(movementVelocity.x, desiredVelocity.x, blend);
+  movementVelocity.z = THREE.MathUtils.lerp(movementVelocity.z, desiredVelocity.z, blend);
+  const horizontalSpeed = Math.hypot(movementVelocity.x, movementVelocity.z);
+  const crosshairGap = 4 + THREE.MathUtils.clamp(horizontalSpeed / player.speed, 0, 1.7) * 5 + (player.onGround ? 0 : 5);
+  document.documentElement.style.setProperty('--crosshair-gap', `${crosshairGap.toFixed(1)}px`);
+  const newPos = player.pos.clone().addScaledVector(movementVelocity, dt);
   if (!checkCollision(newPos)) {
     player.pos.x = newPos.x; player.pos.z = newPos.z;
   } else {
     const tryX = player.pos.clone(); tryX.x = newPos.x;
     if (!checkCollision(tryX)) player.pos.x = newPos.x;
+    else movementVelocity.x = 0;
     const tryZ = player.pos.clone(); tryZ.z = newPos.z;
     if (!checkCollision(tryZ)) player.pos.z = newPos.z;
+    else movementVelocity.z = 0;
   }
 
   const half = WORLD_SIZE / 2 - 3;
@@ -4048,7 +4079,9 @@ function updatePlayer(dt){
   const groundY = groundHeightAt(player.pos.x, player.pos.z);
   const targetHeight = player.crouching ? player.crouchHeight : player.height;
 
-  if (keys[settings.binds.jump] && player.onGround) { player.velY = 5.2; player.onGround = false; }
+  const jumpDown = !!keys[settings.binds.jump];
+  if (jumpDown && !jumpWasDown && player.onGround && !player.crouching) { player.velY = 5.2; player.onGround = false; }
+  jumpWasDown = jumpDown;
   player.velY -= 14 * dt;
   player.pos.y += player.velY * dt;
 
@@ -4404,6 +4437,8 @@ function animate(){
     }
     drawMinimap();
   }
+
+  updateRenderQuality(dt);
 
   composer.render();
 }
