@@ -40,6 +40,7 @@ class SoundEngine {
     this.loadSample('knifeSlash', 'assets/knife-slashing.mp3');
     this.loadSample('knifeStab', 'assets/knife-stab.mp3');
     this.loadSample('subwayAmbience', 'assets/subway.mp3');
+    this.loadSample('graffiti', 'assets/graffiti.mp3');
   }
   resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
@@ -54,16 +55,28 @@ class SoundEngine {
   }
 
   // plays a loaded sample once; returns false if it isn't ready yet (caller falls back to a
-  // synthesized sound instead of silently doing nothing)
-  playSample(name, vol = 1){
+  // synthesized sound instead of silently doing nothing). maxDuration truncates long source
+  // files (with a short fade-out so the cut isn't an audible click) rather than playing them
+  // to the end - the graffiti can/spray sample runs much longer than the spray animation itself
+  playSample(name, vol = 1, maxDuration = null){
     const buffer = this.samples[name];
     if (!this.ctx || !buffer) return false;
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     const g = this.ctx.createGain();
-    g.gain.value = vol;
-    src.connect(g); g.connect(this.master);
-    src.start(this.ctx.currentTime);
+    const t = this.ctx.currentTime;
+    if (maxDuration && buffer.duration > maxDuration) {
+      g.gain.setValueAtTime(vol, t);
+      g.gain.setValueAtTime(vol, t + Math.max(0, maxDuration - 0.08));
+      g.gain.linearRampToValueAtTime(0, t + maxDuration);
+      src.connect(g); g.connect(this.master);
+      src.start(t);
+      src.stop(t + maxDuration);
+    } else {
+      g.gain.value = vol;
+      src.connect(g); g.connect(this.master);
+      src.start(t);
+    }
     return true;
   }
 
@@ -849,6 +862,9 @@ function plateau(x, z, cx, cz, halfW, halfD, height, margin){
 
 const colliders = [];
 const envMeshes = [];
+// ground/floor meshes aren't collidable props (no addBox call), but graffiti still needs to be
+// sprayable onto them - each buildXMap() pushes its own ground mesh(es) here
+const floorMeshes = [];
 function addBox(mesh){
   const box = new THREE.Box3().setFromObject(mesh);
   colliders.push(box);
@@ -954,6 +970,7 @@ function buildArenaMap(){
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
+  floorMeshes.push(ground);
 
   const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/wall.jpg', 6, 1.5), roughness: 1 });
   const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 });
@@ -1067,6 +1084,7 @@ function buildWarehouseMap(){
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
+  floorMeshes.push(ground);
 
   const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_wall.avif', 8, 2), roughness: 0.95 });
   const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 }); // same crate look as Desert
@@ -1253,6 +1271,7 @@ function buildSubwayMap(){
   platformFloor.position.x = platformCx;
   platformFloor.receiveShadow = true;
   scene.add(platformFloor);
+  floorMeshes.push(platformFloor);
 
   const pitW = (eastX - wallThk / 2) - PIT_X0;
   const pitGeo = new THREE.PlaneGeometry(pitW, halfLen * 2, 10, 100);
@@ -1268,6 +1287,7 @@ function buildSubwayMap(){
   pitFloor.position.x = pitCx;
   pitFloor.receiveShadow = true;
   scene.add(pitFloor);
+  floorMeshes.push(pitFloor);
 
   // rails
   const railMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.8 });
@@ -2117,6 +2137,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyQ') equipSlot(lastSlot);
   if (e.code === settings.binds.knife) playKnifeFlip();
   if (e.code === settings.binds.shop) toggleBuyMenu();
+  if (e.code === 'KeyT') sprayGraffiti();
 });
 document.addEventListener('wheel', e => {
   if (!gameStarted || shopOpen) return;
@@ -2968,6 +2989,60 @@ function updateDecals(dt){
     d.life -= dt;
     if (d.life < 3) d.mesh.material.opacity = Math.max(0, d.life / 3) * 0.85;
     if (d.life <= 0) { scene.remove(d.mesh); decals.splice(i, 1); }
+  }
+}
+
+// ---------- Graffiti spray (T key) ----------
+// sprayed onto whatever the crosshair is pointing at - a wall, the floor, or any collidable prop -
+// oriented flush against that surface, fading in (rather than the blood decals' fade-out) up to a
+// permanent 85% opacity cap, never fully opaque so it still reads as spray-painted rather than a
+// hard sticker
+const graffitiTex = textureLoader.load('assets/graffiti.png');
+graffitiTex.colorSpace = THREE.SRGBColorSpace;
+graffitiTex.anisotropy = maxAnisotropy;
+const GRAFFITI_MAX_OPACITY = 0.85;
+const GRAFFITI_FADE_IN = 1.4;
+const GRAFFITI_RANGE = 5;
+const GRAFFITI_ASPECT = 1440 / 1080; // source image is portrait (1080x1440)
+const graffitiDecals = [];
+
+function sprayGraffiti(){
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  raycaster.set(origin, dir);
+  raycaster.far = GRAFFITI_RANGE;
+  const hits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
+  if (hits.length === 0) return;
+  const hit = hits[0];
+  const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+
+  const w = 0.9 + Math.random() * 0.3;
+  const geo = new THREE.PlaneGeometry(w, w * GRAFFITI_ASPECT);
+  const mat = new THREE.MeshBasicMaterial({ map: graffitiTex, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(hit.point).addScaledVector(normal, 0.02);
+
+  // build the plane's basis directly (rather than aligning +Z then spinning randomly around it)
+  // so the sprayed image always comes out upright - a random spin could land the graffiti
+  // sideways or upside down on any wall it happened to be perpendicular-ish to
+  const worldUp = new THREE.Vector3(0, 1, 0);
+  const reference = Math.abs(normal.dot(worldUp)) > 0.999 ? new THREE.Vector3(0, 0, 1) : worldUp;
+  const xAxis = reference.clone().cross(normal).normalize();
+  const yAxis = normal.clone().cross(xAxis).normalize();
+  mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, normal));
+  scene.add(mesh);
+  graffitiDecals.push({ mat, t: 0 });
+
+  // the source file is a long spray-can hiss - cut it to roughly the fade-in's length instead of
+  // letting the whole clip play out well after the graffiti has already finished appearing
+  if (!audio.playSample('graffiti', 0.6, GRAFFITI_FADE_IN + 0.3)) audio.reloadThud(0.25, 200);
+}
+
+function updateGraffitiDecals(dt){
+  for (const g of graffitiDecals) {
+    if (g.t >= GRAFFITI_FADE_IN) continue;
+    g.t = Math.min(GRAFFITI_FADE_IN, g.t + dt);
+    g.mat.opacity = (g.t / GRAFFITI_FADE_IN) * GRAFFITI_MAX_OPACITY;
   }
 }
 
@@ -4312,6 +4387,7 @@ function animate(){
     updateHealthHUD();
     updateParticles(dt);
     updateDecals(dt);
+    updateGraffitiDecals(dt);
     updateGrenades(dt);
     updateSmokes(dt);
     document.getElementById('smokeOverlay').style.opacity = pointInAnySmoke(player.pos.x, player.pos.z) ? 1 : 0;
