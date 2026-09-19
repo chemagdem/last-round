@@ -870,13 +870,42 @@ let groundHeightAt = (x, z) => 0;
 // real photo/render textures for the arena map (assets/textures/), tiled since they're not
 // procedurally generated to an exact size like the rest of this file's canvas-based textures
 const textureLoader = new THREE.TextureLoader();
+const tiledTextureCache = new Map();
 function loadTiledTexture(url, repeatX, repeatY){
-  const tex = textureLoader.load(url);
+  const cacheKey = `${url}|${repeatX}|${repeatY}`;
+  if (tiledTextureCache.has(cacheKey)) return tiledTextureCache.get(cacheKey);
+  const tex = textureLoader.load(url, undefined, undefined, () => {
+    // Keep the material visible if a browser rejects a format or the game is opened from a
+    // restrictive local file URL. The procedural fallback is synchronous and never flashes black.
+    const fallback = metalScratchTexture('#596268');
+    fallback.repeat.set(repeatX, repeatY);
+    tex.image = fallback.image;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeatX, repeatY);
+    tex.needsUpdate = true;
+  });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeatX, repeatY);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = maxAnisotropy;
+  tiledTextureCache.set(cacheKey, tex);
   return tex;
+}
+
+const MAP_TEXTURE_URLS = {
+  arena: ['assets/textures/sand.jpg', 'assets/textures/wall.jpg', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
+  warehouse: ['assets/textures/warehouse_floor.avif', 'assets/textures/warehouse_wall.avif', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
+  subway: ['assets/textures/subway_floor.webp', 'assets/textures/subway_walls.jpg', 'assets/textures/train.png', 'assets/textures/trainfront.png', 'assets/textures/metal.jpg'],
+  skyline: []
+};
+const texturePreloadState = new Map();
+function preloadMapTextures(mapId){
+  if (texturePreloadState.get(mapId) === 'ready') return Promise.resolve();
+  const urls = MAP_TEXTURE_URLS[mapId] || [];
+  texturePreloadState.set(mapId, 'loading');
+  return Promise.all(urls.map(url => new Promise(resolve => {
+    textureLoader.load(url, () => resolve(), () => resolve(), () => resolve());
+  }))).then(() => { texturePreloadState.set(mapId, 'ready'); });
 }
 
 // smooth raised (positive height) or sunken (negative height) rectangular platform,
@@ -1705,6 +1734,11 @@ const MAX_SMOKES = 2;
 let smokeCount = 0;
 
 const weaponGroup = new THREE.Group();
+// First-person weapon proportions: the previous procedural meshes were technically small in
+// world units but appeared oversized at the camera because the whole group sat too close to the
+// lens. This scale and offset restore a believable shoulder-mounted framing.
+weaponGroup.scale.setScalar(0.78);
+weaponGroup.position.set(0.015, -0.015, 0.04);
 camera.add(weaponGroup);
 scene.add(camera);
 
@@ -2138,8 +2172,9 @@ function equipSlot(slot){
   if (currentVisual) weaponGroup.remove(currentVisual.group);
   currentVisual = buildWeaponVisual(id);
   weaponGroup.add(currentVisual.group);
+  weaponGroup.scale.setScalar(0.78);
+  weaponGroup.position.set(0.015, -0.015, 0.04);
   weaponGroup.rotation.x = 0;
-  weaponGroup.position.set(0, 0, 0);
   updateAmmoHUD();
 }
 
@@ -2879,7 +2914,7 @@ const pouchMat = new THREE.MeshStandardMaterial({ color: 0x23231c, roughness: 0.
 // facing convention), so anything that should face front gets a negative Z offset.
 function buildHelmetGear(){
   const g = new THREE.Group();
-  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8, 0, Math.PI * 2, 0, Math.PI / 1.8), helmetMat);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.215, 16, 12, 0, Math.PI * 2, 0, Math.PI / 1.75), helmetMat);
   dome.castShadow = true;
   g.add(dome);
   [-1, 1].forEach(side => { // NVG-style side rail nubs
@@ -2887,8 +2922,10 @@ function buildHelmetGear(){
     nub.position.set(side * 0.145, 0.01, -0.03);
     g.add(nub);
   });
-  const goggles = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.03), goggleMat);
-  goggles.position.set(0, -0.04, -0.13);
+  const faceCover = new THREE.Mesh(new THREE.CapsuleGeometry(0.12, 0.12, 6, 12), vestFabricMat);
+  faceCover.rotation.x = Math.PI / 2; faceCover.position.set(0, -0.085, -0.095); faceCover.scale.set(1, 0.75, 0.45); g.add(faceCover);
+  const goggles = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.06, 0.035), goggleMat);
+  goggles.position.set(0, -0.025, -0.18);
   goggles.castShadow = true;
   g.add(goggles);
   // Front shroud, ear protection and a small side-mounted light make the silhouette read as a
@@ -2950,12 +2987,13 @@ function preloadSoldierModel(){
         o.raycast = () => {}; // hit detection uses separate invisible proxies, never the animated mesh itself
         if (o.material) {
           o.material = o.material.clone();
-          // CesiumMan is a single mesh with one shared texture for the whole body, face included -
-          // a flat color tint here multiplies over the entire texture with no way to spare the
-          // face, which is why it came out the same drab olive as the clothes. Leaving the
-          // original texture alone keeps a natural skin tone; the helmet/vest gear (see
-          // buildHelmetGear/buildVestGear) is what actually reads as "soldier" now anyway.
-          o.material.roughness = 0.85;
+          // Do not expose the blue/white CesiumMan demo texture in the game. It is a CC0 rig,
+          // not a finished soldier asset; keeping its texture makes every enemy read as a toy
+          // mannequin. A uniform tactical base plus our helmet/plate-carrier layers gives the
+          // rig a coherent military silhouette until a production character asset is installed.
+          o.material.map = null;
+          o.material.color.set(0x465047);
+          o.material.roughness = 0.88;
           o.material.metalness = 0.05;
         }
       }
@@ -4727,11 +4765,13 @@ soldierReadyPromise.then(() => {
 let selectedMode = 'pvp';
 
 document.querySelectorAll('.mapCard').forEach(card => {
+  preloadMapTextures(card.dataset.map);
   card.addEventListener('click', () => {
     document.querySelectorAll('.mapCard').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
     selectedMap = card.dataset.map;
     mapChosen = true;
+    preloadMapTextures(selectedMap);
     updateStartButtonState();
   });
 });
