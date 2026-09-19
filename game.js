@@ -1297,15 +1297,8 @@ function buildSubwayMap(){
   const trainSideMat = new THREE.MeshStandardMaterial({ map: trainSideTex, roughness: 0.5, metalness: 0.3 });
   const trainRoofTex = loadTiledTexture('assets/textures/metal.jpg', 2, 6);
   const trainRoofMat = new THREE.MeshStandardMaterial({ map: trainRoofTex, roughness: 0.4, metalness: 0.6 });
-  const trainFrontTex = textureLoader.load('assets/textures/trainfront.png');
-  trainFrontTex.colorSpace = THREE.SRGBColorSpace;
-  trainFrontTex.anisotropy = maxAnisotropy;
-  // the source render only fills the middle of its square canvas (empty padding all round) -
-  // zoom the UVs into just that region so the train fills the whole face instead of looking tiny
-  trainFrontTex.wrapS = trainFrontTex.wrapT = THREE.ClampToEdgeWrapping;
-  trainFrontTex.offset.set(0.17, 0.11);
-  trainFrontTex.repeat.set(0.66, 0.7);
-  const trainFrontMat = new THREE.MeshStandardMaterial({ map: trainFrontTex, roughness: 0.45, metalness: 0.3, transparent: true, alphaTest: 0.5 });
+  const trainFrontTex = loadTiledTexture('assets/textures/metal.jpg', 2, 1.2);
+  const trainFrontMat = new THREE.MeshStandardMaterial({ map: trainFrontTex, color: 0x3a4046, roughness: 0.35, metalness: 0.75 });
 
   const wallBaseY = -2, wallH = 11;
   const wallCx = (westX + eastX) / 2;
