@@ -25,7 +25,7 @@ class SoundEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(this.ctx.destination);
-    this.loadSample('awp', 'assets/awp_02.mp3');
+    this.loadSample('awp', 'assets/cs_go-awp-sound.mp3');
     this.loadSample('scopeClick', 'assets/awp-zoom-sound-effect-cs-go.mp3');
     this.loadSample('ak47', 'assets/ak-47-mp3.mp3');
     this.loadSample('reload', 'assets/uzi-reload.mp3');
@@ -684,7 +684,7 @@ function bloodSplatterTexture(){
   for (let i = 0; i < 14; i++) {
     const x = 64 + (Math.random() - 0.5) * 70, y = 64 + (Math.random() - 0.5) * 70, r = 6 + Math.random() * 16;
     const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, 'rgba(120,4,4,0.9)');
+    grad.addColorStop(0, 'rgba(90, 0, 0, 0.9)');
     grad.addColorStop(1, 'rgba(120,4,4,0)');
     ctx.fillStyle = grad;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
