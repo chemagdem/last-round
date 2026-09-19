@@ -1748,7 +1748,9 @@ const woodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#5a3d24'
 const akWoodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#8f5a2e', 3), bumpMap: weaponWoodBump, bumpScale: 0.012, roughness: 0.58, metalness: 0.02 }); // visible laminate furniture, not an unreadable black blob
 const akMetalMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#50575a'), bumpMap: weaponMetalBump, bumpScale: 0.012, roughness: 0.42, metalness: 0.72 }); // parkerized steel with highlights that survive the FPS lighting
 const pistolMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#24241f'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.45 });
-const awpStockMat = new THREE.MeshStandardMaterial({ color: 0x6f6f4a, roughness: 0.85, metalness: 0.05 }); // solid matte olive polymer stock, not a camo pattern
+const awpStockMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#4d5937', '#657044', '#313a28', '#1f271c']), bumpMap: weaponWoodBump, bumpScale: 0.006, roughness: 0.72, metalness: 0.04 }); // textured olive precision-rifle polymer stock
+const scopeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#202625'), bumpMap: weaponMetalBump, bumpScale: 0.008, roughness: 0.32, metalness: 0.82 });
+const scopeGlassMat = new THREE.MeshStandardMaterial({ color: 0x173e4c, roughness: 0.08, metalness: 0.35, transparent: true, opacity: 0.88, emissive: 0x06252f, emissiveIntensity: 0.65 });
 const chromeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d4d4d4'), bumpMap: weaponMetalBump, bumpScale: 0.004, roughness: 0.2, metalness: 0.95 }); // bright polished slide finish, for the Berettas
 const deagleMat = chromeMat; // brushed stainless finish, matching the real Desert Eagle's signature silver slide
 const skinMat = new THREE.MeshStandardMaterial({ color: 0xb98862, roughness: 0.8 });
@@ -2082,42 +2084,72 @@ function buildWeaponVisual(id){
       break;
     }
     case 'awp': {
-      // bullpup bolt-action sniper: solid matte olive stock/handguard (not a camo pattern), a
-      // big scope on a raised black mount rail, a bolt handle, and a black box magazine
-      rifleModel(0.14, 0.1, 0.85, awpStockMat);
-      magazine.material = gunMat;
-      const mountRail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.4), gunMat);
-      mountRail.position.set(0.24, -0.115, -0.4);
-      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.038, 0.4, 12), gunMat);
-      scopeBody.rotation.x = Math.PI / 2;
-      scopeBody.position.set(0.24, -0.075, -0.4);
-      const scopeLensFront = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.044, 0.02, 12), gunMatLight);
-      scopeLensFront.rotation.x = Math.PI / 2;
-      scopeLensFront.position.set(0.24, -0.075, -0.58);
-      const scopeLensBack = scopeLensFront.clone();
-      scopeLensBack.position.z = -0.22;
-      const mountA = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.03), gunMat);
-      mountA.position.set(0.24, -0.13, -0.32);
-      const mountB = mountA.clone(); mountB.position.z = -0.48;
-      group.add(mountRail, scopeBody, scopeLensFront, scopeLensBack, mountA, mountB);
-      // thick angular handguard, longer than the standard rifle model, matching the AWP's bull barrel look
-      const handguard = weaponBox(0.1, 0.1, 0.55, awpStockMat, 0.022);
-      handguard.position.set(0.24, -0.185, -0.85);
-      group.add(handguard);
-      // bolt handle sticking out the side of the receiver
-      boltHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.09, 8), gunMat);
-      boltHandle.rotation.z = Math.PI / 2;
-      boltHandle.position.set(0.31, -0.185, -0.28);
-      group.add(boltHandle);
-      // trigger guard loop
-      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 6, 10, Math.PI * 1.3), gunMat);
-      triggerGuard.rotation.z = Math.PI * 0.35;
-      triggerGuard.position.set(0.24, -0.29, -0.24);
-      group.add(triggerGuard);
-      // cheek riser behind the scope, same olive as the rest of the stock
-      const cheekRiser = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.14), awpStockMat);
-      cheekRiser.position.set(0.24, -0.14, -0.02);
-      group.add(cheekRiser);
+      // Precision bolt-action silhouette: a separate polymer chassis, steel receiver, long free-
+      // floated barrel and a multi-part optic. This avoids the old generic rifle template, whose
+      // rectangular stock made the AWP read like an enlarged toy carbine.
+      const chassis = weaponBox(0.105, 0.12, 0.82, awpStockMat, 0.028);
+      chassis.position.set(0.24, -0.225, -0.2);
+      chassis.rotation.y = -0.035;
+      const butt = weaponBox(0.12, 0.15, 0.24, awpStockMat, 0.035);
+      butt.position.set(0.24, -0.22, 0.23); butt.rotation.y = -0.08;
+      const recoilPad = weaponBox(0.13, 0.16, 0.035, handleMat, 0.016);
+      recoilPad.position.set(0.24, -0.22, 0.365);
+      const receiver = weaponBox(0.115, 0.14, 0.42, scopeMat, 0.024);
+      receiver.position.set(0.24, -0.18, -0.39);
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.031, 0.82, 24), akMetalMat);
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0.24, -0.17, -1.0);
+      const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.029, 0.13, 20), scopeMat);
+      muzzleBrake.rotation.x = Math.PI / 2; muzzleBrake.position.set(0.24, -0.17, -1.46);
+      const handguard = weaponBox(0.105, 0.105, 0.48, awpStockMat, 0.025);
+      handguard.position.set(0.24, -0.205, -0.78);
+      const magazineBody = weaponBox(0.06, 0.16, 0.095, gunMat, 0.018);
+      magazineBody.position.set(0.24, -0.335, -0.46);
+      magazine = magazineBody;
+      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.008, 8, 18, Math.PI * 1.35), scopeMat);
+      triggerGuard.rotation.z = Math.PI * 0.35; triggerGuard.position.set(0.24, -0.29, -0.29);
+      const trigger = weaponBox(0.012, 0.045, 0.018, akMetalMat, 0.004);
+      trigger.position.set(0.24, -0.28, -0.295); trigger.rotation.x = -0.18;
+
+      // Raised picatinny rail and two optic rings.
+      const mountRail = weaponBox(0.045, 0.028, 0.47, scopeMat, 0.009);
+      mountRail.position.set(0.24, -0.085, -0.4);
+      const railSlots = [];
+      for (let i = 0; i < 8; i++) {
+        const slot = weaponBox(0.052, 0.008, 0.018, gunMatLight, 0.003);
+        slot.position.set(0.24, -0.067, -0.21 - i * 0.052); railSlots.push(slot);
+      }
+      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.052, 0.46, 20), scopeMat);
+      scopeBody.rotation.x = Math.PI / 2; scopeBody.position.set(0.24, -0.015, -0.42);
+      const scopeObjective = new THREE.Mesh(new THREE.CylinderGeometry(0.066, 0.058, 0.075, 20), scopeMat);
+      scopeObjective.rotation.x = Math.PI / 2; scopeObjective.position.set(0.24, -0.015, -0.68);
+      const scopeEyepiece = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.046, 0.09, 20), scopeMat);
+      scopeEyepiece.rotation.x = Math.PI / 2; scopeEyepiece.position.set(0.24, -0.015, -0.16);
+      const scopeLensFront = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.012, 20), scopeGlassMat);
+      scopeLensFront.rotation.x = Math.PI / 2; scopeLensFront.position.set(0.24, -0.015, -0.725);
+      const scopeLensBack = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.043, 0.012, 20), scopeGlassMat);
+      scopeLensBack.rotation.x = Math.PI / 2; scopeLensBack.position.set(0.24, -0.015, -0.105);
+      const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.056, 0.008, 8, 20), scopeMat);
+      ringA.rotation.x = Math.PI / 2; ringA.position.set(0.24, -0.015, -0.57);
+      const ringB = ringA.clone(); ringB.position.z = -0.27;
+      const mountA = weaponBox(0.055, 0.09, 0.055, scopeMat, 0.012); mountA.position.set(0.24, -0.11, -0.56);
+      const mountB = mountA.clone(); mountB.position.z = -0.28;
+
+      // Bolt body and handle remain separate so the existing bolt-cycle animation has a visible
+      // mechanical part to move after each shot.
+      const boltBody = weaponBox(0.07, 0.07, 0.18, scopeMat, 0.014); boltBody.position.set(0.24, -0.145, -0.24);
+      boltHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.11, 16), scopeMat);
+      boltHandle.rotation.z = Math.PI / 2; boltHandle.position.set(0.315, -0.17, -0.25);
+      const boltKnob = new THREE.Mesh(new THREE.SphereGeometry(0.027, 14, 10), scopeMat);
+      boltKnob.position.set(0.375, -0.17, -0.25);
+      const cheekRiser = weaponBox(0.075, 0.065, 0.2, awpStockMat, 0.018);
+      cheekRiser.position.set(0.24, -0.12, 0.03);
+      const bipodLegA = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.012, 0.18, 10), scopeMat);
+      bipodLegA.position.set(0.19, -0.28, -1.06); bipodLegA.rotation.z = -0.22;
+      const bipodLegB = bipodLegA.clone(); bipodLegB.position.x = 0.29; bipodLegB.rotation.z = 0.22;
+      group.add(chassis, butt, recoilPad, receiver, barrel, muzzleBrake, handguard, magazineBody, triggerGuard, trigger,
+        mountRail, ...railSlots, scopeBody, scopeObjective, scopeEyepiece, scopeLensFront, scopeLensBack,
+        ringA, ringB, mountA, mountB, boltBody, boltHandle, boltKnob, cheekRiser, bipodLegA, bipodLegB);
+      muzzle.set(0.24, -0.17, -1.525);
       break;
     }
     case 'grenade': {
