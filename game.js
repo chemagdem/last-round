@@ -2194,6 +2194,8 @@ function equipSlot(slot){
   currentSlot = slot;
   player.ads = false;
   player.scopeLevel = 0;
+  weaponInspectT = -1;
+  weaponInspectId = null;
   const id = slot === 'melee' ? 'knife' : slot === 'grenade' ? 'grenade' : slot === 'smoke' ? 'smoke' : inventory[slot];
   if (currentVisual) weaponGroup.remove(currentVisual.group);
   currentVisual = buildWeaponVisual(id);
@@ -2230,12 +2232,12 @@ let mouseLocked = false;
 const DEFAULT_BINDS = {
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
   jump: 'Space', crouch: 'ShiftLeft', sprint: 'ControlLeft',
-  reload: 'KeyR', shop: 'KeyB', knife: 'KeyF'
+  reload: 'KeyR', shop: 'KeyB', inspect: 'KeyF'
 };
 const BIND_LABELS = {
   forward: 'MOVE FORWARD', back: 'MOVE BACK', left: 'MOVE LEFT', right: 'MOVE RIGHT',
   jump: 'JUMP', crouch: 'CROUCH', sprint: 'SPRINT',
-  reload: 'RELOAD', shop: 'OPEN SHOP', knife: 'KNIFE INSPECT'
+  reload: 'RELOAD', shop: 'OPEN SHOP', inspect: 'INSPECT WEAPON'
 };
 const settings = { sensitivity: 1, binds: { ...DEFAULT_BINDS } };
 (function loadSettings(){
@@ -2266,6 +2268,8 @@ function clearGameplayInput(){
   movementVelocity.set(0, 0, 0);
   player.ads = false;
   player.scopeLevel = 0;
+  weaponInspectT = -1;
+  weaponInspectId = null;
   boltRescopeLevel = 0;
   document.getElementById('tabScoreboard').style.display = 'none';
 }
@@ -2339,7 +2343,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Digit4') equipSlot('grenade');
   if (e.code === 'Digit5') equipSlot('smoke');
   if (e.code === 'KeyQ') equipSlot(lastSlot);
-  if (e.code === settings.binds.knife) playKnifeFlip();
+  if (e.code === settings.binds.inspect) playWeaponInspect();
   if (e.code === settings.binds.shop) toggleBuyMenu();
 });
 document.addEventListener('wheel', e => {
@@ -2360,6 +2364,8 @@ document.addEventListener('wheel', e => {
 const reloadRuntime = { reloading: false, reloadT: 0, duration: 1.5 };
 let fireCooldown = 0;
 let knifeFlipT = -1;
+let weaponInspectT = -1;
+let weaponInspectId = null;
 let weaponRecoilT = -1;
 
 function currentWeaponDef(){
@@ -2372,6 +2378,14 @@ function currentWeaponDef(){
 function playKnifeFlip(){
   if (currentSlot !== 'melee') return;
   knifeFlipT = 0;
+}
+
+function playWeaponInspect(){
+  if (!gameStarted || !player.alive || reloadRuntime.reloading || boltCyclingT > 0 || weaponInspectT >= 0) return;
+  weaponInspectT = 0;
+  weaponInspectId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : inventory[currentSlot];
+  player.ads = false;
+  player.scopeLevel = 0;
 }
 
 function startReload(){
@@ -2497,6 +2511,40 @@ function updateKnifeFlip(dt){
   if (p >= 1) { knifeFlipT = -1; currentVisual.group.rotation.z = 0; currentVisual.group.position.y = 0; }
 }
 
+function updateWeaponInspect(dt){
+  if (weaponInspectT < 0 || !currentVisual) return;
+  weaponInspectT += dt;
+  const duration = 1.15;
+  const p = Math.min(1, weaponInspectT / duration);
+  const phase = p < 0.18 ? p / 0.18 : p > 0.78 ? (1 - p) / 0.22 : 1;
+  const eased = Math.sin(Math.max(0, phase) * Math.PI / 2);
+  const id = weaponInspectId;
+  if (id === 'knife') {
+    currentVisual.group.rotation.z = eased * Math.PI * 0.85;
+    currentVisual.group.rotation.y = eased * 0.55;
+    currentVisual.group.position.set(-eased * 0.06, eased * 0.035, eased * 0.04);
+  } else if (id === 'awp') {
+    currentVisual.group.rotation.y = -eased * 0.48;
+    currentVisual.group.rotation.z = eased * 0.16;
+    currentVisual.group.position.set(-eased * 0.1, eased * 0.06, eased * 0.08);
+  } else if (id === 'grenade' || id === 'smoke') {
+    currentVisual.group.rotation.y = -eased * 0.7;
+    currentVisual.group.rotation.z = eased * 0.28;
+    currentVisual.group.position.set(-eased * 0.08, eased * 0.08, eased * 0.06);
+  } else {
+    // Pistols and assault rifles rotate just enough to expose the slide, magazine and receiver.
+    currentVisual.group.rotation.y = -eased * 0.62;
+    currentVisual.group.rotation.z = eased * 0.12;
+    currentVisual.group.position.set(-eased * 0.09, eased * 0.045, eased * 0.07);
+  }
+  if (p >= 1) {
+    weaponInspectT = -1;
+    weaponInspectId = null;
+    currentVisual.group.position.set(0, 0, 0);
+    currentVisual.group.rotation.set(0, 0, 0);
+  }
+}
+
 // quick forward slash/stab swing on attack - separate axes from the flip animation above so the
 // two never fight each other if triggered close together
 let knifeSwingT = -1;
@@ -2520,7 +2568,7 @@ const bulletTracers = [];
 const particles = []; // {mesh/sprite, vel, life, maxLife, type}
 
 function fireWeapon(){
-  if (!player.alive || reloadRuntime.reloading) return;
+  if (!player.alive || reloadRuntime.reloading || weaponInspectT >= 0) return;
   const def = currentWeaponDef();
   const weaponId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : inventory[currentSlot];
 
@@ -4564,6 +4612,7 @@ function updatePlayer(dt){
   updateReloadAnimation(dt);
   updateWeaponRecoil(dt);
   updateBoltCycle(dt);
+  updateWeaponInspect(dt);
   updateKnifeFlip(dt);
   updateKnifeSwing(dt);
 }
