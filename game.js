@@ -9,6 +9,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
+import { SocialUI } from './social-ui.js';
+import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
 
 // ============================================================
 // AUDIO ENGINE (fully synthesized with Web Audio API - no files)
@@ -2119,14 +2121,39 @@ function keyLabel(code){
 document.addEventListener('keydown', e => keys[e.code] = true);
 document.addEventListener('keyup', e => keys[e.code] = false);
 
+function clearGameplayInput(){
+  Object.keys(keys).forEach(key => { keys[key] = false; });
+  mouseDown = false;
+  movementVelocity.set(0, 0, 0);
+  player.ads = false;
+  player.scopeLevel = 0;
+  boltRescopeLevel = 0;
+  document.getElementById('tabScoreboard').style.display = 'none';
+}
+function restoreGameplayPointer(){
+  if (!gameStarted || !player.alive || shopOpen || pauseMenuOpen) return;
+  try {
+    const request = renderer.domElement.requestPointerLock();
+    if (request?.catch) request.catch(() => socialUI.notice('Click the game to resume mouse control.'));
+  } catch { socialUI.notice('Click the game to resume mouse control.'); }
+}
+const socialUI = new SocialUI({
+  state: () => ({ started: gameStarted, menu: shopOpen || pauseMenuOpen, alive: player.alive, locked: mouseLocked }),
+  clearInput: clearGameplayInput,
+  restoreLock: restoreGameplayPointer,
+  sendChat: sendChatMessage,
+  spray: sprayGraffiti
+});
+
 renderer.domElement.addEventListener('click', () => {
-  if (!mouseLocked && gameStarted && player.alive) renderer.domElement.requestPointerLock();
+  if (!mouseLocked && gameStarted && player.alive && !socialUI.blocked && !shopOpen && !pauseMenuOpen) restoreGameplayPointer();
 });
 document.addEventListener('pointerlockchange', () => {
   mouseLocked = document.pointerLockElement === renderer.domElement;
+  if (!mouseLocked) clearGameplayInput();
 });
 document.addEventListener('mousemove', e => {
-  if (!mouseLocked) return;
+  if (!mouseLocked || socialUI.blocked) return;
   // sensitivity scales down with the current zoom level - a tighter scope (lower fov) turns the
   // mouse slower, so a heavily-zoomed AWP feels far more controlled than a lightly-zoomed pistol
   const sens = (player.ads ? 0.0022 * (camera.fov / baseFov) : 0.0022) * settings.sensitivity;
@@ -2138,6 +2165,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
 
 let mouseDown = false;
 document.addEventListener('mousedown', e => {
+  if (!mouseLocked || !gameStarted || !player.alive || socialUI.blocked || shopOpen || pauseMenuOpen) return;
   if (e.button === 0) mouseDown = true;
   if (e.button === 2) {
     const def = currentWeaponDef();
@@ -2164,7 +2192,7 @@ document.addEventListener('mouseup', e => {
   if (e.button === 2 && !currentWeaponDef().scope) player.ads = false;
 });
 document.addEventListener('keydown', e => {
-  if (!gameStarted || shopOpen || pauseMenuOpen) return;
+  if (!gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
   if (e.code === settings.binds.reload) startReload();
   if (e.code === 'Digit1') equipSlot('primary');
   if (e.code === 'Digit2') equipSlot('secondary');
@@ -2174,10 +2202,9 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyQ') equipSlot(lastSlot);
   if (e.code === settings.binds.knife) playKnifeFlip();
   if (e.code === settings.binds.shop) toggleBuyMenu();
-  if (e.code === 'KeyT') sprayGraffiti();
 });
 document.addEventListener('wheel', e => {
-  if (!gameStarted || shopOpen) return;
+  if (!gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
   const owned = ['melee'];
   if (inventory.secondary) owned.push('secondary');
   if (inventory.primary) owned.push('primary');
@@ -3038,30 +3065,61 @@ function updateDecals(dt){
 // oriented flush against that surface, fading in (rather than the blood decals' fade-out) up to a
 // permanent 85% opacity cap, never fully opaque so it still reads as spray-painted rather than a
 // hard sticker
-const graffitiTex = textureLoader.load('assets/graffiti.png');
-graffitiTex.colorSpace = THREE.SRGBColorSpace;
-graffitiTex.anisotropy = maxAnisotropy;
+const graffitiTextures = new Map();
+for (const spray of SPRAYS) {
+  const entry = { ready: false, texture: null };
+  entry.texture = textureLoader.load(spray.file, () => { entry.ready = true; }, undefined,
+    () => { entry.failed = true; console.warn('Spray could not load:', spray.id); });
+  entry.texture.colorSpace = THREE.SRGBColorSpace;
+  entry.texture.anisotropy = maxAnisotropy;
+  graffitiTextures.set(spray.id, entry);
+}
 const GRAFFITI_MAX_OPACITY = 0.85;
 const GRAFFITI_FADE_IN = 1.4;
-const GRAFFITI_RANGE = 5;
-const GRAFFITI_ASPECT = 1440 / 1080; // source image is portrait (1080x1440)
+const GRAFFITI_RANGE = SPRAY_RANGE;
+const GRAFFITI_LIMIT = 48;
 const graffitiDecals = [];
+let lastLocalSpray = -Infinity;
 
-function sprayGraffiti(){
+function sprayGraffiti(sprayId){
+  if (!gameStarted || !player.alive || shopOpen || pauseMenuOpen) return;
+  const entry = graffitiTextures.get(sprayId);
+  if (!entry?.ready) { socialUI.notice('Spray image is not ready. Try again shortly.'); return; }
+  if (performance.now() - lastLocalSpray < SPRAY_COOLDOWN) {
+    socialUI.notice('Wait a moment before spraying again.'); return;
+  }
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   const origin = camera.getWorldPosition(new THREE.Vector3());
   raycaster.set(origin, dir);
   raycaster.far = GRAFFITI_RANGE;
   const hits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
-  if (hits.length === 0) return;
+  if (hits.length === 0) { socialUI.notice('Aim at a wall or floor within 5 metres.'); return; }
   const hit = hits[0];
   const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
 
-  const w = 0.9 + Math.random() * 0.3;
-  const geo = new THREE.PlaneGeometry(w, w * GRAFFITI_ASPECT);
-  const mat = new THREE.MeshBasicMaterial({ map: graffitiTex, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+  const message = { type: 'spray', sprayId, point: hit.point.toArray(), normal: normal.toArray() };
+  if (gameMode === 'pvp') {
+    if (netRole === 'host') acceptSocialMessage(message, netMyId);
+    else if (netHostConn?.open) netSend(netHostConn, message);
+    else { socialUI.notice('Room disconnected. Spray was not sent.'); return; }
+  } else {
+    createGraffitiDecal(message);
+  }
+  lastLocalSpray = performance.now();
+  if (!audio.playSample('graffiti', 0.6, GRAFFITI_FADE_IN + 0.3)) audio.reloadThud(0.25, 200);
+}
+
+function createGraffitiDecal(message){
+  if (!validSpray(message)) return;
+  const entry = graffitiTextures.get(message.sprayId);
+  if (!entry) return;
+  const normal = new THREE.Vector3().fromArray(message.normal).normalize();
+  const aspect = SPRAYS.find(s => s.id === message.sprayId).aspect || 1;
+  const geo = new THREE.PlaneGeometry(1.5, 1.5 * aspect);
+  const mat = new THREE.MeshBasicMaterial({ map: entry.texture, transparent: true, opacity: 0, alphaTest: 0.015,
+    depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.copy(hit.point).addScaledVector(normal, 0.02);
+  mesh.position.fromArray(message.point).addScaledVector(normal, 0.012);
 
   // build the plane's basis directly (rather than aligning +Z then spinning randomly around it)
   // so the sprayed image always comes out upright - a random spin could land the graffiti
@@ -3072,11 +3130,13 @@ function sprayGraffiti(){
   const yAxis = normal.clone().cross(xAxis).normalize();
   mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, normal));
   scene.add(mesh);
-  graffitiDecals.push({ mat, t: 0 });
-
-  // the source file is a long spray-can hiss - cut it to roughly the fade-in's length instead of
-  // letting the whole clip play out well after the graffiti has already finished appearing
-  if (!audio.playSample('graffiti', 0.6, GRAFFITI_FADE_IN + 0.3)) audio.reloadThud(0.25, 200);
+  graffitiDecals.push({ mesh, mat, t: 0 });
+  while (graffitiDecals.length > GRAFFITI_LIMIT) {
+    const oldest = graffitiDecals.shift();
+    scene.remove(oldest.mesh);
+    oldest.mesh.geometry.dispose();
+    oldest.mat.dispose(); // The texture is shared and stays cached for subsequent sprays.
+  }
 }
 
 function updateGraffitiDecals(dt){
@@ -3501,6 +3561,13 @@ function updateScoreboardNames(){
 }
 
 function handleNetMessage(msg, fromId){
+  if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+  // Social messages use a separate validated route, before the legacy generic game relay.
+  if (msg.type === 'chat' || msg.type === 'spray') {
+    if (netRole === 'host') acceptSocialMessage(msg, fromId);
+    else if (fromId === 'host') displaySocialMessage(msg);
+    return;
+  }
   if (netRole === 'host' && msg.type !== 'roster') netRelayFromHost(msg, fromId);
   switch (msg.type) {
     case 'roster':
@@ -3533,6 +3600,63 @@ function handleNetMessage(msg, fromId){
       applyKillMessage(msg);
       break;
   }
+}
+
+const socialRateLimiter = new SocialRateLimiter();
+let lastLocalChat = -Infinity;
+function sendChatMessage(text){
+  const message = { type: 'chat', text: cleanText(text) };
+  if (!message.text) return true;
+  if (performance.now() - lastLocalChat < CHAT_COOLDOWN) {
+    socialUI.notice('Wait a moment before sending another message.'); return false;
+  }
+  if (gameMode !== 'pvp') {
+    socialUI.showMessage('You · practice', message.text, true);
+  } else if (netRole === 'host') {
+    acceptSocialMessage(message, netMyId);
+  } else if (netHostConn?.open) {
+    netSend(netHostConn, message);
+  } else {
+    socialUI.notice('Room disconnected. Your message has not been sent.'); return false;
+  }
+  lastLocalChat = performance.now();
+  return true;
+}
+
+function acceptSocialMessage(message, senderId){
+  const sender = netRoster.find(p => p.id === senderId && !p.isBot);
+  if (!sender) return;
+  let canonical;
+  if (message.type === 'chat') {
+    const text = cleanText(message.text);
+    if (!text) return;
+    canonical = { type: 'chat', senderId, name: cleanText(sender.name, 24) || 'Player', text };
+  } else {
+    if (!gameStarted || !validSpray(message)) return;
+    const avatar = senderId === netMyId ? null : enemies.find(e => e.isRemote && e.netId === senderId);
+    const origin = senderId === netMyId ? player.pos.clone() : avatar?.mesh.position.clone().add(new THREE.Vector3(0, player.height, 0));
+    if (!origin || (senderId === netMyId ? !player.alive : !avatar.alive) || !withinSprayRange(origin.toArray(), message.point)) return;
+    // Confirm the location really lies on a map surface. Never accept arbitrary world-space art.
+    const point = new THREE.Vector3().fromArray(message.point);
+    const normal = new THREE.Vector3().fromArray(message.normal).normalize();
+    const probe = new THREE.Raycaster(point.clone().addScaledVector(normal, 0.12), normal.clone().negate(), 0, 0.24);
+    const hits = probe.intersectObjects(envMeshes.concat(floorMeshes), false);
+    if (!hits.length || hits[0].point.distanceTo(point) > 0.08) return;
+    const surfaceNormal = hits[0].face.normal.clone().transformDirection(hits[0].object.matrixWorld).normalize();
+    if (surfaceNormal.dot(normal) < 0.95) return;
+    canonical = { type: 'spray', senderId, sprayId: message.sprayId, point: point.toArray(), normal: surfaceNormal.toArray() };
+  }
+  if (!socialRateLimiter.accept(senderId, message.type)) return;
+  displaySocialMessage(canonical);
+  // Include the sender: clients display only the host's accepted echo, avoiding duplicates.
+  netBroadcast(canonical);
+}
+
+function displaySocialMessage(message){
+  if (message.type === 'chat') {
+    const text = cleanText(message.text);
+    if (text) socialUI.showMessage(cleanText(message.name, 24) || 'Player', text, message.senderId === netMyId);
+  } else if (message.type === 'spray' && validSpray(message)) createGraffitiDecal(message);
 }
 
 let netStateTimer = 0;
@@ -3981,6 +4105,8 @@ function updatePlayerRegen(dt){
 
 function playerDie(){
   player.alive = false;
+  if (socialUI.wheelOpen) socialUI.closeWheel(false);
+  clearGameplayInput();
   if (gameMode === 'bomb') return; // round loss is handled by the round system, not the horde game-over screen
   if (gameMode === 'pvp') {
     // credit whoever landed the finishing blow with a kill, and anyone else who hit us in the
@@ -4304,6 +4430,7 @@ let listeningForBind = null; // action name currently waiting for a keypress, or
 
 function togglePauseMenu(){
   if (!gameStarted || shopOpen) return;
+  socialUI.cancel();
   pauseMenuOpen = !pauseMenuOpen;
   document.getElementById('pauseMenu').style.display = pauseMenuOpen ? 'flex' : 'none';
   if (pauseMenuOpen) { document.exitPointerLock(); mouseDown = false; listeningForBind = null; renderBindList(); }
@@ -4329,6 +4456,10 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Escape') { togglePauseMenu(); return; }
   if (!pauseMenuOpen || !listeningForBind) return;
   e.preventDefault();
+  if (['KeyT', 'Enter', 'NumpadEnter', 'Tab'].includes(e.code)) {
+    socialUI.notice('T, Enter and Tab are reserved for sprays, chat and scoreboard.');
+    return;
+  }
   settings.binds[listeningForBind] = e.code;
   listeningForBind = null;
   saveSettings();
@@ -4367,7 +4498,7 @@ function renderTabScoreboard(){
   }
 }
 document.addEventListener('keydown', e => {
-  if (e.code !== 'Tab' || !gameStarted || shopOpen || pauseMenuOpen) return;
+  if (e.code !== 'Tab' || !gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
   e.preventDefault();
   if (document.getElementById('tabScoreboard').style.display === 'block') return;
   renderTabScoreboard();
@@ -4622,6 +4753,8 @@ document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startScreen').style.display = 'none';
   document.getElementById('hud').style.display = 'block';
   gameStarted = true;
+  document.getElementById('matchChat').hidden = false;
+  document.getElementById('socialHint').hidden = false;
   updateAmmoHUD();
   updateGrenadeHUD();
   updateHealthHUD();

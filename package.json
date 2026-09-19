@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "python3 -m http.server 8080",
-    "check": "node --check game.js && node tests/smoke.mjs"
+    "check": "node --check game.js && node --check social-ui.js && node --test tests/social.test.mjs && node tests/smoke.mjs"
   },
   "engines": {
     "node": ">=20"

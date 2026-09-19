@@ -4,12 +4,14 @@
 <meta charset="UTF-8">
 <title>LAST ROUND</title>
 <link rel="icon" type="image/png" href="assets/logo.png">
+<link rel="stylesheet" href="social.css">
 <style>
+  @font-face{font-family:'Baserona';src:url('assets/fonts/Baserona.ttf') format('truetype');font-display:swap;}
   :root{--accent:#ff493d;--panel:rgba(8,10,12,.88);--line:rgba(255,255,255,.12);--crosshair-gap:5px;--crosshair-size:8px;}
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;overflow:hidden;background:#070809;font-family:Inter,'Segoe UI',Arial,sans-serif;}
   button,input{font:inherit;}
-  h1,h2,h3,#startBtn,#closeBuyMenu,#pvpHostBtn,#pvpJoinBtn,.teamSizeBtn,#restartBtn,#deathScreen h1{font-family:'Arial Narrow',Inter,'Segoe UI',Arial,sans-serif;font-weight:800;text-transform:uppercase;}
+  h1,h2,h3,#startBtn,#closeBuyMenu,#pvpHostBtn,#pvpJoinBtn,.teamSizeBtn,#restartBtn,#deathScreen h1{font-family:'Baserona','Arial Narrow','Segoe UI',Arial,sans-serif;font-weight:800;text-transform:uppercase;}
   #hud{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;color:#ddd;z-index:10;}
   #crosshair{position:absolute;top:50%;left:50%;width:2px;height:2px;transform:translate(-50%,-50%);transition:opacity .12s;filter:drop-shadow(0 1px 1px #000);}
   #crosshair span{position:absolute;background:#f4f6f7;}
@@ -143,6 +145,23 @@
 </style>
 </head>
 <body>
+
+<section id="matchChat" aria-label="Match chat" hidden>
+  <div id="chatLog" role="log" aria-live="polite" aria-relevant="additions"></div>
+  <form id="chatForm" hidden autocomplete="off">
+    <label for="chatInput">ALL PLAYERS</label>
+    <input id="chatInput" type="text" placeholder="Say something…" maxlength="180" spellcheck="false" aria-describedby="chatHelp">
+    <div class="chatMeta"><span id="chatHelp">ENTER to send · ESC to cancel</span><span id="chatCount">0/180</span></div>
+  </form>
+</section>
+<div id="socialHint" hidden>[ENTER] CHAT · HOLD [T] SPRAYS</div>
+<div id="sprayWheel" hidden>
+  <div id="sprayRing" role="listbox" aria-label="Choose a graffiti spray">
+    <div id="sprayCenter"><b id="spraySelection">CHOOSE A SPRAY</b><span>Hover a design<br>Release T to spray<br>ESC to cancel</span></div>
+  </div>
+  <div id="sprayPointer"></div>
+</div>
+<div id="socialNotice" role="status" hidden></div>
 
 <div id="startScreen">
   <img id="logo" src="assets/logo.png" alt="LAST ROUND">

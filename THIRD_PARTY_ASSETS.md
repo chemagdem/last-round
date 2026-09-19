@@ -1,9 +1,9 @@
 # Third-party asset audit
 
-The runtime loads the legacy weapon and ambience samples in `assets/`. Their filenames suggest extraction from commercial games or unknown web sources; document redistribution rights (or replace them) before any commercial distribution.
+The project owner confirmed on 2026-09-19 that the existing weapon sounds, font and other supplied assets are licensed. The runtime retains those sounds; licence documentation is maintained by the owner.
 
-`assets/fonts/Baserona.ttf` explicitly permits personal use only. The game now uses a system font stack. Purchase the appropriate licence or replace the file with an OFL-licensed font before commercial distribution.
+`assets/fonts/Baserona.ttf` is enabled for game headings under the owner's confirmation of a purchased licence. The bundled original font README remains unchanged.
 
-The provenance and licence of the image textures, logo, graffiti image, and soldier model loaded from the external URL in `game.js` must also be documented. Absence of a copyright notice is not permission to redistribute an asset.
+The six new transparent spray PNGs in `assets/sprays/` were generated for this project. The cat and mounted knight use images supplied by the owner as references. Generation prompts are recorded in `assets/sprays/PROMPTS.md`.
 
-No entry in this document is legal clearance. Keep a source URL, author, licence text, attribution requirements, and modification record for every production asset.
+This records the owner's statement, not independent verification of licence terms.

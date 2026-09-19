@@ -1,0 +1,26 @@
+/* Match overlays use system type for chat; headings retain the licensed game face. */
+[hidden] { display: none !important; }
+#matchChat { position:fixed; left:28px; bottom:112px; width:min(420px,calc(100vw - 56px)); z-index:110; color:#e9edf2; pointer-events:none; font:13px/1.5 'Segoe UI',sans-serif; }
+#chatLog { max-height:168px; overflow-y:auto; overflow-wrap:anywhere; padding:8px 12px; background:linear-gradient(90deg,rgba(8,12,18,.8),rgba(8,12,18,.4)); border-left:2px solid #9c3131; opacity:0; transition:opacity .25s; scrollbar-width:thin; }
+.chatRecent #chatLog,.chatActive #chatLog { opacity:1; }
+.chatActive #chatLog { pointer-events:auto; }
+.chatLine { padding:3px 0; text-shadow:0 1px 2px #000; }
+.chatLine strong { color:#e8bf74; font-weight:600; }
+.chatOwn strong { color:#95d5df; }
+#chatForm { pointer-events:auto; padding:10px 12px; background:rgba(8,12,18,.96); border:1px solid #9c3131; }
+#chatForm label { display:block; font-size:10px; letter-spacing:2px; color:#e8bf74; margin-bottom:5px; }
+#chatInput { width:100%; padding:6px 0; background:transparent; border:0; outline:0; color:#fff; font:14px 'Segoe UI',sans-serif; }
+.chatMeta { display:flex; justify-content:space-between; font-size:10px; color:#a5aebd; }
+#socialHint { position:fixed; bottom:84px; left:30px; z-index:15; pointer-events:none; color:#ced1d8; font:10px 'Segoe UI',sans-serif; letter-spacing:1px; text-shadow:0 1px 4px #000; }
+#sprayWheel { position:fixed; inset:0; z-index:115; background:radial-gradient(circle,rgba(10,12,18,.75),rgba(5,7,12,.38)); cursor:none; user-select:none; }
+#sprayRing { position:absolute; width:min(650px,94vw,88vh); aspect-ratio:1; left:50%; top:50%; transform:translate(-50%,-50%); }
+#sprayCenter { position:absolute; left:50%; top:50%; width:30%; transform:translate(-50%,-50%); color:white; text-align:center; font:10px/1.5 'Segoe UI',sans-serif; }
+#sprayCenter b { display:block; color:#f5cc87; font-size:13px; margin-bottom:8px; }
+#sprayCenter span { color:#c3cad3; }
+.sprayOption { position:absolute; width:29%; height:27%; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; padding:6px; border:1px solid rgba(255,255,255,.2); border-radius:14px; background:rgba(13,17,24,.84); transition:background .12s,border-color .12s,box-shadow .12s; }
+.sprayOption img { width:100%; height:calc(100% - 24px); object-fit:contain; pointer-events:none; }
+.sprayOption span { font:600 clamp(9px,1.2vw,12px)/1.2 'Segoe UI',sans-serif; color:#edf0f5; text-align:center; margin-top:5px; }
+.sprayOption.selected { background:rgba(110,30,32,.92); border-color:#f1c77a; box-shadow:0 0 0 2px rgba(241,199,122,.3),0 0 30px rgba(223,86,55,.2); }
+#sprayPointer { position:fixed; left:-5px; top:-5px; width:10px; height:10px; border:2px solid white; background:#f4c370; border-radius:50%; pointer-events:none; box-shadow:0 1px 5px #000; }
+#socialNotice { position:fixed; left:50%; top:68%; transform:translateX(-50%); z-index:120; padding:10px 16px; background:rgba(9,12,18,.92); border:1px solid #776249; color:#f8dbac; font:13px 'Segoe UI',sans-serif; pointer-events:none; }
+@media (max-height:650px) { #chatLog { max-height:110px; } }
