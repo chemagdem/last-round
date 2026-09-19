@@ -1171,40 +1171,122 @@ function buildWarehouseMap(){
   };
 }
 
+// hazard tape for the platform edge - diagonal yellow/black stripes, the universal "don't
+// walk past here" marking real stations paint right at the track lip
+function hazardStripeTexture(){
+  const { c, ctx } = makeCanvas(128);
+  ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#e6c62e';
+  const stripeW = 24;
+  for (let x = -128; x < 256; x += stripeW * 2) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, 128); ctx.lineTo(x + stripeW, 128); ctx.lineTo(x + stripeW + 128, 0); ctx.lineTo(x + 128, 0);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// wall-mounted station name plate - dark tile background with a bold painted station name,
+// same idea as siteMarkerTexture but styled like real subway signage
+function stationSignTexture(text){
+  const { c, ctx } = makeCanvas(256);
+  ctx.fillStyle = '#0e3d2e'; ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = '#123f30'; ctx.fillRect(0, 40, 256, 176);
+  ctx.strokeStyle = '#e8e2d0'; ctx.lineWidth = 6;
+  ctx.strokeRect(10, 50, 236, 156);
+  ctx.fillStyle = '#f4efe0';
+  ctx.font = 'bold 54px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 130);
+  return new THREE.CanvasTexture(c);
+}
+
+// small hanging illuminated exit sign
+function exitSignTexture(){
+  const { c, ctx } = makeCanvas(128);
+  ctx.fillStyle = '#0d4d1f'; ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 5;
+  ctx.strokeRect(6, 6, 116, 116);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 34px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('EXIT', 64, 68);
+  return new THREE.CanvasTexture(c);
+}
+
 // ---------- Map: Subway (abandoned station platform) ----------
-// Same layout again (see buildWarehouseMap's comment) - tiled station floor/walls, a flat
-// concrete ceiling and a row of fluorescent tube fixtures instead of warm hanging bulbs.
+// A genuinely different shape from Desert/Warehouse rather than the same footprint reskinned:
+// a long, narrow platform with a sunken track pit and parked train car along one side, support
+// columns down the centerline breaking the sightline, wall benches and station signage.
 function buildSubwayMap(){
-  WORLD_SIZE = 60;
+  WORLD_SIZE = 100;
   applySubwayAtmosphere();
 
-  const ELEV_CX = -17, ELEV_HALF_W = 3.5, ELEV_HALF_D = 20, ELEV_HEIGHT = 2.0;
-  groundHeightAt = (x, z) => plateau(x, z, ELEV_CX, 0, ELEV_HALF_W, ELEV_HALF_D, ELEV_HEIGHT, 6);
+  // platform runs x: -9..9, track pit x: 9..16 with a smoothed curb dropping PIT_DEPTH down
+  const PIT_X0 = 9, PIT_MARGIN = 1.4, PIT_DEPTH = 1.3;
+  const halfLen = 41, wallThk = 2;
+  const westX = -9 - wallThk / 2, eastX = 16 + wallThk / 2;
+  groundHeightAt = (x, z) => {
+    const t = Math.min(1, Math.max(0, (x - PIT_X0) / PIT_MARGIN));
+    const s = t * t * (3 - 2 * t);
+    return -PIT_DEPTH * s;
+  };
 
-  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 60, 60);
+  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 100, 100);
   groundGeo.rotateX(-Math.PI / 2);
   const gPos = groundGeo.attributes.position;
   for (let i = 0; i < gPos.count; i++) {
     gPos.setY(i, groundHeightAt(gPos.getX(i), gPos.getZ(i)));
   }
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_floor.webp', 12, 12), roughness: 0.85 });
+  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_floor.webp', 18, 18), roughness: 0.85 });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_walls.jpg', 6, 1.6), roughness: 0.8 });
+  // dark ballast/track-bed overlay dropped into the pit - a flat plate is close enough since the
+  // curb transition is only 1.4 units wide, and it reads as a distinct trackbed against the tiled floor
+  const pitTex = loadTiledTexture('assets/textures/metal.jpg', 3, 30);
+  const pitMat = new THREE.MeshStandardMaterial({ map: pitTex, color: 0x555555, roughness: 0.7, metalness: 0.3 });
+  const pit = new THREE.Mesh(new THREE.PlaneGeometry(16 - PIT_X0, halfLen * 2), pitMat);
+  pit.rotation.x = -Math.PI / 2;
+  pit.position.set((PIT_X0 + 16) / 2, -PIT_DEPTH + 0.03, 0);
+  pit.receiveShadow = true;
+  scene.add(pit);
+
+  // rails
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.4, metalness: 0.8 });
+  [11.8, 13.6].forEach(x => {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.12, halfLen * 2), railMat);
+    rail.position.set(x, -PIT_DEPTH + 0.1, 0);
+    scene.add(rail);
+  });
+
+  // hazard stripe right at the platform lip
+  const hazardMat = new THREE.MeshStandardMaterial({ map: hazardStripeTexture(), roughness: 1 });
+  hazardMat.map.repeat.set(1, halfLen * 2 / 1.2);
+  const hazard = new THREE.Mesh(new THREE.PlaneGeometry(0.6, halfLen * 2), hazardMat);
+  hazard.rotation.x = -Math.PI / 2;
+  hazard.position.set(PIT_X0 - 0.4, 0.02, 0);
+  scene.add(hazard);
+
+  const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_walls.jpg', 10, 1.8), roughness: 0.8 });
   const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 }); // same crate look as Desert/Warehouse
   crateMat.userData.penetrable = true;
   crateMat.userData.minimapProp = true;
-  const lowWallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_walls.jpg', 1.6, 0.6), roughness: 0.8 });
-  lowWallMat.userData.minimapProp = true;
+  const columnMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/subway_walls.jpg', 1.2, 3), roughness: 0.75 });
+  columnMat.userData.minimapProp = true;
+  const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
+  barrelMat.userData.minimapProp = true;
+  const trainMat = new THREE.MeshStandardMaterial({ color: 0x2c3e46, roughness: 0.5, metalness: 0.4 });
 
-  const halfArenaZ = 27, eastX = 27, westX = ELEV_CX - ELEV_HALF_W - 0.5, wallThk = 2;
-  const wallCx = (eastX + westX) / 2, wallSpanX = (eastX - westX) + wallThk * 2;
-  const wallBaseY = -1, wallH = 10;
-  [[wallCx, -halfArenaZ, wallSpanX, wallH, wallThk], [wallCx, halfArenaZ, wallSpanX, wallH, wallThk],
-   [westX, 0, wallThk, wallH, halfArenaZ * 2 + wallThk * 2], [eastX, 0, wallThk, wallH, halfArenaZ * 2 + wallThk * 2]]
+  const wallBaseY = -2, wallH = 11;
+  [[0, -halfLen - wallThk / 2, eastX - westX, wallH, wallThk], [0, halfLen + wallThk / 2, eastX - westX, wallH, wallThk],
+   [westX, 0, wallThk, wallH, halfLen * 2 + wallThk * 2], [eastX, 0, wallThk, wallH, halfLen * 2 + wallThk * 2]]
     .forEach(([x, z, w, h, d]) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
       mesh.position.set(x, wallBaseY + h / 2, z);
@@ -1214,41 +1296,87 @@ function buildSubwayMap(){
     });
   addPerimeterWalls();
 
-  // a flat concrete ceiling closing the station off
-  const ceilingTex = metalScratchTexture('#3a3d42'); ceilingTex.repeat.set(10, 10);
+  // flat concrete ceiling
+  const ceilingTex = metalScratchTexture('#3a3d42'); ceilingTex.repeat.set(8, 16);
   const ceilingMat = new THREE.MeshStandardMaterial({ map: ceilingTex, roughness: 1, side: THREE.DoubleSide });
-  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(wallSpanX, halfArenaZ * 2 + wallThk * 2), ceilingMat);
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(eastX - westX, halfLen * 2 + wallThk * 2), ceilingMat);
   ceiling.rotation.x = Math.PI / 2;
-  ceiling.position.set(wallCx, wallBaseY + wallH, 0);
+  ceiling.position.set((westX + eastX) / 2, wallBaseY + wallH, 0);
   ceiling.receiveShadow = true;
   scene.add(ceiling);
 
-  // fluorescent tube fixtures - a dense grid (matches Warehouse's already-corrected brightness
-  // lesson) but cool white instead of warm bulbs
+  // a single line of fluorescent tubes down the platform centerline - narrow corridor needs far
+  // fewer fixtures than Warehouse's open square to read just as bright
   const tubeFixtureMat = new THREE.MeshStandardMaterial({ color: 0xe8f0f5, roughness: 0.3, metalness: 0.1, emissive: 0xdfeeff, emissiveIntensity: 0.6 });
-  const lampXs = [-15, -1, 13, 24], lampZs = [-22, -8, 8, 22];
-  lampXs.forEach(x => lampZs.forEach(z => {
-    const lampY = 6.5;
-    const tube = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.14, 0.3), tubeFixtureMat);
-    tube.position.set(x, lampY, z);
+  const lampZs = [-35, -25, -15, -5, 5, 15, 25, 35];
+  lampZs.forEach(z => {
+    const lampY = wallBaseY + wallH - 0.5;
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.14, 0.3), tubeFixtureMat);
+    tube.position.set(0, lampY, z);
     scene.add(tube);
-    const light = new THREE.PointLight(0xdfeeff, 7, 26, 1.7);
-    light.position.set(x, lampY - 0.3, z);
+    const light = new THREE.PointLight(0xdfeeff, 8, 24, 1.7);
+    light.position.set(0, lampY - 0.3, z);
     scene.add(light);
-  }));
-
-  // crate/barrel positions randomized like Warehouse, mirrored north/south
-  const jit = n => (Math.random() - 0.5) * n;
-
-  const rowXs = [-11, -7.55, -4.1, -0.65].map(x => x + jit(1.2));
-  rowXs.forEach(x => {
-    const zj = jit(2);
-    makeBoxProp(x, -15 + zj, 1.7, 1.7, 1.7, crateMat);
-    makeBoxProp(x, 15 - zj, 1.7, 1.7, 1.7, crateMat);
   });
 
-  const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
-  barrelMat.userData.minimapProp = true;
+  // support columns down the platform centerline, offset by distance-from-center bucket (so the
+  // zigzag stays mirror-symmetric north/south) - the real cover-defining feature of this map
+  function makeColumn(x, z){
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.6, wallH - 1.5, 10), columnMat);
+    col.position.set(x, groundHeightAt(x, z) + (wallH - 1.5) / 2, z);
+    col.castShadow = true; col.receiveShadow = true;
+    scene.add(col);
+    addBox(col);
+    addContactShadow(x, z, 1.6);
+  }
+  [-30, -20, -10, 0, 10, 20, 30].forEach(z => {
+    const bucket = Math.round(Math.abs(z) / 10);
+    makeColumn(bucket % 2 === 0 ? -1.8 : 1.8, z);
+  });
+
+  // parked train car in the pit, centered so both spawns have equal access to it as pit cover
+  makeBoxProp(13, 0, 5.2, 3.0, 34, trainMat);
+
+  // wall benches, mirrored north/south
+  function makeBench(x, z){
+    const seatMat = new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.85 });
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.5, metalness: 0.6 });
+    const baseY = groundHeightAt(x, z);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.12, 0.7), seatMat);
+    seat.position.set(x, baseY + 0.5, z);
+    seat.castShadow = true; seat.receiveShadow = true;
+    scene.add(seat); addBox(seat);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.6, 0.1), seatMat);
+    back.position.set(x, baseY + 0.85, z - 0.32);
+    back.castShadow = true;
+    scene.add(back); addBox(back);
+    [[-1.15, -0.25], [1.15, -0.25], [-1.15, 0.25], [1.15, 0.25]].forEach(([dx, dz]) => {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 0.08), legMat);
+      leg.position.set(x + dx, baseY + 0.25, z + dz);
+      scene.add(leg);
+    });
+    addContactShadow(x, z, 1.8);
+  }
+  [-30, -12, 12, 30].forEach(z => makeBench(westX + 1.5, z));
+
+  // station name plates on the west wall, and hanging exit signs above each spawn end
+  const signMat = new THREE.MeshStandardMaterial({ map: stationSignTexture('SUBWAY'), roughness: 0.6 });
+  [-25, 0, 25].forEach(z => {
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.1, 2.4), signMat);
+    plate.rotation.y = Math.PI / 2;
+    plate.position.set(westX + 0.55, 3.2, z);
+    scene.add(plate);
+  });
+  const exitMat = new THREE.MeshStandardMaterial({ map: exitSignTexture(), emissive: 0x0d4d1f, emissiveIntensity: 0.6, roughness: 0.4 });
+  [-halfLen + 3, halfLen - 3].forEach(z => {
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 0.15), exitMat);
+    sign.position.set(0, wallBaseY + wallH - 1.3, z);
+    scene.add(sign);
+  });
+
+  // a few maintenance crates/drums for close-range cover near each spawn - lighter touch than
+  // Desert/Warehouse since columns and the train car now carry most of the map's cover
+  const jit = n => (Math.random() - 0.5) * n;
   function addBarrel(x, z){
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 12), barrelMat);
     barrel.position.set(x, groundHeightAt(x, z) + 0.8, z);
@@ -1256,32 +1384,19 @@ function buildSubwayMap(){
     scene.add(barrel);
     addBox(barrel);
   }
-
-  const entryRowXs = [-9, -5, -1, 3, 7, 11].map(x => x + jit(1.4));
-  entryRowXs.forEach(x => {
-    const zj = jit(1.5);
-    makeBoxProp(x, -18.5 + zj, 1.6, 1.6, 1.6, crateMat);
-    makeBoxProp(x, 18.5 - zj, 1.6, 1.6, 1.6, crateMat);
+  [-33, 33].forEach(z => {
+    makeBoxProp(-3 + jit(1.5), z + jit(2), 1.6, 1.6, 1.6, crateMat);
+    makeBoxProp(3 + jit(1.5), z + jit(2), 1.6, 1.6, 1.6, crateMat);
+    addBarrel(-6 + jit(1.5), z * 0.9 + jit(2));
   });
-  [[14, -19], [14, 19]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(1.5)));
 
-  makeBoxProp(-3 + jit(2.5), -4 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
-  makeBoxProp(7 + jit(2.5), 3 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
-  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(2)));
-
-  makeBoxProp(ELEV_CX, -10 + jit(3), 1.5, 1.5, 1.5, crateMat);
-  makeBoxProp(ELEV_CX, 3 + jit(3), 1.5, 1.5, 1.5, crateMat);
-
-  makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, -17, 2.6, 1.05, 1.1, lowWallMat);
-  makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, 17, 2.6, 1.05, 1.1, lowWallMat);
-
-  const spawnZoneA = { xMin: -11, xMax: 18, zMin: -26, zMax: -20 };
-  const spawnZoneB = { xMin: -11, xMax: 18, zMin: 20, zMax: 26 };
+  const spawnZoneA = { xMin: -7, xMax: 6, zMin: -40, zMax: -33 };
+  const spawnZoneB = { xMin: -7, xMax: 6, zMin: 33, zMax: 40 };
 
   return {
-    spawn: new THREE.Vector3(0, 2, -23),
-    tSpawn: new THREE.Vector3(0, 2, -23),
-    ctSpawn: new THREE.Vector3(0, 2, 23),
+    spawn: new THREE.Vector3(0, 2, -36),
+    tSpawn: new THREE.Vector3(0, 2, -36),
+    ctSpawn: new THREE.Vector3(0, 2, 36),
     tSpawnZone: spawnZoneA,
     ctSpawnZone: spawnZoneB,
     sites: []
@@ -4236,8 +4351,27 @@ document.querySelector('.mapCard[data-map="arena"] .swatch').style.backgroundIma
   `url(${renderMapThumbnail({ bg: '#c9ac7a', elevated: '#a9884f', wall: '#5a3d20', crate: '#5a3d24', spawn: 'rgba(229,71,60,0.18)' })})`;
 document.querySelector('.mapCard[data-map="warehouse"] .swatch').style.backgroundImage =
   `url(${renderMapThumbnail({ bg: '#26262a', elevated: '#38383e', wall: '#0d0d0d', crate: '#5c4428', spawn: 'rgba(229,71,60,0.22)' })})`;
+// stylized (not to-scale) thumbnail for Subway's long-platform-plus-track-pit layout, since it
+// doesn't share the square footprint the shared renderMapThumbnail() draws for the other two maps
+function renderSubwayThumbnail(theme){
+  const size = 200;
+  const cvs = document.createElement('canvas'); cvs.width = size; cvs.height = size;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = theme.platform; ctx.fillRect(20, 10, 120, 180);
+  ctx.fillStyle = theme.pit; ctx.fillRect(140, 10, 40, 180);
+  ctx.fillStyle = theme.train; ctx.fillRect(148, 70, 26, 60);
+  ctx.fillStyle = theme.wall;
+  for (let y = 22; y <= 178; y += 24) ctx.fillRect(75, y, 10, 10);
+  ctx.fillStyle = theme.spawn;
+  ctx.fillRect(20, 10, 120, 26);
+  ctx.fillRect(20, 164, 120, 26);
+  ctx.strokeStyle = theme.wallLine; ctx.lineWidth = 4;
+  ctx.strokeRect(20, 10, 160, 180);
+  return cvs.toDataURL();
+}
 document.querySelector('.mapCard[data-map="subway"] .swatch').style.backgroundImage =
-  `url(${renderMapThumbnail({ bg: '#d8d2c4', elevated: '#b8b0a0', wall: '#8a7a50', crate: '#5c4428', spawn: 'rgba(229,71,60,0.2)' })})`;
+  `url(${renderSubwayThumbnail({ bg: '#1c1e22', platform: '#cfc9ba', pit: '#2b2f33', train: '#3a4650', wall: '#7a6a3a', wallLine: '#0d0d0d', spawn: 'rgba(229,71,60,0.25)' })})`;
 
 document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
