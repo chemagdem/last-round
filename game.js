@@ -1043,19 +1043,16 @@ function buildWarehouseMap(){
     gPos.setY(i, groundHeightAt(gPos.getX(i), gPos.getZ(i)));
   }
   groundGeo.computeVertexNormals();
-  const floorTex = loadTiledTexture('assets/textures/metal.jpg', 14, 14);
-  const groundMat = new THREE.MeshStandardMaterial({ map: floorTex, color: 0x9a9aa0, roughness: 0.85, metalness: 0.3 }); // desaturating tint over the (red) metal photo turns it into a worn grey/steel factory floor
+  const groundMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_floor.avif', 14, 14), roughness: 0.95 });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const wallTex = metalScratchTexture('#3a3a3c'); wallTex.repeat.set(8, 2); // dark worn steel, with the rust/pitting metalScratchTexture already bakes in
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, bumpMap: metalBumpTexture(), bumpScale: 0.02, roughness: 0.9, metalness: 0.4 });
+  const wallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_wall.avif', 8, 2), roughness: 0.95 });
   const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 }); // same crate look as Desert
   crateMat.userData.penetrable = true;
   crateMat.userData.minimapProp = true;
-  const lowWallTex = metalScratchTexture('#4a4a48'); lowWallTex.repeat.set(2, 1);
-  const lowWallMat = new THREE.MeshStandardMaterial({ map: lowWallTex, bumpMap: metalBumpTexture(), bumpScale: 0.02, roughness: 0.85, metalness: 0.35 });
+  const lowWallMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_wall.avif', 2, 1), roughness: 0.95 });
   lowWallMat.userData.minimapProp = true;
 
   const halfArenaZ = 27, eastX = 27, westX = ELEV_CX - ELEV_HALF_W - 0.5, wallThk = 2;
