@@ -2866,6 +2866,7 @@ function hostRoom(teamSize){
     netClientConns[conn.peer] = conn;
     conn.on('data', data => handleNetMessage(data, conn.peer));
     conn.on('close', () => { delete netClientConns[conn.peer]; netRoster = netRoster.filter(p => p.id !== conn.peer); broadcastRoster(); });
+    conn.on('error', err => { document.getElementById('pvpStatus').textContent = 'A player failed to connect: ' + err.type; });
     conn.on('open', () => {
       const team = netRoster.filter(p => p.team === 'A').length <= netRoster.filter(p => p.team === 'B').length ? 'A' : 'B';
       netRoster.push({ id: conn.peer, team, isBot: false, name: 'Player' });
@@ -2886,14 +2887,40 @@ function joinRoom(code){
   netPeer = new Peer(undefined, { config: ICE_CONFIG });
   netPeer.on('open', id => {
     netMyId = id;
+    document.getElementById('pvpStatus').textContent = 'Connecting...';
     netHostConn = netPeer.connect('lr-' + code.trim().toUpperCase());
+    // the room existing (peer-unavailable would have fired already by now) doesn't mean the
+    // actual WebRTC connection will succeed - two peers behind strict NATs can still fail to
+    // negotiate even with a TURN relay configured, and PeerJS doesn't always surface that as an
+    // error, it can just hang forever. This timeout is what turns that silent hang into a message.
+    let settled = false;
+    const connectTimeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      document.getElementById('pvpStatus').textContent = "Couldn't connect to that player (network/firewall issue) - ask them to try hosting again, or try a different network.";
+      netHostConn.close();
+    }, 15000);
     netHostConn.on('open', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(connectTimeout);
       document.getElementById('pvpStatus').textContent = 'Connected - waiting for the host to start...';
       netSend(netHostConn, { type: 'name', name: localPlayerName });
       updateStartButtonState();
     });
     netHostConn.on('data', data => handleNetMessage(data, 'host'));
-    netHostConn.on('close', () => { document.getElementById('pvpStatus').textContent = 'Connection lost.'; });
+    netHostConn.on('close', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(connectTimeout);
+      document.getElementById('pvpStatus').textContent = 'Connection lost.';
+    });
+    netHostConn.on('error', err => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(connectTimeout);
+      document.getElementById('pvpStatus').textContent = 'Connection error: ' + err.type;
+    });
   });
   netPeer.on('error', err => {
     document.getElementById('pvpStatus').textContent = err.type === 'peer-unavailable'
