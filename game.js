@@ -1745,8 +1745,8 @@ const weaponWoodBump = woodBumpTexture();
 const gunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.7, metalness: 0.4 });
 const gunMatLight = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#33352f'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.75, metalness: 0.35 });
 const woodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#5a3d24'), bumpMap: weaponWoodBump, bumpScale: 0.01, roughness: 0.6 });
-const akWoodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#a9743f'), bumpMap: weaponWoodBump, bumpScale: 0.01, roughness: 0.5 }); // honey-brown AK furniture, matching the classic laminate look
-const akMetalMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#6b6b66'), bumpMap: weaponMetalBump, bumpScale: 0.01, roughness: 0.55, metalness: 0.6 }); // worn grey parkerized steel, lighter than the flat-black M4/AWP metal
+const akWoodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#8f5a2e', 3), bumpMap: weaponWoodBump, bumpScale: 0.012, roughness: 0.58, metalness: 0.02 }); // visible laminate furniture, not an unreadable black blob
+const akMetalMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#50575a'), bumpMap: weaponMetalBump, bumpScale: 0.012, roughness: 0.42, metalness: 0.72 }); // parkerized steel with highlights that survive the FPS lighting
 const pistolMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#24241f'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.45 });
 const awpStockMat = new THREE.MeshStandardMaterial({ color: 0x6f6f4a, roughness: 0.85, metalness: 0.05 }); // solid matte olive polymer stock, not a camo pattern
 const chromeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d4d4d4'), bumpMap: weaponMetalBump, bumpScale: 0.004, roughness: 0.2, metalness: 0.95 }); // bright polished slide finish, for the Berettas
@@ -1966,50 +1966,46 @@ function buildWeaponVisual(id){
       break;
     }
     case 'ak47': {
-      rifleModel(0.28, 0.28, 0.42, akWoodMat);
-      // worn grey parkerized steel receiver/barrel/sights instead of the flat-black M4 metal,
-      // and a wood grip to match the classic AKM furniture set
-      const receiver = group.children[0], barrel = group.children[1], sightPost = group.children[4], chargingHandle2 = group.children[5], grip = group.children[6];
-      receiver.material = akMetalMat;
-      barrel.material = akMetalMat;
-      sightPost.material = akMetalMat;
-      chargingHandle2.material = akMetalMat;
-      grip.material = akWoodMat;
-      // banana-curved magazine: three angled segments following the curve
-      magazine.geometry.dispose();
-      magazine.geometry = new THREE.BoxGeometry(0.05, 0.15, 0.08);
-      magazine.material = gunMat;
-      magazine.position.set(0.24, -0.27, -0.41);
-      magazine.rotation.x = -0.25;
-      const magMid = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.078), gunMat);
-      magMid.position.set(0.24, -0.38, -0.36);
-      magMid.rotation.x = -0.55;
-      const magTip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.075), gunMat);
-      magTip.position.set(0.24, -0.48, -0.28);
-      magTip.rotation.x = -0.85;
-      group.add(magMid, magTip);
-      const woodHandguard = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.08, 0.3), akWoodMat);
-      woodHandguard.position.set(0.24, -0.19, -0.65);
-      group.add(woodHandguard);
-      // gas tube above the barrel, distinctive AK silhouette
-      const gasTube = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.32, 8), akMetalMat);
-      gasTube.rotation.x = Math.PI / 2;
-      gasTube.position.set(0.24, -0.145, -0.62);
-      group.add(gasTube);
-      // slant-cut muzzle brake, the classic AK silhouette at the barrel tip
-      const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.022, 0.09, 8), akMetalMat);
-      muzzleBrake.rotation.x = Math.PI / 2;
-      muzzleBrake.position.set(0.24, -0.185, -0.55 - 0.42 - 0.05);
-      group.add(muzzleBrake);
-      // hooded ring around the front sight post
-      const sightHood = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.005, 6, 10), akMetalMat);
-      sightHood.position.copy(sightPost.position); sightHood.position.y += 0.02;
-      group.add(sightHood);
-      // rear sight leaf near the back of the receiver
-      const rearSightLeaf = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.025, 0.05), akMetalMat);
-      rearSightLeaf.position.set(0.24, -0.115, -0.28);
-      rearSightLeaf.rotation.x = -0.3;
-      group.add(rearSightLeaf);
+      // AKM silhouette built from separate steel, laminate and polymer components. The curved
+      // magazine is a tube rather than three intersecting boxes, so it reads as one manufactured
+      // part in motion and during reloads.
+      const receiver = weaponBox(0.11, 0.135, 0.43, akMetalMat, 0.025);
+      receiver.position.set(0.24, -0.205, -0.39);
+      const dustCover = weaponBox(0.095, 0.045, 0.34, akMetalMat, 0.018);
+      dustCover.position.set(0.24, -0.132, -0.42);
+      const stock = weaponBox(0.082, 0.105, 0.34, akWoodMat, 0.025);
+      stock.position.set(0.24, -0.22, -0.02); stock.rotation.y = -0.06;
+      const grip = weaponBox(0.065, 0.17, 0.07, akWoodMat, 0.02);
+      grip.position.set(0.24, -0.335, -0.2); grip.rotation.x = 0.22;
+      const handguard = weaponBox(0.09, 0.09, 0.34, akWoodMat, 0.022);
+      handguard.position.set(0.24, -0.195, -0.68);
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.024, 0.48, 20), akMetalMat);
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0.24, -0.185, -0.99);
+      const gasTube = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.36, 16), akMetalMat);
+      gasTube.rotation.x = Math.PI / 2; gasTube.position.set(0.24, -0.135, -0.73);
+      const magazineCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0, 0.01, 0), new THREE.Vector3(0, -0.07, -0.015),
+        new THREE.Vector3(0, -0.16, -0.045), new THREE.Vector3(0, -0.24, -0.11)
+      ]);
+      magazine = new THREE.Mesh(new THREE.TubeGeometry(magazineCurve, 12, 0.036, 10, false), gunMat);
+      magazine.position.set(0.24, -0.27, -0.405);
+      const magazineFloor = weaponBox(0.065, 0.035, 0.08, gunMat, 0.012);
+      magazineFloor.position.set(0.24, -0.53, -0.52);
+      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.008, 8, 16, Math.PI * 1.35), akMetalMat);
+      triggerGuard.rotation.z = Math.PI * 0.35; triggerGuard.position.set(0.24, -0.285, -0.255);
+      const rearSight = weaponBox(0.025, 0.03, 0.09, akMetalMat, 0.008);
+      rearSight.position.set(0.24, -0.105, -0.29); rearSight.rotation.x = -0.24;
+      const frontSightBase = weaponBox(0.055, 0.035, 0.06, akMetalMat, 0.01);
+      frontSightBase.position.set(0.24, -0.145, -1.18);
+      const frontSightPost = weaponBox(0.016, 0.06, 0.018, akMetalMat, 0.006);
+      frontSightPost.position.set(0.24, -0.1, -1.18);
+      const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.026, 0.11, 16), akMetalMat);
+      muzzleBrake.rotation.x = Math.PI / 2; muzzleBrake.position.set(0.24, -0.185, -1.25);
+      const chargingHandle2 = weaponBox(0.025, 0.025, 0.08, akMetalMat, 0.008);
+      chargingHandle2.position.set(0.185, -0.19, -0.3);
+      group.add(receiver, dustCover, stock, grip, handguard, barrel, gasTube, magazine, magazineFloor, triggerGuard, rearSight, frontSightBase, frontSightPost, muzzleBrake, chargingHandle2);
+      chargingHandle = chargingHandle2;
+      muzzle.set(0.24, -0.185, -1.305);
       break;
     }
     case 'm4a4': {
