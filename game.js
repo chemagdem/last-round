@@ -1521,10 +1521,72 @@ function getSpawnYaw(team){
 }
 
 
+// ---------- Map: Skyline (industrial rooftop) ----------
+// A compact vertical-feeling rooftop arena: a central service block creates two lanes,
+// parapets provide readable boundaries, and HVAC units/vents create close-range cover.
+function buildSkylineMap(){
+  WORLD_SIZE = 72;
+  sky.material.map = desertSkyGradientTexture(); sky.material.needsUpdate = true;
+  scene.fog.color.set(0x667687); scene.fog.density = 0.0022;
+  hemi.color.set(0xaac3d8); hemi.groundColor.set(0x26313d); hemi.intensity = 0.95;
+  sun.color.set(0xffd4a0); sun.intensity = 1.15;
+  fillLight.color.set(0x91b7d9); fillLight.intensity = 0.42;
+
+  const half = 33, wallH = 2.4, wallThk = 1.1;
+  groundHeightAt = () => 0;
+  const floorMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_floor.avif', 18, 18), roughness: 0.92, color: 0x9ba0a2 });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(half * 2, half * 2), floorMat);
+  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); floorMeshes.push(floor);
+
+  const parapetMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/warehouse_wall.avif', 10, 1), roughness: 0.86, color: 0x6c7479 });
+  [[0, -half, half * 2, wallH, wallThk], [0, half, half * 2, wallH, wallThk], [-half, 0, wallThk, wallH, half * 2], [half, 0, wallThk, wallH, half * 2]].forEach(([x, z, w, h, d]) => {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), parapetMat);
+    wall.position.set(x, h / 2, z); wall.castShadow = true; wall.receiveShadow = true; scene.add(wall); addBox(wall);
+  });
+  addPerimeterWalls();
+
+  const concreteMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 3, 2), roughness: 0.74, color: 0x70777b });
+  const hazardMat = new THREE.MeshStandardMaterial({ map: hazardStripeTexture(), roughness: 0.9 });
+  const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 });
+  crateMat.userData.penetrable = true; crateMat.userData.minimapProp = true;
+  concreteMat.userData.minimapProp = true;
+
+  // central service block: three-sided cover leaves four clear routes through the map
+  makeBoxProp(0, -3.8, 16, 2.8, 1.2, concreteMat);
+  makeBoxProp(0, 3.8, 16, 2.8, 1.2, concreteMat);
+  makeBoxProp(-7.4, 0, 1.2, 2.8, 6.4, concreteMat);
+  makeBoxProp(7.4, 0, 1.2, 2.8, 6.4, concreteMat);
+  [[-20, -18], [20, -18], [-20, 18], [20, 18]].forEach(([x, z]) => makeBoxProp(x, z, 3.2, 2.1, 3.2, crateMat));
+  [[-13, -13], [13, -13], [-13, 13], [13, 13], [-25, 0], [25, 0]].forEach(([x, z]) => makeBoxProp(x, z, 2.2, 1.5, 2.2, concreteMat));
+
+  // hazard stripes around the service block make the playable lanes legible from first spawn
+  [[0, -5.35, 16, 0.45], [0, 5.35, 16, 0.45]].forEach(([x, z, w, d]) => {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(w, d), hazardMat);
+    strip.rotation.x = -Math.PI / 2; strip.position.set(x, 0.025, z); strip.material.map.repeat.set(4, 1); scene.add(strip);
+  });
+
+  // rooftop beacons and a soft central pool of light give Skyline a distinct night-match identity
+  const beaconMat = new THREE.MeshStandardMaterial({ color: 0xff3d32, emissive: 0xff1c16, emissiveIntensity: 1.6 });
+  [[-27, -27], [27, -27], [-27, 27], [27, 27]].forEach(([x, z]) => {
+    const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 1.5, 8), beaconMat);
+    beacon.position.set(x, wallH + 0.75, z); scene.add(beacon);
+    const light = new THREE.PointLight(0xff3328, 1.6, 10, 2); light.position.set(x, wallH + 1.2, z); scene.add(light);
+  });
+  const centerLight = new THREE.PointLight(0x9fc8ff, 3.5, 24, 2); centerLight.position.set(0, 7, 0); scene.add(centerLight);
+
+  const spawnZoneA = { xMin: -22, xMax: 22, zMin: -29, zMax: -23 };
+  const spawnZoneB = { xMin: -22, xMax: 22, zMin: 23, zMax: 29 };
+  return {
+    spawn: new THREE.Vector3(0, 2, -26), tSpawn: new THREE.Vector3(0, 2, -26), ctSpawn: new THREE.Vector3(0, 2, 26),
+    tSpawnZone: spawnZoneA, ctSpawnZone: spawnZoneB, sites: []
+  };
+}
+
 const MAPS = {
   arena: { name: 'Desert', build: buildArenaMap },
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
-  subway: { name: 'Subway', build: buildSubwayMap }
+  subway: { name: 'Subway', build: buildSubwayMap },
+  skyline: { name: 'Skyline', build: buildSkylineMap }
 };
 let selectedMap = 'arena';
 
@@ -4691,6 +4753,23 @@ function renderSubwayThumbnail(theme){
 }
 document.querySelector('.mapCard[data-map="subway"] .swatch').style.backgroundImage =
   `url(${renderSubwayThumbnail({ bg: '#1c1e22', platform: '#cfc9ba', pit: '#2b2f33', train: '#3a4650', wall: '#7a6a3a', wallLine: '#0d0d0d', spawn: 'rgba(229,71,60,0.25)' })})`;
+function renderSkylineThumbnail(){
+  const size = 200;
+  const cvs = document.createElement('canvas'); cvs.width = size; cvs.height = size;
+  const ctx = cvs.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, size, size); grad.addColorStop(0, '#607080'); grad.addColorStop(1, '#1b242d');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#899295'; ctx.fillRect(12, 12, 176, 176);
+  ctx.strokeStyle = '#d44b3e'; ctx.lineWidth = 5; ctx.strokeRect(12, 12, 176, 176);
+  ctx.fillStyle = '#4f595e'; ctx.fillRect(59, 59, 82, 82);
+  ctx.fillStyle = '#252c30'; ctx.fillRect(52, 52, 96, 9); ctx.fillRect(52, 139, 96, 9);
+  ctx.fillRect(52, 61, 9, 87); ctx.fillRect(139, 61, 9, 87);
+  ctx.fillStyle = '#30383c';
+  [[35,35],[165,35],[35,165],[165,165],[28,100],[172,100]].forEach(([x,y]) => ctx.fillRect(x - 7, y - 7, 14, 14));
+  ctx.fillStyle = 'rgba(229,71,60,.28)'; ctx.fillRect(18, 15, 164, 25); ctx.fillRect(18, 160, 164, 25);
+  return cvs.toDataURL();
+}
+document.querySelector('.mapCard[data-map="skyline"] .swatch').style.backgroundImage = `url(${renderSkylineThumbnail()})`;
 
 document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
