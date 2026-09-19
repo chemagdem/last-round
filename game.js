@@ -1113,7 +1113,7 @@ const WEAPONS = {
   ak47:   { name: 'AK-47', slot: 'primary', price: 2500, dmg: 34, mag: 30, reserve: 90, fireRate: 0.1, range: 150, reloadDuration: 1.7, zoomFov: 48, kickPush: 0.05, kickTilt: 0.07 },
   m4a4:   { name: 'M4A4', slot: 'primary', price: 2900, dmg: 31, mag: 30, reserve: 90, fireRate: 0.095, range: 150, reloadDuration: 1.65, zoomFov: 48, kickPush: 0.045, kickTilt: 0.06 },
   m4a1:   { name: 'M4A1-S', slot: 'primary', price: 2750, dmg: 35, mag: 20, reserve: 80, fireRate: 0.11, range: 150, reloadDuration: 1.6, zoomFov: 45, kickPush: 0.04, kickTilt: 0.055 },
-  awp:    { name: 'AWP', slot: 'primary', price: 4500, dmg: 115, mag: 5, reserve: 30, fireRate: 1.35, range: 320, reloadDuration: 2.4, zoomFov: 12, scope: true, scopeFov2: 5, kickPush: 0.15, kickTilt: 0.2 },
+  awp:    { name: 'AWP', slot: 'primary', price: 4500, dmg: 115, mag: 5, reserve: 30, fireRate: 1.35, range: 320, reloadDuration: 2.4, zoomFov: 12, scope: true, scopeFov2: 5, kickPush: 0.15, kickTilt: 0.2, boltAction: true },
   grenade:{ name: 'Grenade', slot: 'grenade', price: 300, dmg: 130, radius: 7, fireRate: 0.8 },
   smoke:  { name: 'Smoke Grenade', slot: 'smoke', price: 400, radius: 9, duration: 14, fireRate: 0.8 }
 };
@@ -1180,7 +1180,7 @@ let currentVisual = null; // { group, magazine, chargingHandle, magRestY, charge
 
 function buildWeaponVisual(id){
   const group = new THREE.Group();
-  let magazine = null, chargingHandle = null, muzzle = new THREE.Vector3(0.24, -0.185, -1.0), knifeParts = null;
+  let magazine = null, chargingHandle = null, muzzle = new THREE.Vector3(0.24, -0.185, -1.0), knifeParts = null, boltHandle = null;
 
   function rifleModel(magLen, stockLen, barrelLen, mat){
     const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.5), gunMat);
@@ -1506,7 +1506,7 @@ function buildWeaponVisual(id){
       handguard.position.set(0.24, -0.185, -0.85);
       group.add(handguard);
       // bolt handle sticking out the side of the receiver
-      const boltHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.09, 8), gunMat);
+      boltHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.09, 8), gunMat);
       boltHandle.rotation.z = Math.PI / 2;
       boltHandle.position.set(0.31, -0.185, -0.28);
       group.add(boltHandle);
@@ -1547,7 +1547,10 @@ function buildWeaponVisual(id){
   flashLight.position.copy(muzzle || new THREE.Vector3(0.22, -0.2, -0.6));
   flashSprite.position.copy(flashLight.position);
   group.add(flashLight, flashSprite);
-  return { group, magazine, chargingHandle, magRestY: magazine ? magazine.position.y : 0, chargeRestX: chargingHandle ? chargingHandle.position.x : 0, muzzle, knifeParts };
+  return {
+    group, magazine, chargingHandle, magRestY: magazine ? magazine.position.y : 0, chargeRestX: chargingHandle ? chargingHandle.position.x : 0, muzzle, knifeParts,
+    boltHandle, boltRestZ: boltHandle ? boltHandle.position.z : 0, boltRestX: boltHandle ? boltHandle.position.x : 0
+  };
 }
 
 function equipSlot(slot){
@@ -1654,6 +1657,7 @@ document.addEventListener('mousedown', e => {
         throwGrenade(currentSlot === 'grenade' ? 'frag' : 'smoke', false);
       }
     } else if (def.scope) {
+      if (def.boltAction && boltCyclingT > 0) return; // busy working the bolt - the scope comes back on its own once it's done
       // scoped weapons (sniper) click-cycle through zoom levels instead of hold-to-aim:
       // hip -> scoped -> extra zoom -> back to hip
       player.scopeLevel = (player.scopeLevel + 1) % 3;
@@ -1775,6 +1779,35 @@ function updateReloadAnimation(dt){
   }
 }
 
+// bolt-action cycling between shots (AWP): the scope drops the instant the shot fires (see
+// fireWeapon), then automatically comes back once this timer runs out and the bolt handle has
+// finished its animated back-and-forth, restoring whatever zoom level was active before firing
+const BOLT_CYCLE_DURATION = 1.0;
+let boltCyclingT = 0;
+let boltRescopeLevel = 0;
+function updateBoltCycle(dt){
+  if (boltCyclingT > 0) {
+    boltCyclingT = Math.max(0, boltCyclingT - dt);
+    if (boltCyclingT === 0 && boltRescopeLevel > 0 && currentWeaponDef().boltAction) {
+      player.scopeLevel = boltRescopeLevel;
+      player.ads = true;
+    }
+  }
+  const boltHandle = currentVisual.boltHandle;
+  if (!boltHandle) return;
+  if (boltCyclingT <= 0) {
+    boltHandle.position.z = currentVisual.boltRestZ;
+    boltHandle.position.x = currentVisual.boltRestX;
+    return;
+  }
+  const p = 1 - boltCyclingT / BOLT_CYCLE_DURATION; // 0 -> 1 over the cycle
+  // lift+pull back for the first half, push forward+drop for the second - a simple two-stroke
+  // stand-in for "lift, pull, push, lock"
+  const pull = p < 0.5 ? Math.sin((p / 0.5) * (Math.PI / 2)) : Math.cos(((p - 0.5) / 0.5) * (Math.PI / 2));
+  boltHandle.position.z = currentVisual.boltRestZ + pull * 0.12;
+  boltHandle.position.x = currentVisual.boltRestX + pull * 0.02;
+}
+
 function updateKnifeFlip(dt){
   if (knifeFlipT < 0 || !currentVisual.knifeParts) return;
   knifeFlipT += dt;
@@ -1854,6 +1887,15 @@ function fireWeapon(){
   fireCooldown = def.fireRate;
   updateAmmoHUD();
   if (gameMode !== 'practice' && state.mag <= 0 && state.reserve > 0) startReload(); // out of ammo in the mag - reload without waiting for another trigger pull
+
+  if (def.boltAction) {
+    // working the bolt between shots kicks the scope off, then hands it back once the bolt
+    // animation finishes - remembers whatever zoom level was active so it comes back the same way
+    boltRescopeLevel = player.scopeLevel;
+    player.ads = false;
+    player.scopeLevel = 0;
+    boltCyclingT = BOLT_CYCLE_DURATION;
+  }
 
   const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
   if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
@@ -3528,6 +3570,7 @@ function updatePlayer(dt){
   if (mouseLocked && mouseDown && fireCooldown <= 0) fireWeapon();
 
   updateReloadAnimation(dt);
+  updateBoltCycle(dt);
   updateKnifeFlip(dt);
   updateKnifeSwing(dt);
 }
