@@ -25,7 +25,7 @@ class SoundEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(this.ctx.destination);
-    this.loadSample('awp', 'assets/cs_go-awp-sound.mp3');
+    this.loadSample('awp', 'assets/awp_02.mp3');
     this.loadSample('scopeClick', 'assets/awp-zoom-sound-effect-cs-go.mp3');
     this.loadSample('ak47', 'assets/ak-47-mp3.mp3');
     this.loadSample('reload', 'assets/uzi-reload.mp3');
