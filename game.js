@@ -1666,6 +1666,7 @@ camera.fov = baseFov;
 let shakeIntensity = 0;
 let recoilKick = 0; // additive pitch kick (radians), decays
 let recoilYaw = 0; // additive horizontal kick (radians), decays
+let deagleRecoilKick = 0; // dedicated upward camera impulse for the heavy Desert Eagle
 let sprayIndex = 0;
 let lastFireTime = -999;
 
@@ -1686,7 +1687,7 @@ const SPRAY_PATTERNS = {
   m4a4: buildSprayPattern(30, 0.012, 0.006, 2.6),
   m4a1: buildSprayPattern(20, 0.011, 0.005, 2.6),
   glock: buildSprayPattern(20, 0.009, 0.004, 3),
-  deagle: buildSprayPattern(7, 0.02, 0.008, 2),
+  deagle: buildSprayPattern(7, 0.026, 0.008, 2),
   tec9: buildSprayPattern(18, 0.009, 0.004, 3),
   duals: buildSprayPattern(30, 0.008, 0.004, 3),
   awp: buildSprayPattern(5, 0.03, 0.01, 2)
@@ -1749,6 +1750,39 @@ const goldWeaponMat = new THREE.MeshStandardMaterial({
   roughness: 0.3,
   metalness: 0.88
 });
+const goldTexture = goldWeaponMat.map;
+const SKIN_CATALOG = {
+  gold: { name: 'Gold Standard', meta: 'Metallic gold · equipped by default', preview: 'gold', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.88 },
+  carbon: { name: 'Carbon Black', meta: 'Brushed tactical carbon', preview: 'carbon', owned: true, color: 0x63707a, roughness: 0.42, metalness: 0.78 },
+  crimson: { name: 'Crimson Core', meta: 'Red alloy · prototype finish', preview: 'crimson', owned: true, color: 0xd23a32, roughness: 0.34, metalness: 0.84 }
+};
+const PROFILE_STORAGE_KEY = 'lastRoundProfile';
+const DEFAULT_PROFILE = { name: 'Player', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
+let playerProfile = { ...DEFAULT_PROFILE };
+try {
+  const savedProfile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
+  if (savedProfile && typeof savedProfile === 'object') playerProfile = { ...DEFAULT_PROFILE, ...savedProfile };
+} catch (err) { /* local storage can be disabled in private browsing */ }
+if (!SKIN_CATALOG[playerProfile.equippedSkin]) playerProfile.equippedSkin = 'gold';
+function savePlayerProfile(){
+  try { localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(playerProfile)); } catch (err) { /* keep this session usable */ }
+}
+function profileRank(rating){
+  if (rating >= 1800) return 'ELITE';
+  if (rating >= 1500) return 'MASTER';
+  if (rating >= 1250) return 'VETERAN';
+  if (rating >= 1000) return 'ROOKIE';
+  return 'RECRUIT';
+}
+function applyEquippedSkin(){
+  const skin = SKIN_CATALOG[playerProfile.equippedSkin] || SKIN_CATALOG.gold;
+  goldWeaponMat.map = skin.preview === 'gold' ? goldTexture : null;
+  goldWeaponMat.color.setHex(skin.color);
+  goldWeaponMat.roughness = skin.roughness;
+  goldWeaponMat.metalness = skin.metalness;
+  goldWeaponMat.needsUpdate = true;
+}
+applyEquippedSkin();
 const gunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.7, metalness: 0.4 });
 const gunMatLight = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#33352f'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.75, metalness: 0.35 });
 const woodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#5a3d24'), bumpMap: weaponWoodBump, bumpScale: 0.01, roughness: 0.6 });
@@ -2647,6 +2681,11 @@ function fireWeapon(){
   const adsMul = player.ads ? 0.45 : 1;
   recoilKick += sprayStep.dy * adsMul;
   recoilYaw += sprayStep.dx * adsMul;
+  if (weaponId === 'deagle') {
+    // Negative camera pitch is an upward kick in Three.js' YXZ view convention. Keep this
+    // separate from the learnable spray pattern so the pistol snaps upward and then settles.
+    deagleRecoilKick += (player.ads ? 0.075 : 0.12);
+  }
   shakeIntensity = Math.min(shakeIntensity + (player.ads ? 0.15 : 0.28), 1.2);
   // per-weapon visual kick on the gun model itself - snappy shove back + muzzle-up tilt, both
   // spring back to rest via the existing lerps in updatePlayer (AWP kicks by far the hardest)
@@ -3742,7 +3781,26 @@ let netMyId = null;
 let netTeamSize = 1;
 let localPlayerName = 'Player';
 let netRoster = []; // [{id, team, isBot, name}] - authoritative on host, mirrored on clients
+let matchResultRecorded = false;
 const PVP_WEAPON_ROTATION = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp', 'knife'];
+
+function recordPvpResult(won){
+  if (matchResultRecorded) return 0;
+  matchResultRecorded = true;
+  // Until authenticated opponent ratings exist on a server, use the provisional 1000 baseline.
+  // The K-factor keeps the rating responsive for new players while remaining bounded over time.
+  const opponentRating = 1000;
+  const expected = 1 / (1 + Math.pow(10, (opponentRating - playerProfile.rating) / 400));
+  const score = won ? 1 : 0;
+  const delta = Math.round(32 * (score - expected));
+  playerProfile.rating = Math.max(0, playerProfile.rating + delta);
+  playerProfile.matches += 1;
+  if (won) playerProfile.wins += 1;
+  else playerProfile.losses += 1;
+  savePlayerProfile();
+  renderProfileUI();
+  return delta;
+}
 
 function netSend(conn, msg){
   if (conn && conn.open) conn.send(msg);
@@ -4085,6 +4143,7 @@ function startPvpMatch(){
   roundState.tWins = 0;  // team B score
   netStats = {};
   recentAttackers = [];
+  matchResultRecorded = false;
   warmupSpawnPlaced = false; // buildMap() always drops everyone at the map's generic (team A) spawn point - this needs correcting to the player's real team as soon as it's known, or a joining team B player stays stuck on team A's side for the whole warmup
   if (netRole === 'host') startWarmup();
 }
@@ -4252,9 +4311,11 @@ function applyPvpRoundEnd(winnerTeam, reason, scoreA, scoreB){
   const youWon = winnerTeam === myTeam();
   showWaveBanner(`${youWon ? 'ROUND WON' : 'ROUND LOST'} — ${reason}`);
   if (scoreA >= roundState.roundsToWin || scoreB >= roundState.roundsToWin) {
+    const eloDelta = recordPvpResult(youWon);
     setTimeout(() => {
       const el = document.getElementById('waveBanner');
-      el.textContent = (winnerTeam === myTeam()) ? 'VICTORY' : 'DEFEAT';
+      const sign = eloDelta >= 0 ? '+' : '';
+      el.textContent = `${(winnerTeam === myTeam()) ? 'VICTORY' : 'DEFEAT'} · ELO ${sign}${eloDelta}`;
       el.style.opacity = 1;
     }, 2200);
     return;
@@ -4517,7 +4578,8 @@ function updatePlayer(dt){
 
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw + recoilYaw + shakeX;
-  camera.rotation.x = player.pitch + recoilKick + shakeY;
+  deagleRecoilKick += (0 - deagleRecoilKick) * Math.min(1, dt * 11);
+  camera.rotation.x = player.pitch + recoilKick - deagleRecoilKick + shakeY;
 
   // ADS fov transition - each weapon zooms to its own zoomFov (AWP zooms in much further than iron
   // sights); a scoped weapon at scope level 2 zooms in further still via scopeFov2
@@ -4970,6 +5032,54 @@ soldierReadyPromise.then(() => {
 
 let selectedMode = 'pvp';
 
+function renderProfileUI(){
+  const name = (playerProfile.name || 'Player').trim() || 'Player';
+  const nameEl = document.getElementById('profileName');
+  const rankEl = document.getElementById('profileRank');
+  const ratingEl = document.getElementById('profileRating');
+  const recordEl = document.getElementById('profileRecord');
+  if (nameEl) nameEl.textContent = name;
+  if (rankEl) rankEl.firstChild.textContent = profileRank(playerProfile.rating) + ' ';
+  if (ratingEl) ratingEl.textContent = playerProfile.rating;
+  if (recordEl) recordEl.textContent = `${playerProfile.wins}W — ${playerProfile.losses}L · ${playerProfile.matches} MATCHES`;
+}
+
+function renderInventory(){
+  const grid = document.getElementById('inventoryGrid');
+  if (!grid) return;
+  grid.innerHTML = Object.entries(SKIN_CATALOG).map(([id, skin]) => `
+    <button class="skinCard ${playerProfile.equippedSkin === id ? 'equipped' : ''}" type="button" data-skin="${id}">
+      <span class="skinPreview ${skin.preview}"></span>
+      <span class="skinName">${skin.name}</span>
+      <span class="skinMeta">${skin.meta}</span>
+      <span class="skinState">${playerProfile.equippedSkin === id ? 'EQUIPPED' : 'EQUIP'}</span>
+    </button>`).join('');
+  grid.querySelectorAll('[data-skin]').forEach(card => card.addEventListener('click', () => {
+    playerProfile.equippedSkin = card.dataset.skin;
+    applyEquippedSkin();
+    savePlayerProfile();
+    renderInventory();
+  }));
+}
+
+function setInventoryOpen(open){
+  const modal = document.getElementById('inventoryModal');
+  if (!modal) return;
+  modal.classList.toggle('open', open);
+  if (open) renderInventory();
+}
+
+renderProfileUI();
+localPlayerName = playerProfile.name || 'Player';
+document.getElementById('inventoryBtn').addEventListener('click', () => setInventoryOpen(true));
+document.getElementById('closeInventory').addEventListener('click', () => setInventoryOpen(false));
+document.getElementById('inventoryModal').addEventListener('click', e => {
+  if (e.target.id === 'inventoryModal') setInventoryOpen(false);
+});
+document.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && document.getElementById('inventoryModal').classList.contains('open')) setInventoryOpen(false);
+});
+
 document.querySelectorAll('.mapCard').forEach(card => {
   preloadMapTextures(card.dataset.map);
   card.addEventListener('click', () => {
@@ -5094,7 +5204,11 @@ document.querySelectorAll('.pvpChoiceBtn').forEach(btn => {
 
 document.getElementById('playerNameInput').addEventListener('input', e => {
   localPlayerName = e.target.value.trim() || 'Player';
+  playerProfile.name = localPlayerName;
+  savePlayerProfile();
+  renderProfileUI();
 });
+document.getElementById('playerNameInput').value = playerProfile.name === 'Player' ? '' : playerProfile.name;
 
 document.getElementById('pvpHostBtn').addEventListener('click', () => {
   document.getElementById('pvpStatus').textContent = 'Setting up...';
