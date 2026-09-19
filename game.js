@@ -1296,7 +1296,11 @@ function buildSubwayMap(){
   const trainMat = new THREE.MeshStandardMaterial({ color: 0x455966, roughness: 0.55, metalness: 0.3, emissive: 0x0d1418, emissiveIntensity: 0.4 });
 
   const wallBaseY = -2, wallH = 11;
-  [[0, -halfLen - wallThk / 2, eastX - westX, wallH, wallThk], [0, halfLen + wallThk / 2, eastX - westX, wallH, wallThk],
+  const wallCx = (westX + eastX) / 2;
+  // the end walls must be centered on the corridor's actual midpoint (not x=0) - the platform
+  // and pit are asymmetric widths, so a wall centered at 0 left a gap at the tunnel-side end,
+  // showing the sky gradient through it and reading as a haze right at the far end of the corridor
+  [[wallCx, -halfLen - wallThk / 2, eastX - westX, wallH, wallThk], [wallCx, halfLen + wallThk / 2, eastX - westX, wallH, wallThk],
    [westX, 0, wallThk, wallH, halfLen * 2 + wallThk * 2], [eastX, 0, wallThk, wallH, halfLen * 2 + wallThk * 2]]
     .forEach(([x, z, w, h, d]) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
