@@ -788,6 +788,18 @@ function applyDesertAtmosphere(){
   fillLight.color.set(0xe0c9a0); fillLight.intensity = 0.32;
 }
 
+// dim interior lighting for the Warehouse map - mostly dark, with the hanging lamps built into
+// the map itself (see buildWarehouseMap) doing the real work of lighting the floor
+function applyIndustrialAtmosphere(){
+  sky.material.map = desertSkyGradientTexture(); // barely visible under a roof, just needs to not be blank
+  sky.material.needsUpdate = true;
+  scene.fog.color.set(0x1c1c1c);
+  scene.fog.density = 0.028;
+  hemi.color.set(0x3a3a42); hemi.groundColor.set(0x131311); hemi.intensity = 0.3;
+  sun.color.set(0x9aa0a8); sun.intensity = 0.15;
+  fillLight.color.set(0x505050); fillLight.intensity = 0.12;
+}
+
 // ---------- World / Map system ----------
 let WORLD_SIZE = 220;
 let groundHeightAt = (x, z) => 0;
@@ -1012,6 +1024,121 @@ function buildArenaMap(){
   };
 }
 
+// ---------- Map: Warehouse (abandoned factory interior) ----------
+// Deliberately the exact same layout as Arena/Desert (same crate rows, elevated strip, spawn
+// zones, low walls - just call sites copy-pasted with different materials) rather than a new
+// design - the ask was "same style of crates and cover, symmetric, but different theme", so only
+// the reskin (indoor ceiling, dim hanging lights, worn metal instead of sandstone/sand) changes.
+function buildWarehouseMap(){
+  WORLD_SIZE = 60;
+  applyIndustrialAtmosphere();
+
+  const ELEV_CX = -17, ELEV_HALF_W = 3.5, ELEV_HALF_D = 20, ELEV_HEIGHT = 2.0;
+  groundHeightAt = (x, z) => plateau(x, z, ELEV_CX, 0, ELEV_HALF_W, ELEV_HALF_D, ELEV_HEIGHT, 6);
+
+  const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 60, 60);
+  groundGeo.rotateX(-Math.PI / 2);
+  const gPos = groundGeo.attributes.position;
+  for (let i = 0; i < gPos.count; i++) {
+    gPos.setY(i, groundHeightAt(gPos.getX(i), gPos.getZ(i)));
+  }
+  groundGeo.computeVertexNormals();
+  const floorTex = loadTiledTexture('assets/textures/metal.jpg', 14, 14);
+  const groundMat = new THREE.MeshStandardMaterial({ map: floorTex, color: 0x9a9aa0, roughness: 0.85, metalness: 0.3 }); // desaturating tint over the (red) metal photo turns it into a worn grey/steel factory floor
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const wallTex = metalScratchTexture('#3a3a3c'); wallTex.repeat.set(8, 2); // dark worn steel, with the rust/pitting metalScratchTexture already bakes in
+  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, bumpMap: metalBumpTexture(), bumpScale: 0.02, roughness: 0.9, metalness: 0.4 });
+  const crateMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/box.png', 1, 1), roughness: 0.9 }); // same crate look as Desert
+  crateMat.userData.penetrable = true;
+  crateMat.userData.minimapProp = true;
+  const lowWallTex = metalScratchTexture('#4a4a48'); lowWallTex.repeat.set(2, 1);
+  const lowWallMat = new THREE.MeshStandardMaterial({ map: lowWallTex, bumpMap: metalBumpTexture(), bumpScale: 0.02, roughness: 0.85, metalness: 0.35 });
+  lowWallMat.userData.minimapProp = true;
+
+  const halfArenaZ = 27, eastX = 27, westX = ELEV_CX - ELEV_HALF_W - 0.5, wallThk = 2;
+  const wallCx = (eastX + westX) / 2, wallSpanX = (eastX - westX) + wallThk * 2;
+  const wallBaseY = -1, wallH = 10;
+  [[wallCx, -halfArenaZ, wallSpanX, wallH, wallThk], [wallCx, halfArenaZ, wallSpanX, wallH, wallThk],
+   [westX, 0, wallThk, wallH, halfArenaZ * 2 + wallThk * 2], [eastX, 0, wallThk, wallH, halfArenaZ * 2 + wallThk * 2]]
+    .forEach(([x, z, w, h, d]) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+      mesh.position.set(x, wallBaseY + h / 2, z);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      scene.add(mesh);
+      addBox(mesh);
+    });
+  addPerimeterWalls();
+
+  // a roof closing the building off, otherwise it'd just be an open-topped box under the sky
+  const ceilingTex = metalScratchTexture('#26262a'); ceilingTex.repeat.set(10, 10);
+  const ceilingMat = new THREE.MeshStandardMaterial({ map: ceilingTex, roughness: 1, side: THREE.DoubleSide });
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(wallSpanX, halfArenaZ * 2 + wallThk * 2), ceilingMat);
+  ceiling.rotation.x = Math.PI / 2;
+  ceiling.position.set(wallCx, wallBaseY + wallH, 0);
+  ceiling.receiveShadow = true;
+  scene.add(ceiling);
+
+  // hanging lamps - the only real light sources indoors (see applyIndustrialAtmosphere, which
+  // keeps the general ambient/sun very dim), giving the floor uneven pools of light and shadow
+  const lampFixtureMat = new THREE.MeshStandardMaterial({ color: 0x0d0d0d, roughness: 0.5, metalness: 0.6 });
+  const lampBulbMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
+  [[-8, -16], [-8, 0], [-8, 16], [10, -16], [10, 0], [10, 16]].forEach(([x, z]) => {
+    const lampY = 6.5;
+    const fixture = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 0.3, 10), lampFixtureMat);
+    fixture.position.set(x, lampY, z);
+    scene.add(fixture);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), lampBulbMat);
+    bulb.position.set(x, lampY - 0.25, z);
+    scene.add(bulb);
+    const light = new THREE.PointLight(0xffcf9a, 3, 16, 2);
+    light.position.set(x, lampY - 0.3, z);
+    scene.add(light);
+  });
+
+  // crate rows screening each spawn zone's exit into the main area - identical layout to Desert
+  const rowXs = [-11, -7.55, -4.1, -0.65];
+  rowXs.forEach(x => { makeBoxProp(x, -15, 1.7, 1.7, 1.7, crateMat); makeBoxProp(x, 15, 1.7, 1.7, 1.7, crateMat); });
+
+  const barrelMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 1, 2), roughness: 0.4, metalness: 0.7 });
+  barrelMat.userData.minimapProp = true;
+  function addBarrel(x, z){
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 12), barrelMat);
+    barrel.position.set(x, groundHeightAt(x, z) + 0.8, z);
+    barrel.castShadow = true; barrel.receiveShadow = true;
+    scene.add(barrel);
+    addBox(barrel);
+  }
+
+  const entryRowXs = [-9, -5, -1, 3, 7, 11];
+  entryRowXs.forEach(x => { makeBoxProp(x, -18.5, 1.6, 1.6, 1.6, crateMat); makeBoxProp(x, 18.5, 1.6, 1.6, 1.6, crateMat); });
+  [[14, -19], [14, 19]].forEach(([x, z]) => addBarrel(x, z));
+
+  makeBoxProp(-3, -4, 1.6, 1.6, 1.6, crateMat);
+  makeBoxProp(7, 3, 1.6, 1.6, 1.6, crateMat);
+  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x, z));
+
+  makeBoxProp(ELEV_CX, -10, 1.5, 1.5, 1.5, crateMat);
+  makeBoxProp(ELEV_CX, 3, 1.5, 1.5, 1.5, crateMat);
+
+  makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, -17, 2.6, 1.05, 1.1, lowWallMat);
+  makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, 17, 2.6, 1.05, 1.1, lowWallMat);
+
+  const spawnZoneA = { xMin: -11, xMax: 18, zMin: -26, zMax: -20 };
+  const spawnZoneB = { xMin: -11, xMax: 18, zMin: 20, zMax: 26 };
+
+  return {
+    spawn: new THREE.Vector3(0, 2, -23),
+    tSpawn: new THREE.Vector3(0, 2, -23),
+    ctSpawn: new THREE.Vector3(0, 2, 23),
+    tSpawnZone: spawnZoneA,
+    ctSpawnZone: spawnZoneB,
+    sites: []
+  };
+}
+
 // picks a random point inside a map's spawn zone when one is defined (arena), otherwise falls
 // back to the fixed spawn point every other map still uses
 function getTeamSpawnPos(meta, team){
@@ -1033,7 +1160,8 @@ function getSpawnYaw(team){
 
 
 const MAPS = {
-  arena: { name: 'Desert', build: buildArenaMap }
+  arena: { name: 'Desert', build: buildArenaMap },
+  warehouse: { name: 'Warehouse', build: buildWarehouseMap }
 };
 let selectedMap = 'arena';
 
@@ -2915,7 +3043,10 @@ async function joinRoom(code){
 }
 
 function broadcastRoster(){
-  netBroadcast({ type: 'roster', roster: netRoster, teamSize: netTeamSize });
+  // carries the host's map choice too - a joining client used to always build its own locally
+  // selected map (hardcoded to Desert back when that was the only option), which would silently
+  // desync the two peers onto different geometry the moment a second map existed
+  netBroadcast({ type: 'roster', roster: netRoster, teamSize: netTeamSize, map: selectedMap });
   updateScoreboardNames();
 }
 
@@ -2946,6 +3077,7 @@ function handleNetMessage(msg, fromId){
   switch (msg.type) {
     case 'roster':
       netRoster = msg.roster; netTeamSize = msg.teamSize;
+      if (netRole === 'client' && msg.map && MAPS[msg.map]) selectedMap = msg.map;
       updateScoreboardNames();
       break;
     case 'name':
@@ -3921,6 +4053,39 @@ document.querySelectorAll('.mapCard').forEach(card => {
     updateStartButtonState();
   });
 });
+
+// top-down layout thumbnails for the map picker - both maps share the exact same crate/spawn
+// layout (see buildWarehouseMap's comment), so this draws that one real layout in each map's own
+// color theme rather than needing an actual in-game screenshot of each
+function renderMapThumbnail(theme){
+  const size = 200;
+  const cvs = document.createElement('canvas'); cvs.width = size; cvs.height = size;
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, size, size);
+  const toX = wx => (wx + 22) / 50 * size;
+  const toZ = wz => (wz + 28) / 56 * size;
+  // elevated strip
+  ctx.fillStyle = theme.elevated;
+  ctx.fillRect(toX(-20.5), toZ(-26), toX(-13.5) - toX(-20.5), toZ(26) - toZ(-26));
+  // spawn zone tint
+  ctx.fillStyle = theme.spawn;
+  ctx.fillRect(toX(-11), toZ(-26), toX(18) - toX(-11), toZ(-20) - toZ(-26));
+  ctx.fillRect(toX(-11), toZ(20), toX(18) - toX(-11), toZ(26) - toZ(20));
+  // boundary walls
+  ctx.strokeStyle = theme.wall; ctx.lineWidth = 5;
+  ctx.strokeRect(toX(-21), toZ(-27), toX(27) - toX(-21), toZ(27) - toZ(-27));
+  // crates/props
+  ctx.fillStyle = theme.crate;
+  const box = (x, z, s = 5) => ctx.fillRect(toX(x) - s / 2, toZ(z) - s / 2, s, s);
+  [-11, -7.55, -4.1, -0.65].forEach(x => { box(x, -15); box(x, 15); });
+  [-9, -5, -1, 3, 7, 11].forEach(x => { box(x, -18.5); box(x, 18.5); });
+  box(-3, -4); box(7, 3); box(-17, -10); box(-17, 3);
+  return cvs.toDataURL();
+}
+document.querySelector('.mapCard[data-map="arena"] .swatch').style.backgroundImage =
+  `url(${renderMapThumbnail({ bg: '#c9ac7a', elevated: '#a9884f', wall: '#5a3d20', crate: '#5a3d24', spawn: 'rgba(229,71,60,0.18)' })})`;
+document.querySelector('.mapCard[data-map="warehouse"] .swatch').style.backgroundImage =
+  `url(${renderMapThumbnail({ bg: '#26262a', elevated: '#38383e', wall: '#0d0d0d', crate: '#5c4428', spawn: 'rgba(229,71,60,0.22)' })})`;
 
 document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
