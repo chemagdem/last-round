@@ -52,6 +52,7 @@ class SoundEngine {
     this.loadSample('grenadeThrow', 'assets/grenade-plonk-sound-effect-tarkov-louder.mp3');
     this.loadSample('deagle', 'assets/desert-eagle-cs.mp3');
     this.loadSample('explosion', 'assets/exploded_zfp5Xgm.mp3');
+    this.loadSample('flashbang', 'assets/cs-go-flashbang.mp3');
     this.loadSample('m4a4', 'assets/m70-rifle.mp3');
     this.loadSample('smg', 'assets/wpn_45_smg_2d_01.mp3');
     this.loadSample('knifeSlash', 'assets/knife-slashing.mp3');
@@ -3209,13 +3210,33 @@ function spawnFlashPop(point){
   scene.add(s);
   particles.push({ obj: s, type: 'explosion', life: 0.25, maxLife: 0.25, vel: new THREE.Vector3(0, 0.1, 0) });
 }
+// bigger, layered frag blast: a bright core flash, a slower billowing fireball that lingers, and a
+// burst of glowing embers thrown outward - reads as a real explosion instead of one flat sprite
 function spawnExplosionFlash(point){
-  const mat = new THREE.SpriteMaterial({ map: explosionTex, transparent: true, opacity: 1, depthWrite: false });
-  const s = new THREE.Sprite(mat);
-  s.scale.set(0.6, 0.6, 1);
-  s.position.copy(point);
-  scene.add(s);
-  particles.push({ obj: s, type: 'explosion', life: 0.35, maxLife: 0.35, vel: new THREE.Vector3(0, 0.3, 0) });
+  const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: explosionTex, transparent: true, opacity: 1, depthWrite: false }));
+  core.scale.set(1.3, 1.3, 1);
+  core.position.copy(point);
+  scene.add(core);
+  particles.push({ obj: core, type: 'explosion', life: 0.22, maxLife: 0.22, vel: new THREE.Vector3(0, 0.5, 0) });
+
+  const cloud = new THREE.Sprite(new THREE.SpriteMaterial({ map: explosionTex, transparent: true, opacity: 0.85, depthWrite: false }));
+  cloud.scale.set(1.9, 1.9, 1);
+  cloud.position.copy(point).add(new THREE.Vector3(0, 0.35, 0));
+  scene.add(cloud);
+  particles.push({ obj: cloud, type: 'explosion', life: 0.9, maxLife: 0.9, vel: new THREE.Vector3(0, 1.2, 0) });
+
+  for (let i = 0; i < 16; i++) {
+    const ember = new THREE.Sprite(new THREE.SpriteMaterial({ map: explosionTex, transparent: true, opacity: 1, depthWrite: false }));
+    ember.scale.set(0.14, 0.14, 1);
+    ember.position.copy(point);
+    scene.add(ember);
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 3 + Math.random() * 6;
+    particles.push({
+      obj: ember, type: 'ember', life: 0.4 + Math.random() * 0.35, maxLife: 0.4 + Math.random() * 0.35,
+      initialOpacity: 1, vel: new THREE.Vector3(Math.cos(ang) * spd, 3 + Math.random() * 4, Math.sin(ang) * spd)
+    });
+  }
 }
 
 function updateParticles(dt){
@@ -3317,12 +3338,12 @@ function updateGrenades(dt){
 
 function explodeGrenade(point){
   if (!audio.playSample('explosion', 1)) audio.explosion();
-  shakeIntensity = Math.min(shakeIntensity + 1.2, 1.8);
+  shakeIntensity = Math.min(shakeIntensity + 1.3, 1.9);
 
-  const light = new THREE.PointLight(0xffaa55, 6, 14);
+  const light = new THREE.PointLight(0xffaa55, 10, 20);
   light.position.copy(point);
   scene.add(light);
-  setTimeout(() => scene.remove(light), 120);
+  setTimeout(() => scene.remove(light), 160);
 
   const def = WEAPONS.grenade;
   enemies.forEach(enemy => {
@@ -3335,7 +3356,7 @@ function explodeGrenade(point){
   });
 
   spawnExplosionFlash(point);
-  for (let i = 0; i < 10; i++) spawnDustPuff(point);
+  for (let i = 0; i < 16; i++) spawnDustPuff(point);
 }
 
 // distance+line-of-sight check shared by every target a flashbang can blind: calls onHit(intensity)
@@ -3355,7 +3376,7 @@ function applyFlashTo(from, point, def, onHit){
 }
 
 function detonateFlash(point){
-  if (!audio.playSample('explosion', 0.5)) audio.explosion();
+  if (!audio.playSample('flashbang', 0.9)) audio.explosion();
   const light = new THREE.PointLight(0xffffff, 9, 22);
   light.position.copy(point);
   scene.add(light);
