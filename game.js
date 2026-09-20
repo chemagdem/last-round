@@ -4,6 +4,7 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { createFounderFinish } from './founder-skin.js';
 import { buildFoundry } from './foundry-map.js';
 import { FOUNDRY } from './foundry-layout.js';
 import { TeammateSpectator } from './spectator.js';
@@ -1823,7 +1824,7 @@ scene.add(camera);
 
 const weaponMetalBump = metalBumpTexture();
 const weaponWoodBump = woodBumpTexture();
-const goldWeaponMat = new THREE.MeshStandardMaterial({
+const goldWeaponMat = new THREE.MeshPhysicalMaterial({
   map: loadTiledTexture('assets/textures/gold.png', 1.2, 2.2),
   bumpMap: weaponMetalBump,
   bumpScale: 0.0008,
@@ -1831,7 +1832,10 @@ const goldWeaponMat = new THREE.MeshStandardMaterial({
   metalness: 0.88
 });
 const goldTexture = goldWeaponMat.map;
+const founderTexture = createFounderFinish();
+let founderEntitled = false;
 const SKIN_CATALOG = {
+  founder: { name: 'First Light · 001', meta: 'FOUNDER EXCLUSIVE · Obsidian / gold inlay', preview: 'founder', color: 0xffffff, roughness: 0.3, metalness: 0.82 },
   gold: { name: 'Gold Standard', meta: 'Metallic gold · equipped by default', preview: 'gold', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.88 },
   carbon: { name: 'Carbon Black', meta: 'Brushed tactical carbon', preview: 'carbon', owned: true, color: 0x63707a, roughness: 0.42, metalness: 0.78 },
   crimson: { name: 'Crimson Core', meta: 'Red alloy · prototype finish', preview: 'crimson', owned: true, color: 0xd23a32, roughness: 0.34, metalness: 0.84 }
@@ -1840,16 +1844,14 @@ const PROFILE_STORAGE_KEY = 'lastRoundProfile';
 let cloudAccount = null;
 let cloudProfileActive = false;
 const DEFAULT_PROFILE = { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
-// Founder recognition is derived from the verified session email at load time (see the
-// applyProfile callback below), never stored as an editable profile column - so it can't be
-// spoofed by editing a database row, only by actually controlling that mailbox.
-const FOUNDER_EMAIL = 'josemgarciademarina@hotmail.com';
+// Founder entitlement comes from the authenticated database RPC, never guest storage.
 let playerProfile = { ...DEFAULT_PROFILE };
 try {
   const savedProfile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
   if (savedProfile && typeof savedProfile === 'object') playerProfile = { ...DEFAULT_PROFILE, ...savedProfile };
 } catch (err) { /* local storage can be disabled in private browsing */ }
-if (!SKIN_CATALOG[playerProfile.equippedSkin]) playerProfile.equippedSkin = 'gold';
+playerProfile.isFounder = false;
+if (!SKIN_CATALOG[playerProfile.equippedSkin] || playerProfile.equippedSkin === 'founder') playerProfile.equippedSkin = 'gold';
 function savePlayerProfile(){
   if (!cloudProfileActive) {
     try { localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(playerProfile)); } catch (err) { /* keep this session usable */ }
@@ -1864,8 +1866,11 @@ function profileRank(rating){
   return 'RECRUIT';
 }
 function applyEquippedSkin(){
+  if (playerProfile.equippedSkin === 'founder' && !founderEntitled) playerProfile.equippedSkin = 'gold';
   const skin = SKIN_CATALOG[playerProfile.equippedSkin] || SKIN_CATALOG.gold;
-  goldWeaponMat.map = skin.preview === 'gold' ? goldTexture : null;
+  goldWeaponMat.map = skin.preview === 'founder' ? founderTexture : skin.preview === 'gold' ? goldTexture : null;
+  goldWeaponMat.clearcoat = skin.preview === 'founder' ? 0.4 : 0;
+  goldWeaponMat.clearcoatRoughness = 0.26;
   goldWeaponMat.color.setHex(skin.color);
   goldWeaponMat.roughness = skin.roughness;
   goldWeaponMat.metalness = skin.metalness;
@@ -5729,7 +5734,7 @@ document.getElementById('ladderClose').addEventListener('click', () => document.
 function renderInventory(){
   const grid = document.getElementById('inventoryGrid');
   if (!grid) return;
-  grid.innerHTML = Object.entries(SKIN_CATALOG).map(([id, skin]) => `
+  grid.innerHTML = Object.entries(SKIN_CATALOG).filter(([id]) => id !== 'founder' || founderEntitled).map(([id, skin]) => `
     <button class="skinCard ${playerProfile.equippedSkin === id ? 'equipped' : ''}" type="button" data-skin="${id}">
       <span class="skinPreview ${skin.preview}"></span>
       <span class="skinName">${skin.name}</span>
@@ -5737,6 +5742,7 @@ function renderInventory(){
       <span class="skinState">${playerProfile.equippedSkin === id ? 'EQUIPPED' : 'EQUIP'}</span>
     </button>`).join('');
   grid.querySelectorAll('[data-skin]').forEach(card => card.addEventListener('click', () => {
+    if (card.dataset.skin === 'founder' && !founderEntitled) return;
     playerProfile.equippedSkin = card.dataset.skin;
     applyEquippedSkin();
     savePlayerProfile();
@@ -5911,10 +5917,11 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   isPlaying: () => gameStarted,
   applyProfile: profile => {
     cloudProfileActive = true;
-    const { email, ...cloudFields } = profile;
+    const { email, founderAccess, ...cloudFields } = profile;
+    founderEntitled = founderAccess === true;
     playerProfile = { ...DEFAULT_PROFILE, ...cloudFields };
-    // derived from the verified session email, never persisted - see FOUNDER_EMAIL's comment
-    playerProfile.isFounder = email === FOUNDER_EMAIL;
+    // The server checks the confirmed Auth identity before granting this entitlement.
+    playerProfile.isFounder = founderEntitled;
     localPlayerName = playerProfile.name;
     document.querySelector('#profileDock .profileEyebrow').textContent = 'CLOUD PROFILE · PROVISIONAL';
     applyEquippedSkin();

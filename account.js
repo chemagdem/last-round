@@ -80,7 +80,14 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying, apply
       profile = fresh.data;
     }
     if (userId !== id) return;
-    applyProfile({ ...fields(profile), email: session.user.email }); loaded = true;
+    // Fail closed if the migration is missing or the entitlement RPC fails.
+    let founderAccess = false;
+    try {
+      const permission = await client.rpc('has_founder_skin');
+      founderAccess = !permission.error && permission.data === true;
+    } catch { /* Standard skins and account login remain available. */ }
+    if (userId !== id) return;
+    applyProfile({ ...fields(profile), email: session.user.email, founderAccess }); loaded = true;
     badge.textContent = 'Cloud profile · unverified statistics';
     say('Signed in. Cloud profile loaded.');
     upsertLadder(id, fields(profile)); // refresh/create this week's ladder row on every sign-in
