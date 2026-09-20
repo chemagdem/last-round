@@ -278,6 +278,10 @@
       <h3>MULTIPLAYER (PVP)</h3>
       <p>1v1 or 2v2 against a friend via room code. Each round forces a different weapon - the team that wipes the other wins.</p>
     </div>
+    <div class="modeCard" data-mode="knife">
+      <h3>KNIFE THROWING</h3>
+      <p>1v1 / 2v2. Five knives, lethal throws and gravity. Run to recover your knives. No firearms. Requires all players.</p>
+    </div>
     <div class="modeCard" data-mode="practice">
       <h3>PRACTICE</h3>
       <p>Static targets to work on your aim. Unlimited budget for weapons, and a 60-minute session.</p>
@@ -432,6 +436,12 @@
       <select id="practiceWeapon"><option value="">SELECT WEAPON</option></select>
       <button class="pauseBtn" id="resetTraining" type="button">RESET ACCURACY</button>
     </section>
+    <div class="graphicsControls">
+      <label for="graphicsPreset">GRAPHICS</label>
+      <select id="graphicsPreset"><option value="performance">PERFORMANCE</option><option value="balanced">BALANCED</option><option value="quality">HIGH QUALITY</option></select>
+      <label for="fovSlider">FIELD OF VIEW <span id="fovValue">75</span>°</label>
+      <input id="fovSlider" type="range" min="65" max="100" step="1" value="75">
+    </div>
     <label class="motionSetting"><input type="checkbox" id="reducedMotion"> REDUCED CAMERA MOTION</label>
     <button class="pauseBtn" id="resumeBtn">RESUME</button>
     <button class="pauseBtn" id="mainMenuBtn">MAIN MENU</button>

@@ -10,6 +10,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SocialUI } from './social-ui.js';
 import { mountAccount } from './account.js';
+import { seededRandom, createReflectionEnvironment, addWorldDetail, refineWorldMaterials } from './world-art.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
 
 // ============================================================
@@ -721,7 +723,7 @@ function bloodSplatterTexture(){
 const scene = new THREE.Scene();
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-const baseFov = 75;
+let baseFov = 75;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -734,6 +736,8 @@ renderer.toneMappingExposure = 1.05;
 renderer.info.autoReset = true;
 document.body.appendChild(renderer.domElement);
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+const reflectionEnvironment = createReflectionEnvironment(renderer);
+scene.environment = reflectionEnvironment.texture;
 
 // post-processing (bloom for muzzle flash / sun glow)
 // Note: SSAO was tried here for contact-shadow realism, but three.js's SSAOPass reads the whole
@@ -744,8 +748,9 @@ const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 // this pass earns on its own - reverted for now.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.5, 0.82);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.16, 0.35, 1.0);
 composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -773,6 +778,7 @@ function updateRenderQuality(dt){
   else if (fps > 58) renderQuality.scale = Math.min(renderQuality.max, renderQuality.scale + 0.05);
   if (Math.abs(previous - renderQuality.scale) > 0.001) {
     renderer.setPixelRatio(renderQuality.scale);
+    composer.setPixelRatio(renderQuality.scale);
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     composer.setSize(window.innerWidth, window.innerHeight);
   }
@@ -814,10 +820,11 @@ const sun = new THREE.DirectionalLight(0xfff2d0, 1.35);
 sun.position.set(140, 110, -180);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -120; sun.shadow.camera.right = 120;
-sun.shadow.camera.top = 120; sun.shadow.camera.bottom = -120;
+sun.shadow.camera.left = -43; sun.shadow.camera.right = 43;
+sun.shadow.camera.top = 43; sun.shadow.camera.bottom = -43;
 sun.shadow.camera.far = 400;
-sun.shadow.bias = -0.0015;
+sun.shadow.bias = -0.00015;
+sun.shadow.normalBias = 0.035;
 scene.add(sun);
 scene.add(sun.target);
 
@@ -865,22 +872,30 @@ function applySubwayAtmosphere(){
 // ---------- World / Map system ----------
 let WORLD_SIZE = 220;
 let groundHeightAt = (x, z) => 0;
+let mapRandom = seededRandom(1);
 
 // real photo/render textures for the arena map (assets/textures/), tiled since they're not
 // procedurally generated to an exact size like the rest of this file's canvas-based textures
 const textureLoader = new THREE.TextureLoader();
 const tiledTextureCache = new Map();
+const textureSources = new Map();
+function textureSource(url){
+  if (!textureSources.has(url)) {
+    textureSources.set(url, new Promise(resolve => {
+      textureLoader.load(url, texture => resolve(texture.image), undefined, () => {
+        const fallback = metalScratchTexture('#867e6e');
+        resolve(fallback.image);
+      });
+    }));
+  }
+  return textureSources.get(url);
+}
 function loadTiledTexture(url, repeatX, repeatY){
   const cacheKey = `${url}|${repeatX}|${repeatY}`;
   if (tiledTextureCache.has(cacheKey)) return tiledTextureCache.get(cacheKey);
-  const tex = textureLoader.load(url, undefined, undefined, () => {
-    // Keep the material visible if a browser rejects a format or the game is opened from a
-    // restrictive local file URL. The procedural fallback is synchronous and never flashes black.
-    const fallback = metalScratchTexture('#596268');
-    fallback.repeat.set(repeatX, repeatY);
-    tex.image = fallback.image;
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(repeatX, repeatY);
+  const tex = metalScratchTexture('#867e6e');
+  textureSource(url).then(image => {
+    tex.image = image;
     tex.needsUpdate = true;
   });
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -902,9 +917,7 @@ function preloadMapTextures(mapId){
   if (texturePreloadState.get(mapId) === 'ready') return Promise.resolve();
   const urls = MAP_TEXTURE_URLS[mapId] || [];
   texturePreloadState.set(mapId, 'loading');
-  return Promise.all(urls.map(url => new Promise(resolve => {
-    textureLoader.load(url, () => resolve(), () => resolve(), () => resolve());
-  }))).then(() => { texturePreloadState.set(mapId, 'ready'); });
+  return Promise.all(urls.map(textureSource)).then(() => { texturePreloadState.set(mapId, 'ready'); });
 }
 
 // smooth raised (positive height) or sunken (negative height) rectangular platform,
@@ -979,7 +992,7 @@ function makePalmTree(x, z, scale = 1){
   const trunkH = 4.5 * scale;
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * scale, 0.18 * scale, trunkH, 8), trunkMat);
   trunk.position.set(x, baseY + trunkH / 2, z);
-  trunk.rotation.z = (Math.random() - 0.5) * 0.15;
+  trunk.rotation.z = (mapRandom() - 0.5) * 0.15;
   trunk.castShadow = true;
   scene.add(trunk);
   addBox(trunk);
@@ -1197,7 +1210,7 @@ function buildWarehouseMap(){
   // crate/barrel positions are randomized (within safe, non-overlapping bounds) every time this
   // map builds, rather than reusing Desert's exact coordinates - jitter is mirrored north/south
   // so the two spawns still get equivalent cover, just laid out differently each match
-  const jit = n => (Math.random() - 0.5) * n;
+  const jit = n => (mapRandom() - 0.5) * n;
 
   const rowXs = [-11, -7.55, -4.1, -0.65].map(x => x + jit(1.2));
   rowXs.forEach(x => {
@@ -1495,7 +1508,7 @@ function buildSubwayMap(){
 
   // a few maintenance crates/drums for close-range cover near each spawn - lighter touch than
   // Desert/Warehouse since columns and the train car now carry most of the map's cover
-  const jit = n => (Math.random() - 0.5) * n;
+  const jit = n => (mapRandom() - 0.5) * n;
   function addBarrel(x, z){
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.6, 12), barrelMat);
     barrel.position.set(x, groundHeightAt(x, z) + 0.8, z);
@@ -1635,6 +1648,10 @@ function buildMap(id){
     for (const object of [...scene.children]) {
       if (persistentSceneObjects.has(object)) continue;
       scene.remove(object);
+      if (object.userData.preserveResources) {
+        object.traverse(child => { if (child.isInstancedMesh) child.dispose(); });
+        continue;
+      }
       object.traverse(child => {
         if (child.geometry) geometries.add(child.geometry);
         // Maps and actors share materials/textures: retain those caches across matches.
@@ -1648,7 +1665,10 @@ function buildMap(id){
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
+  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211 })[id]);
   const result = MAPS[id].build();
+  refineWorldMaterials(envMeshes.concat(floorMeshes), id);
+  addWorldDetail(scene, envMeshes, id);
   currentMapMeta = result;
   player.pos.copy(result.spawn);
   player.pos.y = groundHeightAt(result.spawn.x, result.spawn.z) + player.height;
@@ -1744,6 +1764,11 @@ const GUNSHOT_PROFILES = {
 };
 
 const inventory = { primary: null, secondary: null };
+let knifeAvailable = true;
+let knifeCount = 1;
+let selectedRuleset = 'standard';
+function knifeCapacity(){ return selectedRuleset === 'knife' && gameMode === 'pvp' ? 5 : 1; }
+function resetKnifeSupply(){ knifeCount = knifeCapacity(); knifeAvailable = true; }
 const ammoState = {}; // slot -> { mag, reserve }
 let currentSlot = 'melee';
 let lastSlot = 'melee';
@@ -2252,6 +2277,7 @@ function buildWeaponVisual(id){
 }
 
 function equipSlot(slot, force = false){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife' && slot !== 'melee') return;
   if (slot === 'primary' && !inventory.primary) return;
   if (slot === 'secondary' && !inventory.secondary) return;
   if (slot === 'grenade' && grenadeCount <= 0) return;
@@ -2272,6 +2298,7 @@ function equipSlot(slot, force = false){
   const id = slot === 'melee' ? 'knife' : slot === 'grenade' ? 'grenade' : slot === 'smoke' ? 'smoke' : inventory[slot];
   if (currentVisual) weaponGroup.remove(currentVisual.group);
   currentVisual = buildWeaponVisual(id);
+  currentVisual.group.visible = id !== 'knife' || knifeAvailable;
   weaponGroup.add(currentVisual.group);
   weaponGroup.scale.setScalar(0.78);
   weaponGroup.position.set(0.015, -0.015, 0.04);
@@ -2290,9 +2317,21 @@ forearm.position.set(0.16, -0.32, 0.05);
 const sleeve = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.08, 5, 10), sleeveMat);
 sleeve.rotation.z = Math.PI / 2.3;
 sleeve.position.set(0.1, -0.29, 0.14);
-const hand = new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 8), skinMat);
+const playerGloveMat = new THREE.MeshStandardMaterial({ color: 0x363d3b, roughness: .94,
+  bumpMap: checkeredGripTexture(), bumpScale: .002 });
+const hand = new THREE.Mesh(new THREE.SphereGeometry(0.058, 24, 16), playerGloveMat);
 hand.position.set(0.235, -0.32, -0.12);
 armGroup.add(forearm, sleeve, hand);
+// Segmented fingers keep the empty hand readable after a knife throw.
+for (let i = 0; i < 4; i++) {
+  const finger = new THREE.Mesh(new THREE.CapsuleGeometry(.012, .035, 4, 8), playerGloveMat);
+  finger.position.set(.21 + i * .018, -.354, -.15); finger.rotation.x = -.7;
+  armGroup.add(finger);
+  const knuckle = new THREE.Mesh(new THREE.SphereGeometry(.014, 10, 8), playerGloveMat);
+  knuckle.position.set(.21 + i * .018, -.323, -.167); armGroup.add(knuckle);
+}
+const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(.016, .04, 4, 10), playerGloveMat);
+thumb.position.set(.184, -.31, -.135); thumb.rotation.z = -.65; armGroup.add(thumb);
 weaponGroup.add(armGroup);
 
 // ============================================================
@@ -2312,12 +2351,14 @@ const BIND_LABELS = {
   jump: 'JUMP', crouch: 'CROUCH', sprint: 'SPRINT',
   reload: 'RELOAD', shop: 'OPEN SHOP', inspect: 'INSPECT WEAPON'
 };
-const settings = { sensitivity: 1, reducedMotion: true, binds: { ...DEFAULT_BINDS } };
+const settings = { sensitivity: 1, reducedMotion: true, graphics: 'balanced', fov: 75, binds: { ...DEFAULT_BINDS } };
 (function loadSettings(){
   try {
     const saved = JSON.parse(localStorage.getItem('lastRoundSettings') || 'null');
     if (saved) {
       settings.reducedMotion = saved.reducedMotion !== false;
+      if (['performance', 'balanced', 'quality'].includes(saved.graphics)) settings.graphics = saved.graphics;
+      if (Number.isFinite(saved.fov)) settings.fov = Math.max(65, Math.min(100, saved.fov));
       if (typeof saved.sensitivity === 'number') settings.sensitivity = saved.sensitivity;
       if (saved.binds) Object.assign(settings.binds, saved.binds);
     }
@@ -2326,6 +2367,29 @@ const settings = { sensitivity: 1, reducedMotion: true, binds: { ...DEFAULT_BIND
 function saveSettings(){
   try { localStorage.setItem('lastRoundSettings', JSON.stringify(settings)); } catch (err) { /* private window / storage blocked - setting still works this session */ }
 }
+function applyGraphicsSettings(){
+  const preset = {
+    performance: { max: 1, shadow: 1024, bloom: false },
+    balanced: { max: 1.5, shadow: 2048, bloom: true },
+    quality: { max: 2, shadow: 4096, bloom: true }
+  }[settings.graphics];
+  renderQuality.max = Math.min(window.devicePixelRatio, preset.max);
+  renderQuality.scale = renderQuality.max;
+  renderQuality.sampleTime = 0; renderQuality.frameCount = 0;
+  renderer.setPixelRatio(renderQuality.scale);
+  composer.setPixelRatio(renderQuality.scale);
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloomPass.enabled = preset.bloom;
+  if (sun.shadow.mapSize.x !== preset.shadow) {
+    sun.shadow.map?.dispose(); sun.shadow.map = null;
+    sun.shadow.mapSize.set(preset.shadow, preset.shadow);
+    sun.shadow.needsUpdate = true;
+  }
+  baseFov = settings.fov;
+  camera.fov = baseFov; camera.updateProjectionMatrix();
+}
+applyGraphicsSettings();
 function keyLabel(code){
   if (!code) return '...';
   if (code.startsWith('Key')) return code.slice(3);
@@ -2465,6 +2529,7 @@ function playKnifeFlip(){
 }
 
 function playWeaponInspect(){
+  if (currentSlot === 'melee' && !knifeAvailable) return;
   if (!gameStarted || !player.alive || reloadRuntime.reloading || boltCyclingT > 0 || weaponInspectT >= 0) return;
   weaponInspectT = 0;
   weaponRecoilT = -1;
@@ -2605,7 +2670,7 @@ function updateWeaponRecoil(dt){
   const clamped = Math.max(0, impulse);
   const strength = currentWeaponDef().boltAction ? 1 : 0.45;
   currentVisual.group.position.z = clamped * 0.105 * strength;
-  currentVisual.group.rotation.x = -clamped * 0.19 * strength;
+  currentVisual.group.rotation.x = clamped * 0.19 * strength;
   if (p >= 1) {
     weaponRecoilT = -1;
     currentVisual.group.position.z = 0;
@@ -2681,7 +2746,7 @@ const thrownKnifeRay = new THREE.Raycaster();
 const thrownKnifeGeometry = new THREE.ConeGeometry(0.035, 0.35, 4);
 const thrownKnifeGrip = new THREE.BoxGeometry(0.045, 0.14, 0.04);
 
-function createThrownKnife(origin, direction, damaging = false){
+function createThrownKnife(origin, direction, damaging = false, id = crypto.randomUUID()){
   const mesh = new THREE.Group();
   const blade = new THREE.Mesh(thrownKnifeGeometry, bladeMat);
   blade.rotation.x = -Math.PI / 2;
@@ -2692,11 +2757,13 @@ function createThrownKnife(origin, direction, damaging = false){
   mesh.position.copy(origin);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), direction);
   scene.add(mesh);
-  thrownKnives.push({ mesh, direction, damaging, life: 2, epoch: matchEpoch, round: roundState.roundNum });
+  thrownKnives.push({ mesh, id, velocity: direction.clone().multiplyScalar(38), damaging,
+    landed: false, hitEnemy: false, epoch: matchEpoch, round: roundState.roundNum });
+  return id;
 }
 
 function throwKnife(){
-  if (matchFinished || fireCooldown > 0 || reloadRuntime.reloading) return;
+  if (!knifeAvailable || matchFinished || fireCooldown > 0 || reloadRuntime.reloading) return;
   weaponInspectT = -1; weaponInspectId = null; weaponRecoilT = -1;
   currentVisual.group.position.set(0, 0, 0);
   currentVisual.group.rotation.set(0, 0, 0);
@@ -2705,22 +2772,51 @@ function throwKnife(){
   playKnifeSwing();
   const origin = camera.getWorldPosition(new THREE.Vector3());
   const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-  createThrownKnife(origin, direction, true);
-  if (gameMode === 'pvp') netBroadcast({ type: 'knifeThrow', origin: origin.toArray(), direction: direction.toArray() });
+  const id = createThrownKnife(origin, direction, true);
+  knifeCount--;
+  knifeAvailable = knifeCount > 0;
+  currentVisual.group.visible = knifeAvailable;
+  updateAmmoHUD();
+  if (gameMode === 'pvp') netBroadcast({ type: 'knifeThrow', id, origin: origin.toArray(), direction: direction.toArray() });
   audio.playSample('knifeSlash', 0.8);
 }
 
 function updateThrownKnives(dt){
   for (let i = thrownKnives.length - 1; i >= 0; i--) {
     const knife = thrownKnives[i];
-    knife.life -= dt;
-    const distance = 42 * dt;
+    if (knife.epoch !== matchEpoch || knife.round !== roundState.roundNum) {
+      scene.remove(knife.mesh); thrownKnives.splice(i, 1); continue;
+    }
+    if (knife.landed) {
+      if (knife.damaging && player.alive) {
+        const feet = player.pos.clone(); feet.y -= player.crouching ? player.crouchHeight : player.height;
+        const reach = knife.mesh.position.clone().sub(player.pos);
+        thrownKnifeRay.set(player.pos, reach.clone().normalize());
+        thrownKnifeRay.far = Math.max(0, reach.length() - 0.15);
+        if (knifeCount < knifeCapacity() && feet.distanceTo(knife.mesh.position) < 1.8 && !thrownKnifeRay.intersectObjects(envMeshes, false).length) {
+          knifeCount++;
+          knifeAvailable = true;
+          if (currentSlot === 'melee') currentVisual.group.visible = true;
+          updateAmmoHUD();
+          socialUI.notice('Knife recovered');
+          if (gameMode === 'pvp') netBroadcast({ type: 'knifePickup', id: knife.id });
+          scene.remove(knife.mesh); thrownKnives.splice(i, 1);
+        }
+      }
+      continue;
+    }
+    // Ballistic motion: fast initial throw, then gravity bends the trajectory.
+    const step = knife.velocity.clone().multiplyScalar(dt);
+    step.y -= 0.5 * 9.81 * dt * dt;
+    knife.velocity.y -= 9.81 * dt;
+    const distance = step.length();
+    const direction = step.clone().normalize();
     // Sweep the entire step so fast knives cannot skip thin walls or soldiers.
-    thrownKnifeRay.set(knife.mesh.position, knife.direction);
+    thrownKnifeRay.set(knife.mesh.position, direction);
     thrownKnifeRay.far = distance;
     const walls = thrownKnifeRay.intersectObjects(envMeshes.concat(floorMeshes), false);
     const targets = enemies.filter(enemy => enemy.alive && !(gameMode === 'pvp' && enemy.team === myTeam()));
-    const hits = thrownKnifeRay.intersectObjects(targets.map(enemy => enemy.mesh), true);
+    const hits = knife.damaging && !knife.hitEnemy ? thrownKnifeRay.intersectObjects(targets.map(enemy => enemy.mesh), true) : [];
     const hit = hits[0];
     const blocked = walls.length && (!hit || walls[0].distance <= hit.distance);
     if (hit && !blocked && knife.damaging && knife.epoch === matchEpoch && knife.round === roundState.roundNum) {
@@ -2732,12 +2828,27 @@ function updateThrownKnives(dt){
           { weaponName: 'Throwing Knife', instantKill: true });
         showHitMarker(false, killed);
         audio.playSample('knifeStab', 0.8);
+        knife.hitEnemy = true;
+        knife.velocity.multiplyScalar(0.15);
       }
     }
-    if (hit || blocked || knife.life <= 0 || knife.epoch !== matchEpoch || knife.round !== roundState.roundNum) {
-      scene.remove(knife.mesh);
-      thrownKnives.splice(i, 1);
-    } else knife.mesh.position.addScaledVector(knife.direction, distance);
+    if (blocked) {
+      const wall = walls[0];
+      const normal = wall.face.normal.clone().transformDirection(wall.object.matrixWorld);
+      if (normal.dot(direction) > 0) normal.negate();
+      knife.mesh.position.copy(wall.point).addScaledVector(normal, 0.06);
+      if (normal.y > 0.45) knife.landed = true;
+      else knife.velocity.reflect(normal).multiplyScalar(0.18);
+    } else if (hit) knife.mesh.position.copy(hit.point);
+    else knife.mesh.position.add(step);
+    if (knife.mesh.position.y < groundHeightAt(knife.mesh.position.x, knife.mesh.position.z) + 0.05) {
+      knife.mesh.position.y = groundHeightAt(knife.mesh.position.x, knife.mesh.position.z) + 0.05;
+      knife.landed = true;
+    }
+    if (knife.landed) {
+      knife.mesh.rotation.set(0, 0, 0.4);
+      if (knife.damaging && gameMode === 'pvp') netBroadcast({ type: 'knifeLanded', id: knife.id, point: knife.mesh.position.toArray() });
+    } else knife.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), knife.velocity.clone().normalize());
   }
 }
 const bulletTracers = [];
@@ -2767,6 +2878,7 @@ function fireWeapon(){
   }
 
   if (currentSlot === 'melee') {
+    if (!knifeAvailable) return;
     fireCooldown = def.fireRate;
     playKnifeSwing();
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -2831,7 +2943,7 @@ function fireWeapon(){
   // The Deagle uses its grip-pivot animation only, without a second downward tilt.
   if (weaponId !== 'deagle') {
     weaponGroup.position.z += def.kickPush ?? 0.06;
-    weaponGroup.rotation.x -= def.kickTilt ?? 0.05;
+    weaponGroup.rotation.x += def.kickTilt ?? 0.05;
   }
   weaponRecoilT = 0;
 
@@ -4093,7 +4205,7 @@ function broadcastRoster(){
   // carries the host's map choice too - a joining client used to always build its own locally
   // selected map (hardcoded to Desert back when that was the only option), which would silently
   // desync the two peers onto different geometry the moment a second map existed
-  netBroadcast({ type: 'roster', roster: netRoster, teamSize: netTeamSize, map: selectedMap });
+  netBroadcast({ type: 'roster', roster: netRoster, teamSize: netTeamSize, map: selectedMap, ruleset: selectedRuleset });
   updateScoreboardNames();
 }
 
@@ -4141,7 +4253,14 @@ function handleNetMessage(msg, fromId){
   switch (msg.type) {
     case 'roster':
       netRoster = msg.roster; netTeamSize = msg.teamSize;
-      if (netRole === 'client' && msg.map && MAPS[msg.map]) selectedMap = msg.map;
+      if (netRole === 'client' && fromId === 'host' && !gameStarted) {
+        selectedRuleset = msg.ruleset === 'knife' ? 'knife' : 'standard';
+        document.getElementById('pvpStatus').textContent = selectedRuleset === 'knife' ? 'KNIFE THROWING · 5 KNIVES' : 'STANDARD PVP';
+      }
+      if (netRole === 'client' && msg.map && MAPS[msg.map]) {
+        selectedMap = msg.map;
+        preloadMapTextures(selectedMap).then(updateStartButtonState);
+      }
       updateScoreboardNames();
       break;
     case 'name':
@@ -4167,11 +4286,25 @@ function handleNetMessage(msg, fromId){
       break;
     case 'knifeThrow': {
       const validVector = value => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
-      if (validVector(msg.origin) && validVector(msg.direction) && thrownKnives.length < 32) {
+      if (typeof msg.id === 'string' && msg.id.length <= 64 && validVector(msg.origin) && validVector(msg.direction) && thrownKnives.length < 32) {
         const direction = new THREE.Vector3().fromArray(msg.direction);
         if (direction.lengthSq() > 0.9 && direction.lengthSq() < 1.1)
-          createThrownKnife(new THREE.Vector3().fromArray(msg.origin), direction.normalize());
+          createThrownKnife(new THREE.Vector3().fromArray(msg.origin), direction.normalize(), false, msg.id);
       }
+      break;
+    }
+    case 'knifeLanded': {
+      const knife = thrownKnives.find(item => !item.damaging && item.id === msg.id);
+      if (knife && Array.isArray(msg.point) && msg.point.length === 3 && msg.point.every(Number.isFinite)) {
+        knife.mesh.position.fromArray(msg.point);
+        knife.mesh.rotation.set(0, 0, 0.4);
+        knife.landed = true;
+      }
+      break;
+    }
+    case 'knifePickup': {
+      const index = thrownKnives.findIndex(item => !item.damaging && item.id === msg.id);
+      if (index >= 0) { scene.remove(thrownKnives[index].mesh); thrownKnives.splice(index, 1); }
       break;
     }
     case 'kill':
@@ -4339,7 +4472,7 @@ function beginRematch(map, epoch){
   document.getElementById('waveBanner').style.opacity = 0;
   buildMap(map);
   // Reuse round spawn/equipment setup, then enter warmup rather than live play.
-  applyPvpRoundStart(1, 'glock', 0, 0);
+  applyPvpRoundStart(1, selectedRuleset === 'knife' ? 'knife' : 'glock', 0, 0);
   startPvpMatch(15);
   if (netRole !== 'host') applyWarmup(15);
   document.getElementById('bombStatusLabel').textContent = '';
@@ -4348,6 +4481,13 @@ function beginRematch(map, epoch){
 }
 
 function startPvpMatch(warmupSeconds = WARMUP_FULL){
+  if (selectedRuleset === 'knife') {
+    warmupSeconds = 15;
+    inventory.primary = null; inventory.secondary = null;
+    grenadeCount = 0; smokeCount = 0;
+    resetKnifeSupply();
+    equipSlot('melee', true);
+  }
   matchFinished = false;
   weaponBag = []; previousRoundWeapon = null;
   roundState.roundNum = 1;
@@ -4399,6 +4539,13 @@ function applyWarmup(timer){
 
 function updateWarmup(dt){
   if (netRole !== 'host') return;
+  if (selectedRuleset === 'knife' && ['A','B'].some(team => netRoster.filter(p => p.team === team && !p.isBot).length < netTeamSize)) {
+    warmupTimer = 15;
+    warmupBroadcastT -= dt;
+    if (warmupBroadcastT <= 0) { warmupBroadcastT = 1; broadcastWarmup(); }
+    document.getElementById('centerMessage').textContent = `Waiting for ${netTeamSize * 2} players · KNIFE THROWING`;
+    return;
+  }
   warmupTimer -= dt;
   warmupBroadcastT -= dt;
   if (warmupBroadcastT <= 0) { warmupBroadcastT = 1; broadcastWarmup(); }
@@ -4411,6 +4558,7 @@ function updateWarmup(dt){
 // own local player specifically (the same targeting the single-player horde mode always used),
 // rather than picking whichever opposing player is actually nearest.
 function ensureBotFill(){
+  if (selectedRuleset === 'knife') return;
   if (netTeamSize !== 2) return;
   const teamACount = netRoster.filter(p => p.team === 'A').length;
   const teamBCount = netRoster.filter(p => p.team === 'B').length;
@@ -4429,13 +4577,14 @@ function ensureBotFill(){
 
 function startPvpRoundAsHost(){
   ensureBotFill();
-  const weapon = nextRoundWeapon();
+  const weapon = selectedRuleset === 'knife' ? 'knife' : nextRoundWeapon();
   const msg = { type: 'roundStart', roundNum: roundState.roundNum, weapon, scoreA: roundState.ctWins, scoreB: roundState.tWins };
   applyPvpRoundStart(msg.roundNum, msg.weapon, msg.scoreA, msg.scoreB);
   netBroadcast(msg);
 }
 
 function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
+  resetKnifeSupply();
   thrownKnives.forEach(knife => scene.remove(knife.mesh));
   thrownKnives.length = 0;
   reloadGeneration++;
@@ -4929,8 +5078,9 @@ function updateAmmoHUD(){
   const def = currentWeaponDef();
   document.getElementById('ammoLabel').textContent = def.name.toUpperCase();
   if (currentSlot === 'melee') {
-    document.getElementById('ammoCount').textContent = '';
-    document.getElementById('ammoReserve').textContent = '';
+    document.getElementById('ammoLabel').textContent = knifeAvailable ? 'KNIFE · RMB THROW' : 'EMPTY HAND · RECOVER KNIFE';
+    document.getElementById('ammoCount').textContent = knifeCount;
+    document.getElementById('ammoReserve').textContent = knifeCapacity() === 5 ? '5' : '';
   } else if (currentSlot === 'grenade') {
     document.getElementById('ammoCount').textContent = grenadeCount;
     document.getElementById('ammoReserve').textContent = '';
@@ -5053,6 +5203,7 @@ const roundState = {
 };
 
 function toggleBuyMenu(){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife') { socialUI.notice('Knife Throwing: recover your knives on the map.'); return; }
   if (!player.alive) return;
   // once a PvP round is actually live the weapon is forced and buying is off the table entirely -
   // the shop is only for spending the unlimited warmup money before the match starts
@@ -5123,6 +5274,19 @@ document.getElementById('sensSlider').addEventListener('input', e => {
 });
 document.getElementById('sensSlider').value = settings.sensitivity;
 document.getElementById('sensValue').textContent = settings.sensitivity.toFixed(1);
+document.getElementById('graphicsPreset').value = settings.graphics;
+document.getElementById('fovSlider').value = settings.fov;
+document.getElementById('fovValue').textContent = settings.fov;
+document.getElementById('graphicsPreset').addEventListener('change', event => {
+  settings.graphics = event.target.value;
+  applyGraphicsSettings(); saveSettings();
+});
+document.getElementById('fovSlider').addEventListener('input', event => {
+  settings.fov = Number(event.target.value);
+  baseFov = settings.fov;
+  document.getElementById('fovValue').textContent = settings.fov;
+  saveSettings();
+});
 
 document.getElementById('resumeBtn').addEventListener('click', togglePauseMenu);
 document.getElementById('resultReturn').addEventListener('click', () => location.reload());
@@ -5200,6 +5364,7 @@ document.addEventListener('keyup', e => {
 });
 
 function buyWeapon(id){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS[id];
   if (money < def.price) return;
   money -= def.price;
@@ -5211,6 +5376,7 @@ function buyWeapon(id){
 }
 
 function buyGrenade(){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS.grenade;
   if (money < def.price || grenadeCount >= MAX_GRENADES) return;
   money -= def.price;
@@ -5221,6 +5387,7 @@ function buyGrenade(){
 }
 
 function buySmoke(){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS.smoke;
   if (money < def.price || smokeCount >= MAX_SMOKES) return;
   money -= def.price;
@@ -5311,7 +5478,7 @@ animate();
 // ============================================================
 let mapChosen = true; // only one map exists now (Desert), pre-selected - no click needed
 function updateStartButtonState(){
-  let ready = mapChosen && soldierAssetsReady;
+  let ready = mapChosen && soldierAssetsReady && texturePreloadState.get(selectedMap) === 'ready';
   if (selectedMode === 'pvp') ready = ready && !!netPeer && !!netMyId;
   document.getElementById('startBtn').disabled = !ready;
 }
@@ -5372,16 +5539,18 @@ document.addEventListener('keydown', e => {
 });
 
 document.querySelectorAll('.mapCard').forEach(card => {
-  preloadMapTextures(card.dataset.map);
+  card.addEventListener('mouseenter', () => preloadMapTextures(card.dataset.map), { once: true });
   card.addEventListener('click', () => {
     document.querySelectorAll('.mapCard').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
     selectedMap = card.dataset.map;
     mapChosen = true;
-    preloadMapTextures(selectedMap);
+    preloadMapTextures(selectedMap).then(updateStartButtonState);
     updateStartButtonState();
   });
 });
+
+preloadMapTextures(selectedMap).then(updateStartButtonState);
 
 // top-down layout thumbnails for the map picker - both maps share the exact same crate/spawn
 // layout (see buildWarehouseMap's comment), so this draws that one real layout in each map's own
@@ -5458,7 +5627,9 @@ document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
     document.querySelectorAll('.modeCard').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
-    selectedMode = card.dataset.mode;
+    selectedMode = card.dataset.mode === 'knife' ? 'pvp' : card.dataset.mode;
+    selectedRuleset = card.dataset.mode === 'knife' ? 'knife' : 'standard';
+    if (netRole === 'host' && !gameStarted) broadcastRoster();
     document.getElementById('pvpPanel').style.display = selectedMode === 'pvp' ? 'flex' : 'none';
     document.getElementById('startBtn').textContent = selectedMode === 'practice' ? 'START PRACTICE' : "I'M READY";
     updateStartButtonState();
