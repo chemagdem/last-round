@@ -1854,6 +1854,8 @@ const goldWeaponMat = new THREE.MeshPhysicalMaterial({
   metalness: 0.88
 });
 const goldTexture = goldWeaponMat.map;
+const luxuryTexture = loadTiledTexture('assets/luxury_skin.png', 1.4, 1.4);
+const pinkSiberianTexture = loadTiledTexture('assets/pink_siberian.png', 3, 3);
 const founderTexture = createFounderFinish();
 let founderEntitled = false;
 let founderStatus = 'FOUNDER ACCESS: SIGN IN REQUIRED';
@@ -1861,7 +1863,9 @@ const SKIN_CATALOG = {
   founder: { name: 'First Light · 001', meta: 'FOUNDER EXCLUSIVE · Obsidian / gold inlay', preview: 'founder', color: 0xffffff, roughness: 0.3, metalness: 0.82 },
   gold: { name: 'Gold Standard', meta: 'Metallic gold · equipped by default', preview: 'gold', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.88 },
   carbon: { name: 'Carbon Black', meta: 'Brushed tactical carbon', preview: 'carbon', owned: true, color: 0x63707a, roughness: 0.42, metalness: 0.78 },
-  crimson: { name: 'Crimson Core', meta: 'Red alloy · prototype finish', preview: 'crimson', owned: true, color: 0xd23a32, roughness: 0.34, metalness: 0.84 }
+  crimson: { name: 'Crimson Core', meta: 'Red alloy · prototype finish', preview: 'crimson', owned: true, color: 0xd23a32, roughness: 0.34, metalness: 0.84 },
+  luxury: { name: 'Luxury', meta: 'Black & gold marble finish', preview: 'luxury', owned: true, color: 0xffffff, roughness: 0.2, metalness: 0.5 },
+  pinkSiberian: { name: 'Pink Siberian', meta: 'Pink digital camo · matte finish', preview: 'pinkSiberian', owned: true, color: 0xffffff, roughness: 0.55, metalness: 0.12 }
 };
 const PROFILE_STORAGE_KEY = 'lastRoundProfile';
 let cloudAccount = null;
@@ -1891,7 +1895,8 @@ function profileRank(rating){
 function applyEquippedSkin(){
   if (playerProfile.equippedSkin === 'founder' && !founderEntitled) playerProfile.equippedSkin = 'gold';
   const skin = SKIN_CATALOG[playerProfile.equippedSkin] || SKIN_CATALOG.gold;
-  goldWeaponMat.map = skin.preview === 'founder' ? founderTexture : skin.preview === 'gold' ? goldTexture : null;
+  goldWeaponMat.map = skin.preview === 'founder' ? founderTexture : skin.preview === 'gold' ? goldTexture
+    : skin.preview === 'luxury' ? luxuryTexture : skin.preview === 'pinkSiberian' ? pinkSiberianTexture : null;
   goldWeaponMat.clearcoat = skin.preview === 'founder' ? 0.4 : 0;
   goldWeaponMat.clearcoatRoughness = 0.26;
   goldWeaponMat.color.setHex(skin.color);
