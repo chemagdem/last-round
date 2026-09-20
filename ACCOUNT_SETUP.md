@@ -1,20 +1,41 @@
 # Cloud account setup
 
-This integration is implemented but not deployed or connected to a live backend.
-Guest mode still works without configuration. Existing guest statistics are not
-imported into accounts. The three current finishes remain free prototype cosmetics.
+`auth-config.js` is wired to a real Supabase project (`teromfegnfmbxeyppcie`) and
+`CLOUD_ACCOUNTS_ENABLED` is `true` in `game.js`. Guest mode still works without an
+account. Existing guest statistics are not imported into accounts. The three current
+finishes remain free prototype cosmetics.
 
-1. Create a Supabase project under your own account.
-2. Run `account.sql` once in its SQL editor.
-3. Enable email/password authentication and email confirmation. Set the minimum
-   password length to 12. Configure SMTP and abuse protection before public release.
-4. Set the Auth Site URL and allowed redirect URL to the exact HTTPS game URL
-   (including its path). Email confirmation and password recovery return there.
-5. In `auth-config.js`, set `url` to the project URL and `publishableKey` to its
-   public publishable key (or legacy anon key). NEVER use service_role or secret keys.
-6. Publish the updated game files. Register, confirm the email, and sign in.
-7. Test password recovery, sign-out, a second account, and a second browser.
-   Verify that account B cannot read or update account A's database row.
+**One manual step is still required before sign-in will actually work**: `account.sql`
+has not been run against the project yet. Automated deployment could not reach the
+database directly (the direct host resolves IPv6-only from this environment, and the
+connection pooler didn't recognize the project as a tenant, likely because it's brand
+new) - open the project's SQL editor at
+https://supabase.com/dashboard/project/teromfegnfmbxeyppcie/sql/new, paste the full
+contents of `account.sql`, and press Run. That single step creates `player_profiles`
+and the new `ladder_entries` table (see below) with their RLS policies.
+
+Remaining one-time setup in the Supabase dashboard:
+1. Enable email/password authentication and email confirmation
+   (Authentication → Providers). Set the minimum password length to 12. Configure SMTP
+   and abuse protection before any public release.
+2. Set the Auth Site URL and allowed redirect URL (Authentication → URL Configuration)
+   to the exact HTTPS game URL (including its path) - email confirmation and password
+   recovery links return there.
+3. Register an account in-game, confirm the email, and sign in.
+4. Test password recovery, sign-out, a second account, and a second browser. Verify
+   that account B cannot read or update account A's database row, and cannot see
+   account A's row filtered out of the public ladder read either (RLS only restricts
+   writes on that table - reads are intentionally public, see below).
+
+## Weekly ladder
+
+`ladder_entries` (added in `account.sql`) holds one row per (user, week). The "week"
+(`season_id`) is a fixed 7-day bucket computed client-side in `ladder.js` from a fixed
+epoch - there is no scheduled job that resets anything; a write made after a week
+boundary simply lands in a new row, and the leaderboard query only ever reads the
+current bucket. Old weeks' rows are kept, not deleted. The table is public-read (even
+signed-out visitors can load the ladder dialog) but write-restricted to each row's own
+owner, same RLS pattern as `player_profiles`.
 
 ## Current boundaries
 

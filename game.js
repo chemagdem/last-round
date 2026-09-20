@@ -17,6 +17,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { SocialUI } from './social-ui.js';
 import { mountAccount } from './account.js';
+import { COUNTRY_LIST, flagEmoji } from './ladder.js';
 import { seededRandom, createReflectionEnvironment, addWorldDetail, refineWorldMaterials } from './world-art.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
@@ -1822,7 +1823,7 @@ const SKIN_CATALOG = {
 const PROFILE_STORAGE_KEY = 'lastRoundProfile';
 let cloudAccount = null;
 let cloudProfileActive = false;
-const DEFAULT_PROFILE = { name: 'Player', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
+const DEFAULT_PROFILE = { name: 'Player', country: '', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
 let playerProfile = { ...DEFAULT_PROFILE };
 try {
   const savedProfile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
@@ -5615,11 +5616,59 @@ function renderProfileUI(){
   const rankEl = document.getElementById('profileRank');
   const ratingEl = document.getElementById('profileRating');
   const recordEl = document.getElementById('profileRecord');
-  if (nameEl) nameEl.textContent = name;
+  if (nameEl) nameEl.textContent = (playerProfile.country ? flagEmoji(playerProfile.country) + ' ' : '') + name;
   if (rankEl) rankEl.firstChild.textContent = profileRank(playerProfile.rating) + ' ';
   if (ratingEl) ratingEl.textContent = playerProfile.rating;
   if (recordEl) recordEl.textContent = `${playerProfile.wins}W — ${playerProfile.losses}L · ${playerProfile.matches} MATCHES`;
 }
+
+function populateCountrySelect(){
+  const select = document.getElementById('countrySelect');
+  if (!select || select.dataset.populated) return;
+  select.dataset.populated = '1';
+  const blank = document.createElement('option');
+  blank.value = ''; blank.textContent = '🏳 Country';
+  select.appendChild(blank);
+  COUNTRY_LIST.forEach(([code, countryName]) => {
+    const opt = document.createElement('option');
+    opt.value = code; opt.textContent = `${flagEmoji(code)} ${countryName}`;
+    select.appendChild(opt);
+  });
+  select.value = playerProfile.country || '';
+  select.addEventListener('change', () => {
+    playerProfile.country = select.value;
+    savePlayerProfile();
+    renderProfileUI();
+  });
+}
+populateCountrySelect();
+
+async function openLadderDialog(){
+  const dialog = document.getElementById('ladderDialog');
+  const status = document.getElementById('ladderStatus');
+  const windowEl = document.getElementById('ladderWindow');
+  const tbody = document.querySelector('#ladderTable tbody');
+  dialog.showModal();
+  status.textContent = 'Loading…';
+  tbody.innerHTML = '';
+  if (!cloudAccount) { status.textContent = 'Cloud accounts are not configured yet.'; return; }
+  try {
+    const { entries, window: seasonRange, selfId } = await cloudAccount.fetchLadder();
+    const fmt = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    windowEl.textContent = `This week: ${fmt(seasonRange.start)} – ${fmt(seasonRange.end)} (resets automatically every 7 days)`;
+    status.textContent = entries.length ? 'Unverified, client-reported statistics.' : 'No one has played this week yet.';
+    tbody.innerHTML = entries.map((row, i) => `
+      <tr class="${row.user_id === selfId ? 'ladderSelf' : ''}">
+        <td>${i + 1}</td>
+        <td>${row.country ? flagEmoji(row.country) : '🏳'}</td>
+        <td>${(row.name || 'Player').replace(/</g, '&lt;')}</td>
+        <td>${row.rating}</td>
+        <td>${row.wins}-${row.losses}</td>
+      </tr>`).join('');
+  } catch (error) { status.textContent = 'Ladder unavailable: ' + error.message; }
+}
+document.getElementById('ladderButton').addEventListener('click', openLadderDialog);
+document.getElementById('ladderClose').addEventListener('click', () => document.getElementById('ladderDialog').close());
 
 function renderInventory(){
   const grid = document.getElementById('inventoryGrid');
@@ -5790,8 +5839,7 @@ document.getElementById('playerNameInput').addEventListener('input', e => {
   renderProfileUI();
 });
 document.getElementById('playerNameInput').value = playerProfile.name === 'Player' ? '' : playerProfile.name;
-// Cloud integration is parked; retain the implementation for a future release.
-const CLOUD_ACCOUNTS_ENABLED = false;
+const CLOUD_ACCOUNTS_ENABLED = true;
 if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   readProfile: () => playerProfile,
   isPlaying: () => gameStarted,
@@ -5800,6 +5848,8 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
     playerProfile = { ...DEFAULT_PROFILE, ...profile };
     localPlayerName = playerProfile.name;
     document.getElementById('playerNameInput').value = localPlayerName;
+    const countrySelect = document.getElementById('countrySelect');
+    if (countrySelect) countrySelect.value = playerProfile.country || '';
     document.querySelector('#profileDock .profileEyebrow').textContent = 'CLOUD PROFILE · PROVISIONAL';
     applyEquippedSkin();
     renderProfileUI();

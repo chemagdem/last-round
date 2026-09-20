@@ -9,3 +9,15 @@
 #accountStatus{line-height:1.5;color:#d7b66c;min-height:40px}
 #accountState{display:block;color:#bcc5c9;font-size:10px;line-height:1.5;margin-top:8px}
 .skinPreview,.skinMeta{display:block}
+#countrySelect{padding:9px 10px;background:rgba(0,0,0,0.4);border:2px solid #443;color:#ddd;border-radius:4px;letter-spacing:1px;width:200px;text-align:center}
+#ladderButton{margin-top:8px;background:#1a2018;color:#eee;border:1px solid #4e6f43;padding:8px 12px;cursor:pointer;width:100%}
+#ladderDialog{color:#e9edef;background:#111518;border:1px solid #79633d;border-radius:12px;width:min(480px,92vw);padding:26px;font:14px 'Segoe UI',sans-serif}
+#ladderDialog::backdrop{background:#000b;backdrop-filter:blur(6px)}
+#ladderDialog h2{margin:0 0 12px;letter-spacing:2px}
+#ladderStatus{line-height:1.5;color:#d7b66c;min-height:20px;margin:0}
+#ladderWindow{color:#8a9298;font-size:11px;margin:4px 0 14px}
+#ladderTable{width:100%;border-collapse:collapse;font-size:13px}
+#ladderTable th{text-align:left;color:#8a9298;font-weight:normal;padding:4px 6px;border-bottom:1px solid #333}
+#ladderTable td{padding:6px;border-bottom:1px solid #222}
+#ladderTable tr.ladderSelf td{color:#ffd27a}
+#ladderClose{padding:10px 12px;margin-top:14px;background:#30201e;border:1px solid #94603f;color:white;cursor:pointer}

@@ -246,6 +246,7 @@
     <div id="profileRecord">0W — 0L · 0 MATCHES</div>
     <button id="inventoryBtn" type="button">INVENTORY <span aria-hidden="true">↗</span></button>
     <button id="accountButton" type="button">ACCOUNT / SIGN IN</button>
+    <button id="ladderButton" type="button">WEEKLY LADDER <span aria-hidden="true">↗</span></button>
     <span id="accountState">Guest · saved on this device</span>
   </section>
   <img id="logo" src="assets/logo.png" alt="LAST ROUND">
@@ -289,6 +290,7 @@
   </div>
   <div id="pvpPanel">
     <input id="playerNameInput" placeholder="YOUR NAME" maxlength="16">
+    <select id="countrySelect" aria-label="Country / flag"></select>
     <div id="pvpEntryChoice">
       <button class="pvpChoiceBtn selected" data-choice="host">HOST A GAME</button>
       <button class="pvpChoiceBtn" data-choice="join">JOIN WITH CODE</button>
@@ -350,6 +352,13 @@
     <button value="retry" formnovalidate>RETRY SYNC</button>
   </form>
   <button id="accountClose" type="button">CLOSE</button>
+</dialog>
+<dialog id="ladderDialog" aria-labelledby="ladderTitle">
+  <h2 id="ladderTitle">WEEKLY LADDER</h2>
+  <p id="ladderStatus" role="status">Sign in to appear on the ladder. Rankings reset every 7 days. Statistics are unverified.</p>
+  <p id="ladderWindow"></p>
+  <table id="ladderTable"><thead><tr><th>#</th><th></th><th>Player</th><th>Rating</th><th>W-L</th></tr></thead><tbody></tbody></table>
+  <button id="ladderClose" type="button">CLOSE</button>
 </dialog>
 
 <div id="deathScreen">

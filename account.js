@@ -1,4 +1,5 @@
 import { authConfig } from './auth-config.js';
+import { currentSeasonId, seasonWindow } from './ladder.js';
 
 // Loading this module does not load the remote SDK unless configured.
 export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
@@ -18,7 +19,32 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
   const buttons = () => [...form.querySelectorAll('button')];
   const setBusy = value => { busy = value; buttons().forEach(b => { b.disabled = value; }); };
   const fields = profile => ({ name: String(profile.name || 'Player').slice(0,16), rating: profile.rating,
-    wins: profile.wins, losses: profile.losses, matches: profile.matches, equippedSkin: profile.equippedSkin });
+    wins: profile.wins, losses: profile.losses, matches: profile.matches, equippedSkin: profile.equippedSkin,
+    country: String(profile.country || '').slice(0,2) });
+
+  // the weekly ladder is a separate table (see account.sql) keyed by (user, season_id) - writing
+  // to it is best-effort and never blocks the main profile save if it fails
+  async function upsertLadder(id, snapshot) {
+    if (!client) return;
+    const seasonId = currentSeasonId();
+    await client.from('ladder_entries').upsert({
+      user_id: id, season_id: seasonId, name: snapshot.name, country: snapshot.country,
+      rating: snapshot.rating, wins: snapshot.wins, losses: snapshot.losses, matches: snapshot.matches,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,season_id' }).then(({ error }) => {
+      if (error) console.warn('Ladder sync failed:', error.message);
+    });
+  }
+
+  async function fetchLadder(limit = 50) {
+    const seasonId = currentSeasonId();
+    if (!client) return { entries: [], seasonId, window: seasonWindow(seasonId), selfId: null };
+    const { data, error } = await client.from('ladder_entries')
+      .select('user_id,name,country,rating,wins,losses,matches')
+      .eq('season_id', seasonId).order('rating', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return { entries: data || [], seasonId, window: seasonWindow(seasonId), selfId: userId };
+  }
 
   // Never merge a guest's rating into an authenticated account implicitly.
   async function loadUser(session) {
@@ -44,6 +70,7 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
     applyProfile(fields(profile)); loaded = true;
     badge.textContent = 'Cloud profile · unverified statistics';
     say('Signed in. Cloud profile loaded.');
+    upsertLadder(id, fields(profile)); // refresh/create this week's ladder row on every sign-in
   }
   function save() {
     if (!client || !userId || !loaded) return;
@@ -55,6 +82,7 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
         if (id !== userId || !loaded) return;
         const { error } = await client.from('player_profiles').update(snapshot).eq('user_id', id);
         if (id === userId) badge.textContent = error ? 'Cloud save failed · retry via account' : 'Cloud saved · unverified statistics';
+        if (!error) await upsertLadder(id, snapshot);
       }).catch(() => { badge.textContent = 'Cloud save failed · retry via account'; });
     }, 500);
   }
@@ -98,7 +126,7 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
   if (!authConfig.url || !authConfig.publishableKey) {
     say('Cloud accounts are not configured yet. Guest mode remains available.');
     setBusy(true);
-    return { save, active: () => false };
+    return { save, active: () => false, fetchLadder };
   }
   try {
     const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.102.0');
@@ -117,5 +145,5 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
     if (error) throw error;
     await loadUser(data.session);
   } catch (error) { say('Cloud connection unavailable: ' + error.message); }
-  return { save, active: () => Boolean(userId) };
+  return { save, active: () => Boolean(userId), fetchLadder };
 }
