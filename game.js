@@ -3289,7 +3289,8 @@ function throwGrenade(type, far = true){
   if (type === 'smoke') { smokeCount--; updateGrenadeHUD(); }
   else if (type === 'flash') { flashCount--; updateGrenadeHUD(); }
   else { grenadeCount--; updateGrenadeHUD(); }
-  if (!audio.playSample('grenadeThrow', 0.85)) audio.mechClick(420, 0.16, 0.05);
+  const throwSample = type === 'flash' ? 'flashbang' : 'grenadeThrow';
+  if (!audio.playSample(throwSample, 0.85)) audio.mechClick(420, 0.16, 0.05);
 
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   dir.y += 0.18;
@@ -3376,7 +3377,7 @@ function applyFlashTo(from, point, def, onHit){
 }
 
 function detonateFlash(point){
-  if (!audio.playSample('flashbang', 0.9)) audio.explosion();
+  if (!audio.playSample('explosion', 0.5)) audio.explosion();
   const light = new THREE.PointLight(0xffffff, 9, 22);
   light.position.copy(point);
   scene.add(light);
