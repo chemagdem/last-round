@@ -5231,11 +5231,15 @@ function respawnInWarmup(){
 // ============================================================
 // MOVEMENT / COLLISION
 // ============================================================
-function checkCollision(newPos){
+// feetYOverride lets live gameplay movement test against where the player's feet actually are
+// right now (so jumping up onto a crate and walking around on top of it doesn't get blocked by
+// the crate itself) - callers that just need "is this spot clear at ground level" (spawn checks)
+// omit it and get the old terrain-based assumption.
+function checkCollision(newPos, feetYOverride){
   // player.pos.y is eye height (ground + height/crouchHeight), not feet height - the box has to
   // span feet-to-head or it floats above anything shorter than the player and never touches it
   const radius = 0.5;
-  const feetY = groundHeightAt(newPos.x, newPos.z);
+  const feetY = feetYOverride ?? groundHeightAt(newPos.x, newPos.z);
   const topY = feetY + (player.crouching ? player.crouchHeight : player.height);
   const box = new THREE.Box3(
     new THREE.Vector3(newPos.x - radius, feetY, newPos.z - radius),
@@ -5302,15 +5306,21 @@ function updatePlayer(dt){
   const horizontalSpeed = Math.hypot(movementVelocity.x, movementVelocity.z);
   const crosshairGap = 4 + combatMotion.bloom + THREE.MathUtils.clamp(horizontalSpeed / player.speed, 0, 1.7) * 5 + (player.onGround ? 0 : 5);
   document.documentElement.style.setProperty('--crosshair-gap', `${crosshairGap.toFixed(1)}px`);
+  // use where the player's feet actually are right now, not the terrain's default assumption -
+  // otherwise standing on top of a crate you jumped onto would immediately collide with that
+  // same crate the instant you tried to take a step. The +0.05 keeps the collision box from
+  // exactly touching whatever's directly underfoot - resting exactly on a box's top face
+  // otherwise reads as an intersection (shared boundary) and freezes all horizontal movement.
+  const liveFeetY = player.pos.y - (player.crouching ? player.crouchHeight : player.height) + 0.05;
   const newPos = player.pos.clone().addScaledVector(movementVelocity, dt);
-  if (!checkCollision(newPos)) {
+  if (!checkCollision(newPos, liveFeetY)) {
     player.pos.x = newPos.x; player.pos.z = newPos.z;
   } else {
     const tryX = player.pos.clone(); tryX.x = newPos.x;
-    if (!checkCollision(tryX)) player.pos.x = newPos.x;
+    if (!checkCollision(tryX, liveFeetY)) player.pos.x = newPos.x;
     else movementVelocity.x = 0;
     const tryZ = player.pos.clone(); tryZ.z = newPos.z;
-    if (!checkCollision(tryZ)) player.pos.z = newPos.z;
+    if (!checkCollision(tryZ, liveFeetY)) player.pos.z = newPos.z;
     else movementVelocity.z = 0;
   }
 
@@ -5322,12 +5332,27 @@ function updatePlayer(dt){
   const targetHeight = player.crouching ? player.crouchHeight : player.height;
 
   const jumpDown = !!keys[settings.binds.jump];
-  if (jumpDown && !jumpWasDown && player.onGround && !player.crouching) { player.velY = 5.2; player.onGround = false; }
+  // 7.5 clears the top of a typical ~1.6-1.7-tall crate/barrel with a bit of room to spare -
+  // just enough to actually land on one instead of bumping into the side of it
+  if (jumpDown && !jumpWasDown && player.onGround && !player.crouching) { player.velY = 7.5; player.onGround = false; }
   jumpWasDown = jumpDown;
   player.velY -= 14 * dt;
   player.pos.y += player.velY * dt;
 
-  const floorY = groundY + targetHeight;
+  // landing on top of a crate/barrel works the same way as landing on terrain: take whichever is
+  // higher, terrain or the top of any collider under the player's feet - but only a collider
+  // whose top is at or just below our own feet, so this never snaps the player up onto the side
+  // of something they're merely walking into
+  let standY = groundY;
+  const radius = 0.5;
+  const feetAfterFall = player.pos.y - targetHeight;
+  for (const c of colliders) {
+    if (player.pos.x < c.min.x - radius || player.pos.x > c.max.x + radius) continue;
+    if (player.pos.z < c.min.z - radius || player.pos.z > c.max.z + radius) continue;
+    if (c.max.y > standY && c.max.y <= feetAfterFall + 0.35) standY = c.max.y;
+  }
+
+  const floorY = standY + targetHeight;
   if (player.pos.y <= floorY) { player.pos.y = floorY; player.velY = 0; player.onGround = true; }
 
   camera.position.set(player.pos.x + shakeX, player.pos.y + shakeY, player.pos.z);
