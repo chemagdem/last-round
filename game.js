@@ -2342,11 +2342,16 @@ const keys = {};
 let mouseLocked = false;
 
 // ---------- Settings: sensitivity + rebindable keys, persisted across reloads ----------
+// Sprint defaults to Shift (not Ctrl): holding Ctrl while tapping W/A/S/D collides with
+// Ctrl+W/Ctrl+N/etc, browser shortcuts a page is never allowed to preventDefault() - holding
+// sprint-forward would silently close the tab. Crouch takes Ctrl instead, since crouch is a
+// quick tap, not something held down continuously alongside WASD.
 const DEFAULT_BINDS = {
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
-  jump: 'Space', crouch: 'ShiftLeft', sprint: 'ControlLeft',
+  jump: 'Space', crouch: 'ControlLeft', sprint: 'ShiftLeft',
   reload: 'KeyR', shop: 'KeyB', inspect: 'KeyF'
 };
+const LEGACY_DEFAULT_BINDS = { ...DEFAULT_BINDS, crouch: 'ShiftLeft', sprint: 'ControlLeft' };
 const BIND_LABELS = {
   forward: 'MOVE FORWARD', back: 'MOVE BACK', left: 'MOVE LEFT', right: 'MOVE RIGHT',
   jump: 'JUMP', crouch: 'CROUCH', sprint: 'SPRINT',
@@ -2364,6 +2369,13 @@ const settings = { sensitivity: 1, reducedMotion: true, graphics: 'balanced', fo
       if (saved.binds) Object.assign(settings.binds, saved.binds);
     }
   } catch (err) { /* corrupt/blocked storage - just use defaults */ }
+  // one-time migration: only touch crouch/sprint if they still exactly match the OLD default
+  // combo (i.e. this player never customized either one) - an intentional custom bind is left
+  // alone even if it happens to be Ctrl
+  if (settings.binds.crouch === LEGACY_DEFAULT_BINDS.crouch && settings.binds.sprint === LEGACY_DEFAULT_BINDS.sprint) {
+    settings.binds.crouch = DEFAULT_BINDS.crouch;
+    settings.binds.sprint = DEFAULT_BINDS.sprint;
+  }
 })();
 function saveSettings(){
   try { localStorage.setItem('lastRoundSettings', JSON.stringify(settings)); } catch (err) { /* private window / storage blocked - setting still works this session */ }
