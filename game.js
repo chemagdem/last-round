@@ -5332,11 +5332,14 @@ function updatePlayer(dt){
   const targetHeight = player.crouching ? player.crouchHeight : player.height;
 
   const jumpDown = !!keys[settings.binds.jump];
-  // 7.5 clears the top of a typical ~1.6-1.7-tall crate/barrel with a bit of room to spare -
-  // just enough to actually land on one instead of bumping into the side of it
-  if (jumpDown && !jumpWasDown && player.onGround && !player.crouching) { player.velY = 7.5; player.onGround = false; }
+  // Raising velY alone (keeping the old gravity) made the jump reach the same height but hang in
+  // the air far longer, which read as low-gravity/floaty. Scaling gravity up together with velY
+  // keeps roughly the original snappy up-and-down timing while still clearing a typical
+  // ~1.6-1.7-tall crate/barrel (max height ~1.74) with a little room to spare.
+  const GRAVITY = 26;
+  if (jumpDown && !jumpWasDown && player.onGround && !player.crouching) { player.velY = 9.5; player.onGround = false; }
   jumpWasDown = jumpDown;
-  player.velY -= 14 * dt;
+  player.velY -= GRAVITY * dt;
   player.pos.y += player.velY * dt;
 
   // landing on top of a crate/barrel works the same way as landing on terrain: take whichever is
