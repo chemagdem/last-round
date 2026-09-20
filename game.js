@@ -1626,7 +1626,27 @@ const MAPS = {
 let selectedMap = 'arena';
 
 let currentMapMeta = null;
+let persistentSceneObjects = null;
 function buildMap(id){
+  if (!persistentSceneObjects) persistentSceneObjects = new Set(scene.children);
+  else {
+    // Keep sky, global lights and the camera; remove the previous arena and effects.
+    const geometries = new Set();
+    for (const object of [...scene.children]) {
+      if (persistentSceneObjects.has(object)) continue;
+      scene.remove(object);
+      object.traverse(child => {
+        if (child.geometry) geometries.add(child.geometry);
+        // Maps and actors share materials/textures: retain those caches across matches.
+      });
+    }
+    geometries.forEach(geometry => geometry.dispose());
+    colliders.length = 0; envMeshes.length = 0; floorMeshes.length = 0;
+    enemies.length = 0; particles.length = 0; grenades.length = 0;
+    activeSmokes.length = 0; bulletTracers.length = 0; decals.length = 0;
+    graffitiDecals.forEach(decal => decal.mat.dispose());
+    graffitiDecals.length = 0;
+  }
   const result = MAPS[id].build();
   currentMapMeta = result;
   player.pos.copy(result.spawn);
@@ -2230,12 +2250,18 @@ function buildWeaponVisual(id){
   };
 }
 
-function equipSlot(slot){
+function equipSlot(slot, force = false){
   if (slot === 'primary' && !inventory.primary) return;
   if (slot === 'secondary' && !inventory.secondary) return;
   if (slot === 'grenade' && grenadeCount <= 0) return;
   if (slot === 'smoke' && smokeCount <= 0) return;
-  if (slot === currentSlot || reloadRuntime.reloading) return;
+  if (!force && (slot === currentSlot || reloadRuntime.reloading)) return;
+  if (force) {
+    reloadGeneration++;
+    reloadRuntime.reloading = false;
+    document.getElementById('reloadLabel').style.opacity = 0;
+  }
+  weaponRecoilT = -1;
   lastSlot = currentSlot;
   currentSlot = slot;
   player.ads = false;
@@ -2285,11 +2311,12 @@ const BIND_LABELS = {
   jump: 'JUMP', crouch: 'CROUCH', sprint: 'SPRINT',
   reload: 'RELOAD', shop: 'OPEN SHOP', inspect: 'INSPECT WEAPON'
 };
-const settings = { sensitivity: 1, binds: { ...DEFAULT_BINDS } };
+const settings = { sensitivity: 1, reducedMotion: true, binds: { ...DEFAULT_BINDS } };
 (function loadSettings(){
   try {
     const saved = JSON.parse(localStorage.getItem('lastRoundSettings') || 'null');
     if (saved) {
+      settings.reducedMotion = saved.reducedMotion !== false;
       if (typeof saved.sensitivity === 'number') settings.sensitivity = saved.sensitivity;
       if (saved.binds) Object.assign(settings.binds, saved.binds);
     }
@@ -2316,11 +2343,16 @@ function clearGameplayInput(){
   player.scopeLevel = 0;
   weaponInspectT = -1;
   weaponInspectId = null;
+  if (currentVisual && !reloadRuntime.reloading) {
+    currentVisual.group.position.set(0, 0, 0);
+    currentVisual.group.rotation.set(0, 0, 0);
+    weaponRecoilT = -1;
+  }
   boltRescopeLevel = 0;
   document.getElementById('tabScoreboard').style.display = 'none';
 }
 function restoreGameplayPointer(){
-  if (!gameStarted || !player.alive || shopOpen || pauseMenuOpen) return;
+  if (!gameStarted || !player.alive || shopOpen || pauseMenuOpen || matchFinished) return;
   try {
     const request = renderer.domElement.requestPointerLock();
     if (request?.catch) request.catch(() => socialUI.notice('Click the game to resume mouse control.'));
@@ -2408,6 +2440,9 @@ document.addEventListener('wheel', e => {
 // WEAPON / SHOOTING / RELOAD ANIMATION (generic across all weapons)
 // ============================================================
 const reloadRuntime = { reloading: false, reloadT: 0, duration: 1.5 };
+let reloadGeneration = 0;
+const sessionMetrics = { shots: 0, hits: 0, headshots: 0 };
+let matchFinished = false;
 let fireCooldown = 0;
 let knifeFlipT = -1;
 let weaponInspectT = -1;
@@ -2429,6 +2464,9 @@ function playKnifeFlip(){
 function playWeaponInspect(){
   if (!gameStarted || !player.alive || reloadRuntime.reloading || boltCyclingT > 0 || weaponInspectT >= 0) return;
   weaponInspectT = 0;
+  weaponRecoilT = -1;
+  currentVisual.group.position.set(0, 0, 0);
+  currentVisual.group.rotation.set(0, 0, 0);
   weaponInspectId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : inventory[currentSlot];
   player.ads = false;
   player.scopeLevel = 0;
@@ -2444,7 +2482,9 @@ function startReload(){
   reloadRuntime.duration = def.reloadDuration || 1.5;
   if (!audio.playSample('reload', 0.8)) audio.reloadSequence(reloadRuntime.duration, currentSlot === 'primary');
   document.getElementById('reloadLabel').style.opacity = 1;
+  const reloadToken = ++reloadGeneration;
   setTimeout(() => {
+    if (reloadToken !== reloadGeneration) return;
     const need = def.mag - state.mag;
     const take = Math.min(need, state.reserve);
     state.mag += take;
@@ -2457,11 +2497,11 @@ function startReload(){
 
 function updateReloadAnimation(dt){
   const magazine = currentVisual.magazine, chargingHandle = currentVisual.chargingHandle;
-  if (!magazine || !chargingHandle) { weaponGroup.rotation.x = 0; return; }
+  if (!magazine) { weaponGroup.rotation.x = 0; return; }
   if (!reloadRuntime.reloading) {
     magazine.position.y = currentVisual.magRestY;
     magazine.visible = true;
-    chargingHandle.position.x = currentVisual.chargeRestX;
+    if (chargingHandle) chargingHandle.position.x = currentVisual.chargeRestX;
     return;
   }
   reloadRuntime.reloadT += dt;
@@ -2490,6 +2530,7 @@ function updateReloadAnimation(dt){
     magazine.position.y = magRestY;
   }
 
+  if (!chargingHandle) return;
   if (p > 0.85) {
     const lp = (p - 0.85) / 0.15;
     chargingHandle.position.x = chargeRestX - Math.sin(lp * Math.PI) * 0.08;
@@ -2636,7 +2677,13 @@ const bulletTracers = [];
 const particles = []; // {mesh/sprite, vel, life, maxLife, type}
 
 function fireWeapon(){
-  if (!player.alive || reloadRuntime.reloading || weaponInspectT >= 0) return;
+  if (!player.alive || matchFinished || reloadRuntime.reloading) return;
+  if (weaponInspectT >= 0) {
+    weaponInspectT = -1;
+    weaponInspectId = null;
+    currentVisual.group.position.set(0, 0, 0);
+    currentVisual.group.rotation.set(0, 0, 0);
+  }
   const def = currentWeaponDef();
   const weaponId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : inventory[currentSlot];
 
@@ -2693,6 +2740,7 @@ function fireWeapon(){
   }
 
   const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
+  sessionMetrics.shots++;
   if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
   flashLight.intensity = 5;
   flashSpriteMat.opacity = 1;
@@ -2745,6 +2793,8 @@ function fireWeapon(){
 
   function resolveEnemyHit(hit, dmgFalloff){
     const isHeadshot = hit.object.userData.isHead === true;
+    sessionMetrics.hits++;
+    if (isHeadshot) sessionMetrics.headshots++;
     const isLimb = hit.object.userData.isLimb === true;
     const dmgMul = (isHeadshot ? 2.5 : (isLimb ? 0.75 : 1)) * dmgFalloff;
     let obj = hit.object;
@@ -3810,6 +3860,22 @@ let localPlayerName = 'Player';
 let netRoster = []; // [{id, team, isBot, name}] - authoritative on host, mirrored on clients
 let matchResultRecorded = false;
 const PVP_WEAPON_ROTATION = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp', 'knife'];
+let weaponBag = [], previousRoundWeapon = null;
+let matchEpoch = 0;
+function nextRoundWeapon(){
+  if (!weaponBag.length) {
+    weaponBag = [...PVP_WEAPON_ROTATION];
+    for (let i = weaponBag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [weaponBag[i], weaponBag[j]] = [weaponBag[j], weaponBag[i]];
+    }
+    if (weaponBag.at(-1) === previousRoundWeapon) {
+      [weaponBag[0], weaponBag[weaponBag.length - 1]] = [weaponBag.at(-1), weaponBag[0]];
+    }
+  }
+  previousRoundWeapon = weaponBag.pop();
+  return previousRoundWeapon;
+}
 
 function recordPvpResult(won){
   if (matchResultRecorded) return 0;
@@ -3830,7 +3896,7 @@ function recordPvpResult(won){
 }
 
 function netSend(conn, msg){
-  if (conn && conn.open) conn.send(msg);
+  if (conn && conn.open) conn.send({ ...msg, matchEpoch: msg.matchEpoch ?? matchEpoch });
 }
 function netBroadcast(msg, exceptId){
   if (netRole === 'host') {
@@ -3988,6 +4054,16 @@ function updateScoreboardNames(){
 
 function handleNetMessage(msg, fromId){
   if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+  if (msg.type === 'rematch') {
+    if (netRole === 'client' && fromId === 'host' && Number.isInteger(msg.matchEpoch)
+      && msg.matchEpoch > matchEpoch && Object.hasOwn(MAPS, msg.map)) {
+      beginRematch(msg.map, msg.matchEpoch);
+    }
+    return;
+  }
+  if ((msg.matchEpoch ?? 0) !== matchEpoch) return;
+  if (['roundStart', 'roundEnd', 'warmup'].includes(msg.type)
+    && (netRole !== 'client' || fromId !== 'host')) return;
   // Social messages use a separate validated route, before the legacy generic game relay.
   if (msg.type === 'chat' || msg.type === 'spray') {
     if (netRole === 'host') acceptSocialMessage(msg, fromId);
@@ -4164,7 +4240,40 @@ let warmupTimer = WARMUP_FULL;
 let warmupDroppedToShort = false;
 let warmupBroadcastT = 0;
 
-function startPvpMatch(){
+function beginRematch(map, epoch){
+  matchEpoch = epoch;
+  selectedMap = map;
+  document.getElementById('matchResult').close();
+  pauseMenuOpen = false; shopOpen = false;
+  document.getElementById('pauseMenu').style.display = 'none';
+  document.getElementById('buyMenu').style.display = 'none';
+  socialUI.cancel();
+  reloadGeneration++;
+  reloadRuntime.reloading = false;
+  clearGameplayInput();
+  boltCyclingT = 0; boltRescopeLevel = 0; knifeSwingT = -1;
+  recoilKick = 0; recoilYaw = 0; shakeIntensity = 0; regenDelayT = 0;
+  player.crouching = false;
+  inventory.primary = null; inventory.secondary = null;
+  grenadeCount = 0; smokeCount = 0;
+  Object.keys(ammoState).forEach(key => delete ammoState[key]);
+  Object.assign(sessionMetrics, { shots: 0, hits: 0, headshots: 0 });
+  document.getElementById('killfeed').replaceChildren();
+  document.getElementById('smokeOverlay').style.opacity = 0;
+  document.getElementById('waveBanner').style.opacity = 0;
+  buildMap(map);
+  // Reuse round spawn/equipment setup, then enter warmup rather than live play.
+  applyPvpRoundStart(1, 'glock', 0, 0);
+  startPvpMatch(15);
+  if (netRole !== 'host') applyWarmup(15);
+  document.getElementById('bombStatusLabel').textContent = '';
+  updateGrenadeHUD(); updateScoreboardNames();
+  restoreGameplayPointer();
+}
+
+function startPvpMatch(warmupSeconds = WARMUP_FULL){
+  matchFinished = false;
+  weaponBag = []; previousRoundWeapon = null;
   roundState.roundNum = 1;
   roundState.ctWins = 0; // team A score
   roundState.tWins = 0;  // team B score
@@ -4172,13 +4281,14 @@ function startPvpMatch(){
   recentAttackers = [];
   matchResultRecorded = false;
   warmupSpawnPlaced = false; // buildMap() always drops everyone at the map's generic (team A) spawn point - this needs correcting to the player's real team as soon as it's known, or a joining team B player stays stuck on team A's side for the whole warmup
-  if (netRole === 'host') startWarmup();
+  if (netRole === 'host') startWarmup(warmupSeconds);
 }
 
-function startWarmup(){
+function startWarmup(seconds = WARMUP_FULL){
   roundState.phase = 'warmup';
-  warmupTimer = WARMUP_FULL;
-  warmupDroppedToShort = false;
+  warmupTimer = seconds;
+  warmupDroppedToShort = seconds <= WARMUP_SHORT;
+  warmupBroadcastT = 1;
   broadcastWarmup();
 }
 
@@ -4243,13 +4353,20 @@ function ensureBotFill(){
 
 function startPvpRoundAsHost(){
   ensureBotFill();
-  const weapon = PVP_WEAPON_ROTATION[(roundState.roundNum - 1) % PVP_WEAPON_ROTATION.length];
+  const weapon = nextRoundWeapon();
   const msg = { type: 'roundStart', roundNum: roundState.roundNum, weapon, scoreA: roundState.ctWins, scoreB: roundState.tWins };
   applyPvpRoundStart(msg.roundNum, msg.weapon, msg.scoreA, msg.scoreB);
   netBroadcast(msg);
 }
 
 function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
+  reloadGeneration++;
+  reloadRuntime.reloading = false;
+  document.getElementById('reloadLabel').style.opacity = 0;
+  clearGameplayInput();
+  recoilKick = 0;
+  recoilYaw = 0;
+  fireCooldown = 0;
   roundState.roundNum = roundNum;
   roundState.ctWins = scoreA;
   roundState.tWins = scoreB;
@@ -4287,12 +4404,12 @@ function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
   updateHealthHUD();
 
   if (weaponId === 'knife') {
-    equipSlot('melee');
+    equipSlot('melee', true);
   } else {
     const def = WEAPONS[weaponId];
     inventory[def.slot] = weaponId;
     ammoState[def.slot] = { mag: def.mag, reserve: def.reserve };
-    equipSlot(def.slot);
+    equipSlot(def.slot, true);
   }
   updateAmmoHUD();
 
@@ -4338,12 +4455,26 @@ function applyPvpRoundEnd(winnerTeam, reason, scoreA, scoreB){
   const youWon = winnerTeam === myTeam();
   showWaveBanner(`${youWon ? 'ROUND WON' : 'ROUND LOST'} — ${reason}`);
   if (scoreA >= roundState.roundsToWin || scoreB >= roundState.roundsToWin) {
+    matchFinished = true;
+    clearGameplayInput();
     const eloDelta = recordPvpResult(youWon);
+    const finishedEpoch = matchEpoch;
     setTimeout(() => {
+      if (finishedEpoch !== matchEpoch || !matchFinished) return;
       const el = document.getElementById('waveBanner');
       const sign = eloDelta >= 0 ? '+' : '';
       el.textContent = `${(winnerTeam === myTeam()) ? 'VICTORY' : 'DEFEAT'} · ELO ${sign}${eloDelta}`;
       el.style.opacity = 1;
+      document.exitPointerLock();
+      document.getElementById('resultTitle').textContent = youWon ? 'VICTORY' : 'DEFEAT';
+      document.getElementById('resultScore').textContent = `${scoreA} : ${scoreB}`;
+      const stats = ensureStats(netMyId);
+      document.getElementById('resultDetail').textContent = `${stats.kills} KILLS / ${stats.assists} ASSISTS / ${stats.deaths} DEATHS`;
+      document.getElementById('resultRating').textContent = `PROVISIONAL RATING ${sign}${eloDelta} · ${playerProfile.rating}`;
+      document.getElementById('matchResult').showModal();
+      document.getElementById('rematchMap').value = selectedMap;
+      document.getElementById('rematchControls').hidden = netRole !== 'host';
+      document.getElementById('rematchWaiting').hidden = netRole === 'host';
     }, 2200);
     return;
   }
@@ -4595,13 +4726,14 @@ function checkCollision(newPos){
 
 function updatePlayer(dt){
   if (!player.alive) return;
+  if (shopOpen || pauseMenuOpen || matchFinished) return;
 
   // recoil / shake decay
   recoilKick = Math.max(0, recoilKick - dt * 0.08);
   recoilYaw += (0 - recoilYaw) * Math.min(1, dt * 3);
   shakeIntensity = Math.max(0, shakeIntensity - dt * 2.5);
-  const shakeX = (Math.random() - 0.5) * shakeIntensity * 0.01;
-  const shakeY = (Math.random() - 0.5) * shakeIntensity * 0.01;
+  const shakeX = settings.reducedMotion ? 0 : (Math.random() - 0.5) * shakeIntensity * 0.01;
+  const shakeY = settings.reducedMotion ? 0 : (Math.random() - 0.5) * shakeIntensity * 0.01;
 
   camera.rotation.order = 'YXZ';
   camera.rotation.y = player.yaw + recoilYaw + shakeX;
@@ -4745,6 +4877,7 @@ function updateMoneyHUD(){
 function updateHealthHUD(){
   const pct = Math.max(0, player.health / player.maxHealth * 100);
   document.getElementById('healthInner').style.width = pct + '%';
+  document.getElementById('healthbar').classList.toggle('lowHealth', pct <= 25);
   document.getElementById('healthValue').textContent = `${Math.ceil(Math.max(0, player.health))}`;
   const danger = 1 - pct / 100;
   document.getElementById('vignette').style.boxShadow = `inset 0 0 ${120 * danger}px ${40 * danger}px rgba(160,0,0,${0.55 * danger})`;
@@ -4859,11 +4992,12 @@ let pauseMenuOpen = false;
 let listeningForBind = null; // action name currently waiting for a keypress, or null
 
 function togglePauseMenu(){
-  if (!gameStarted || shopOpen) return;
+  if (!gameStarted || shopOpen || matchFinished) return;
+  document.getElementById('practiceTools').hidden = gameMode !== 'practice';
   socialUI.cancel();
   pauseMenuOpen = !pauseMenuOpen;
   document.getElementById('pauseMenu').style.display = pauseMenuOpen ? 'flex' : 'none';
-  if (pauseMenuOpen) { document.exitPointerLock(); mouseDown = false; listeningForBind = null; renderBindList(); }
+  if (pauseMenuOpen) { document.exitPointerLock(); clearGameplayInput(); listeningForBind = null; renderBindList(); }
   else renderer.domElement.requestPointerLock();
 }
 
@@ -4894,7 +5028,15 @@ document.addEventListener('keydown', e => {
   listeningForBind = null;
   saveSettings();
   renderBindList();
+  refreshControlHints();
 });
+
+function refreshControlHints(){
+  const hints = document.querySelectorAll('#buyHint .hudKey');
+  if (hints[0]) hints[0].textContent = keyLabel(settings.binds.shop);
+  if (hints[2]) hints[2].textContent = keyLabel(settings.binds.inspect);
+}
+refreshControlHints();
 
 document.getElementById('sensSlider').addEventListener('input', e => {
   settings.sensitivity = parseFloat(e.target.value);
@@ -4905,6 +5047,41 @@ document.getElementById('sensSlider').value = settings.sensitivity;
 document.getElementById('sensValue').textContent = settings.sensitivity.toFixed(1);
 
 document.getElementById('resumeBtn').addEventListener('click', togglePauseMenu);
+document.getElementById('resultReturn').addEventListener('click', () => location.reload());
+document.getElementById('rematchStart').addEventListener('click', () => {
+  if (netRole !== 'host' || !matchFinished) return;
+  const map = document.getElementById('rematchMap').value;
+  if (!Object.hasOwn(MAPS, map)) return;
+  const epoch = matchEpoch + 1;
+  // Reliable ordered PeerJS channels deliver this before the new warmup packets.
+  netBroadcast({ type: 'rematch', map, matchEpoch: epoch });
+  beginRematch(map, epoch);
+});
+const trainingWeaponPicker = document.getElementById('practiceWeapon');
+Object.entries(WEAPONS).filter(([, def]) => ['primary', 'secondary'].includes(def.slot)).forEach(([id, def]) => {
+  const option = document.createElement('option');
+  option.value = id;
+  option.textContent = def.name;
+  trainingWeaponPicker.appendChild(option);
+});
+trainingWeaponPicker.addEventListener('change', () => {
+  if (gameMode !== 'practice') return;
+  const id = trainingWeaponPicker.value, def = WEAPONS[id];
+  if (!def) return;
+  inventory[def.slot] = id;
+  ammoState[def.slot] = { mag: def.mag, reserve: def.reserve };
+  equipSlot(def.slot, true);
+});
+document.getElementById('resetTraining').addEventListener('click', () => {
+  if (gameMode === 'practice') Object.assign(sessionMetrics, { shots: 0, hits: 0, headshots: 0 });
+});
+document.getElementById('matchResult').addEventListener('cancel', event => event.preventDefault());
+document.getElementById('reducedMotion').checked = settings.reducedMotion;
+document.getElementById('reducedMotion').addEventListener('change', event => {
+  settings.reducedMotion = event.target.checked;
+  saveSettings();
+});
+window.addEventListener('blur', () => { if (gameStarted) clearGameplayInput(); });
 document.getElementById('mainMenuBtn').addEventListener('click', () => location.reload());
 
 // ============================================================
@@ -4915,7 +5092,12 @@ function renderTabScoreboard(){
   body.innerHTML = '';
   const addRow = (name, team, k, a, d) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${name}</td><td>${team}</td><td class="num">${k}</td><td class="num">${a}</td><td class="num">${d}</td>`;
+    [name, team, k, a, d].forEach((value, index) => {
+      const cell = document.createElement('td');
+      cell.textContent = String(value);
+      if (index > 1) cell.className = 'num';
+      tr.appendChild(cell);
+    });
     body.appendChild(tr);
   };
   if (gameMode === 'pvp') {
@@ -4946,7 +5128,7 @@ function buyWeapon(id){
   inventory[def.slot] = id;
   ammoState[def.slot] = { mag: def.mag, reserve: def.reserve };
   updateMoneyHUD();
-  equipSlot(def.slot);
+  equipSlot(def.slot, true);
   renderBuyMenu();
 }
 
@@ -5009,7 +5191,7 @@ function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  if (gameStarted && !shopOpen && !pauseMenuOpen) {
+  if (gameStarted && !matchFinished && (gameMode === 'pvp' || (!shopOpen && !pauseMenuOpen))) {
     updatePlayer(dt);
     updatePlayerRegen(dt);
     updateEnemies(dt);
@@ -5023,7 +5205,11 @@ function animate(){
     document.getElementById('smokeOverlay').style.opacity = pointInAnySmoke(player.pos.x, player.pos.z) ? 1 : 0;
     if (gameMode === 'bomb') updateRound(dt);
     if (gameMode === 'pvp') updatePvpRound(dt);
-    if (gameMode === 'practice') updatePractice(dt);
+    if (gameMode === 'practice') {
+      updatePractice(dt);
+      document.getElementById('trainingStats').hidden = false;
+      document.getElementById('trainingStats').textContent = `ACCURACY ${sessionMetrics.shots ? Math.round(sessionMetrics.hits / sessionMetrics.shots * 100) : 0}% · ${sessionMetrics.hits} HITS · ${sessionMetrics.headshots} HEADSHOTS`;
+    }
 
     // drifting clouds
     clouds.forEach((c, i) => { c.position.x += dt * (2 + (i % 3)); if (c.position.x > 300) c.position.x = -300; });
@@ -5235,7 +5421,9 @@ document.getElementById('playerNameInput').addEventListener('input', e => {
   renderProfileUI();
 });
 document.getElementById('playerNameInput').value = playerProfile.name === 'Player' ? '' : playerProfile.name;
-mountAccount({
+// Cloud integration is parked; retain the implementation for a future release.
+const CLOUD_ACCOUNTS_ENABLED = false;
+if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   readProfile: () => playerProfile,
   isPlaying: () => gameStarted,
   applyProfile: profile => {

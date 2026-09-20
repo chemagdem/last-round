@@ -1,0 +1,32 @@
+/* Tactical hierarchy with restrained accents and readable numeric information. */
+#ammo{bottom:27px;right:28px;padding:12px 18px;background:linear-gradient(110deg,#101418e8,#181214ce);border-right:3px solid #d7b66c;border-bottom:1px solid #ffffff20;min-width:164px;line-height:1.2;font-variant-numeric:tabular-nums}
+#ammo #ammoLabel{font-size:11px;letter-spacing:2px;color:#bbc3c8}
+#ammo #ammoCount{font-size:34px;font-weight:700;color:#f5f6f7}
+#ammo #ammoReserve{font-size:17px;color:#a4afb6}
+#buyHint{bottom:124px;flex-wrap:wrap;max-width:calc(100vw - 56px)}
+#reloadLabel{bottom:103px;color:#d7b66c;font-size:10px}
+#trainingStats{position:absolute;top:72px;left:50%;transform:translateX(-50%);padding:8px 14px;background:#101418dc;border-bottom:1px solid #d7b66c;color:#dce2e5;font-size:11px;letter-spacing:1px;white-space:nowrap;font-variant-numeric:tabular-nums}
+#matchResult{width:min(560px,92vw);padding:40px;text-align:center;color:#edf1f3;background:radial-gradient(ellipse at top,#51201d,#11161b 65%);border:1px solid #d7b66c70;border-top:3px solid #e5473c;border-radius:8px;box-shadow:0 24px 100px #0009}
+#matchResult::backdrop{background:#030609cf;backdrop-filter:blur(8px)}
+#matchResult h2{font-family:Baserona,'Segoe UI',sans-serif;font-size:42px;letter-spacing:4px;margin:24px 0 12px}
+#resultScore{font-size:66px;font-weight:800;font-variant-numeric:tabular-nums}
+.resultEyebrow,#resultRating{font-size:10px;letter-spacing:2px;color:#d7b66c}
+#resultDetail{font-size:13px;letter-spacing:1px;color:#c1cbd2}
+#rematchControls{margin-top:22px;padding:18px;border:1px solid #d7b66c55;background:#10151a}
+#rematchControls label{display:block;color:#d7b66c;font-size:10px;letter-spacing:2px;margin-bottom:10px}
+#rematchMap{width:100%;padding:10px;color:white;background:#171e25;border:1px solid #69727b}
+#rematchStart{width:100%;margin-top:12px;padding:14px;background:#a83228;border:1px solid #ed7061;color:white;font-weight:700;cursor:pointer}
+#rematchWaiting{color:#d7b66c;font-size:12px}
+#resultReturn{margin-top:22px;padding:14px 24px;border:1px solid #ff7669;background:#9a2921;color:white;font-weight:700;letter-spacing:2px;cursor:pointer}
+.motionSetting{font-size:11px;color:#c8d0d6;letter-spacing:1px;margin:14px}
+#practiceTools{width:min(340px,90vw);padding:16px;border:1px solid #d7b66c44;background:#151b20}
+#practiceTools label{font-size:10px;color:#d7b66c;letter-spacing:2px;display:block;margin-bottom:10px}
+#practiceWeapon{width:100%;padding:10px;background:#0d1217;color:#eef2f5;border:1px solid #515961}
+#accountButton,#accountState{display:none}
+#profileDock{top:52px;width:236px}
+#pauseMenu{background:radial-gradient(ellipse at top,#251819f5,#090d11f5)}
+#healthbar.lowHealth{border-left-color:#ff7065}
+#healthbar.lowHealth #healthValue{color:#ff867b}
+button:focus-visible{outline:2px solid #d7b66c;outline-offset:4px}
+@media(max-width:1000px){#profileDock{position:relative!important;top:auto;right:auto;width:min(92vw,340px);margin:10px auto}#trainingStats{top:76px;font-size:9px;max-width:94vw;white-space:normal;text-align:center}}
+@media(prefers-reduced-motion:reduce){#logo{animation:none}.mapCard,.skinCard{transition:none}}

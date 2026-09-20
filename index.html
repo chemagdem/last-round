@@ -6,6 +6,7 @@
 <link rel="icon" type="image/png" href="assets/logo.png">
 <link rel="stylesheet" href="social.css">
 <link rel="stylesheet" href="account.css">
+<link rel="stylesheet" href="polish.css">
 <style>
   @font-face{font-family:'Baserona';src:url('assets/fonts/Baserona.ttf') format('truetype');font-display:swap;}
   :root{--accent:#ff493d;--panel:rgba(8,10,12,.88);--line:rgba(255,255,255,.12);--crosshair-gap:5px;--crosshair-size:8px;}
@@ -317,6 +318,22 @@
   </section>
 </div>
 
+<dialog id="matchResult" aria-labelledby="resultTitle">
+  <span class="resultEyebrow">LAST ROUND / MATCH COMPLETE</span>
+  <h2 id="resultTitle">VICTORY</h2>
+  <strong id="resultScore">0 : 0</strong>
+  <p id="resultDetail"></p><p id="resultRating"></p>
+  <div id="rematchControls" hidden>
+    <label for="rematchMap">NEXT BATTLEFIELD</label>
+    <select id="rematchMap">
+      <option value="arena">DESERT</option><option value="warehouse">WAREHOUSE</option>
+      <option value="subway">SUBWAY</option><option value="skyline">SKYLINE</option>
+    </select>
+    <button id="rematchStart" type="button">PLAY AGAIN · 15s WARMUP</button>
+  </div>
+  <p id="rematchWaiting" hidden>Waiting for the host to choose the next map…</p>
+  <button id="resultReturn" type="button">BACK TO HQ</button>
+</dialog>
 <dialog id="accountDialog" aria-labelledby="accountTitle">
   <h2 id="accountTitle">PLAYER ACCOUNT</h2>
   <p id="accountStatus" role="status">Sign in to save your profile across devices. Statistics are unverified.</p>
@@ -360,6 +377,7 @@
     <div class="tick tick-right"></div>
   </div>
   <div id="hitmarker"></div>
+  <div id="trainingStats" hidden></div>
   <div id="hitFlash"></div>
   <div id="vignette"></div>
   <div id="centerMessage"></div>
@@ -409,6 +427,12 @@
     <div id="bindList"></div>
   </div>
   <div class="pauseBtnRow">
+    <section id="practiceTools" hidden>
+      <label for="practiceWeapon">TRAINING LOADOUT</label>
+      <select id="practiceWeapon"><option value="">SELECT WEAPON</option></select>
+      <button class="pauseBtn" id="resetTraining" type="button">RESET ACCURACY</button>
+    </section>
+    <label class="motionSetting"><input type="checkbox" id="reducedMotion"> REDUCED CAMERA MOTION</label>
     <button class="pauseBtn" id="resumeBtn">RESUME</button>
     <button class="pauseBtn" id="mainMenuBtn">MAIN MENU</button>
   </div>
