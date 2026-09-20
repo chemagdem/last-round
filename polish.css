@@ -35,7 +35,6 @@
 #practiceTools{width:min(340px,90vw);padding:16px;border:1px solid #d7b66c44;background:#151b20}
 #practiceTools label{font-size:10px;color:#d7b66c;letter-spacing:2px;display:block;margin-bottom:10px}
 #practiceWeapon{width:100%;padding:10px;background:#0d1217;color:#eef2f5;border:1px solid #515961}
-#accountButton,#accountState{display:none}
 #profileDock{top:52px;width:236px}
 #pauseMenu{background:radial-gradient(ellipse at top,#251819f5,#090d11f5)}
 #healthbar.lowHealth{border-left-color:#ff7065}
