@@ -1751,6 +1751,10 @@ let jumpWasDown = false;
 camera.position.copy(player.pos);
 camera.fov = baseFov;
 
+// flashbang whiteout state (see detonateFlash) - playerFlashT counts down to 0, playerFlashMax is
+// whatever it was set to on the hit that's currently fading, used to compute the overlay's opacity
+let playerFlashT = 0, playerFlashMax = 0;
+
 // screen shake / recoil state
 let shakeIntensity = 0;
 let recoilKick = 0; // additive pitch kick (radians), decays
@@ -1793,7 +1797,10 @@ const WEAPONS = {
   m4a1:   { name: 'M4A1-S', slot: 'primary', price: 2750, dmg: 35, mag: 20, reserve: 80, fireRate: 0.11, range: 150, reloadDuration: 1.6, zoomFov: 45, kickPush: 0.04, kickTilt: 0.055 },
   awp:    { name: 'AWP', slot: 'primary', price: 4500, dmg: 115, mag: 5, reserve: 30, fireRate: 1.35, range: 320, reloadDuration: 2.4, zoomFov: 12, scope: true, scopeFov2: 5, kickPush: 0.15, kickTilt: 0.2, boltAction: true },
   grenade:{ name: 'Grenade', slot: 'grenade', price: 350, dmg: 130, radius: 9, fireRate: 0.8 },
-  smoke:  { name: 'Smoke Grenade', slot: 'smoke', price: 300, radius: 10, duration: 14, fireRate: 0.8 }
+  smoke:  { name: 'Smoke Grenade', slot: 'smoke', price: 300, radius: 10, duration: 14, fireRate: 0.8 },
+  // radius is the max effective range of the blind, duration is how long a point-blank (distance
+  // 0, full line of sight) hit lasts - both taper to 0 by the time you reach the edge of radius
+  flash:  { name: 'Flashbang', slot: 'flash', price: 200, radius: 13, duration: 3.4, fireRate: 0.8 }
 };
 
 // per-weapon gunshot timbre for the synthesized audio engine (see SoundEngine.gunshot)
@@ -1824,6 +1831,8 @@ const MAX_GRENADES = 3;
 let grenadeCount = 0;
 const MAX_SMOKES = 2;
 let smokeCount = 0;
+const MAX_FLASHES = 2;
+let flashCount = 0;
 
 const weaponGroup = new THREE.Group();
 // First-person weapon proportions: the previous procedural meshes were technically small in
@@ -1909,6 +1918,7 @@ const handleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0
 const knifeHandleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, bumpMap: checkeredGripTexture(), bumpScale: 0.0004, roughness: 0.75 });
 const grenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#384a24'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.65, metalness: 0.15 });
 const smokeGrenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#8a8f88'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.2 });
+const flashMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d8d8d0'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.35, metalness: 0.55 });
 
 // weapon aim position (hip vs ADS)
 const hipPos = new THREE.Vector3(0, 0, 0);
@@ -2301,6 +2311,20 @@ function buildWeaponVisual(id){
       muzzle = null;
       break;
     }
+    case 'flash': {
+      // same spoon/pin silhouette as the frag, but a bright silver body so it's never mistaken
+      // for the olive frag or the grey smoke canister at a glance
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.078, 12, 10), flashMat);
+      body.position.set(0.22, -0.22, -0.3);
+      const lever = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.07, 0.015), gunMatLight);
+      lever.position.set(0.27, -0.14, -0.3);
+      const pin = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.006, 6, 10), gunMatLight);
+      pin.position.set(0.31, -0.13, -0.3);
+      pin.rotation.y = Math.PI / 2;
+      group.add(body, lever, pin);
+      muzzle = null;
+      break;
+    }
   }
 
   const sight = attachWeaponSight(group, id, gunMatLight);
@@ -2320,6 +2344,7 @@ function equipSlot(slot, force = false){
   if (slot === 'secondary' && !inventory.secondary) return;
   if (slot === 'grenade' && grenadeCount <= 0) return;
   if (slot === 'smoke' && smokeCount <= 0) return;
+  if (slot === 'flash' && flashCount <= 0) return;
   if (!force && (slot === currentSlot || reloadRuntime.reloading)) return;
   if (force) {
     reloadGeneration++;
@@ -2333,7 +2358,7 @@ function equipSlot(slot, force = false){
   player.scopeLevel = 0;
   weaponInspectT = -1;
   weaponInspectId = null;
-  const id = slot === 'melee' ? 'knife' : slot === 'grenade' ? 'grenade' : slot === 'smoke' ? 'smoke' : inventory[slot];
+  const id = slot === 'melee' ? 'knife' : slot === 'grenade' ? 'grenade' : slot === 'smoke' ? 'smoke' : slot === 'flash' ? 'flash' : inventory[slot];
   if (currentVisual) weaponGroup.remove(currentVisual.group);
   currentVisual = buildWeaponVisual(id);
   currentVisual.group.visible = id !== 'knife' || knifeAvailable;
@@ -2508,13 +2533,13 @@ document.addEventListener('mousedown', e => {
   if (e.button === 0) mouseDown = true;
   if (e.button === 2) {
     const def = currentWeaponDef();
-    // right click on a grenade/smoke throws short instead of aiming down sights
+    // right click on a grenade/smoke/flash throws short instead of aiming down sights
     if (currentSlot === 'melee') {
       throwKnife();
-    } else if (currentSlot === 'grenade' || currentSlot === 'smoke') {
+    } else if (currentSlot === 'grenade' || currentSlot === 'smoke' || currentSlot === 'flash') {
       if (player.alive && !reloadRuntime.reloading && fireCooldown <= 0) {
         fireCooldown = def.fireRate;
-        throwGrenade(currentSlot === 'grenade' ? 'frag' : 'smoke', false);
+        throwGrenade(currentSlot === 'grenade' ? 'frag' : currentSlot === 'smoke' ? 'smoke' : 'flash', false);
       }
     } else if (def.scope) {
       if (def.boltAction && boltCyclingT > 0) return; // busy working the bolt - the scope comes back on its own once it's done
@@ -2540,6 +2565,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Digit3') equipSlot('melee');
   if (e.code === 'Digit4') equipSlot('grenade');
   if (e.code === 'Digit5') equipSlot('smoke');
+  if (e.code === 'Digit6') equipSlot('flash');
   if (e.code === 'KeyQ') equipSlot(lastSlot);
   if (e.code === settings.binds.inspect) playWeaponInspect();
   if (e.code === settings.binds.shop) toggleBuyMenu();
@@ -2551,6 +2577,7 @@ document.addEventListener('wheel', e => {
   if (inventory.primary) owned.push('primary');
   if (grenadeCount > 0) owned.push('grenade');
   if (smokeCount > 0) owned.push('smoke');
+  if (flashCount > 0) owned.push('flash');
   const idx = owned.indexOf(currentSlot);
   const next = owned[(idx + (e.deltaY > 0 ? 1 : owned.length - 1)) % owned.length];
   equipSlot(next);
@@ -2574,6 +2601,7 @@ function currentWeaponDef(){
   if (currentSlot === 'melee') return WEAPONS.knife;
   if (currentSlot === 'grenade') return WEAPONS.grenade;
   if (currentSlot === 'smoke') return WEAPONS.smoke;
+  if (currentSlot === 'flash') return WEAPONS.flash;
   return WEAPONS[inventory[currentSlot]];
 }
 
@@ -2589,13 +2617,13 @@ function playWeaponInspect(){
   weaponRecoilT = -1;
   currentVisual.group.position.set(0, 0, 0);
   currentVisual.group.rotation.set(0, 0, 0);
-  weaponInspectId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : inventory[currentSlot];
+  weaponInspectId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : currentSlot === 'flash' ? 'flash' : inventory[currentSlot];
   player.ads = false;
   player.scopeLevel = 0;
 }
 
 function startReload(){
-  if (currentSlot === 'melee' || currentSlot === 'grenade' || currentSlot === 'smoke' || reloadRuntime.reloading) return;
+  if (currentSlot === 'melee' || currentSlot === 'grenade' || currentSlot === 'smoke' || currentSlot === 'flash' || reloadRuntime.reloading) return;
   const state = ammoState[currentSlot];
   const def = currentWeaponDef();
   if (state.mag === def.mag || state.reserve <= 0) return;
@@ -2758,7 +2786,7 @@ function updateWeaponInspect(dt){
     currentVisual.group.rotation.y = -eased * 0.48;
     currentVisual.group.rotation.z = eased * 0.16;
     currentVisual.group.position.set(-eased * 0.1, eased * 0.06, eased * 0.08);
-  } else if (id === 'grenade' || id === 'smoke') {
+  } else if (id === 'grenade' || id === 'smoke' || id === 'flash') {
     currentVisual.group.rotation.y = -eased * 0.7;
     currentVisual.group.rotation.z = eased * 0.28;
     currentVisual.group.position.set(-eased * 0.08, eased * 0.08, eased * 0.06);
@@ -2917,7 +2945,7 @@ function fireWeapon(){
     currentVisual.group.rotation.set(0, 0, 0);
   }
   const def = currentWeaponDef();
-  const weaponId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : inventory[currentSlot];
+  const weaponId = currentSlot === 'melee' ? 'knife' : currentSlot === 'grenade' ? 'grenade' : currentSlot === 'smoke' ? 'smoke' : currentSlot === 'flash' ? 'flash' : inventory[currentSlot];
 
   if (currentSlot === 'grenade') {
     fireCooldown = def.fireRate;
@@ -2928,6 +2956,12 @@ function fireWeapon(){
   if (currentSlot === 'smoke') {
     fireCooldown = def.fireRate;
     throwGrenade('smoke', true);
+    return;
+  }
+
+  if (currentSlot === 'flash') {
+    fireCooldown = def.fireRate;
+    throwGrenade('flash', true);
     return;
   }
 
@@ -3166,6 +3200,15 @@ function spawnDustPuff(point){
 }
 
 const explosionTex = softDiscTexture('rgba(255,180,80,1)');
+const flashPopTex = softDiscTexture('rgba(255,255,255,1)');
+function spawnFlashPop(point){
+  const mat = new THREE.SpriteMaterial({ map: flashPopTex, transparent: true, opacity: 1, depthWrite: false });
+  const s = new THREE.Sprite(mat);
+  s.scale.set(1.4, 1.4, 1);
+  s.position.copy(point);
+  scene.add(s);
+  particles.push({ obj: s, type: 'explosion', life: 0.25, maxLife: 0.25, vel: new THREE.Vector3(0, 0.1, 0) });
+}
 function spawnExplosionFlash(point){
   const mat = new THREE.SpriteMaterial({ map: explosionTex, transparent: true, opacity: 1, depthWrite: false });
   const s = new THREE.Sprite(mat);
@@ -3220,9 +3263,10 @@ const grenades = []; // { mesh, vel, fuse, type }
 const activeSmokes = []; // { pos, radius, life, sprites: [] } - blocks AI line-of-sight and the player's own view
 
 function throwGrenade(type, far = true){
-  const count = type === 'smoke' ? smokeCount : grenadeCount;
+  const count = type === 'smoke' ? smokeCount : type === 'flash' ? flashCount : grenadeCount;
   if (count <= 0) return;
   if (type === 'smoke') { smokeCount--; updateGrenadeHUD(); }
+  else if (type === 'flash') { flashCount--; updateGrenadeHUD(); }
   else { grenadeCount--; updateGrenadeHUD(); }
   if (!audio.playSample('grenadeThrow', 0.85)) audio.mechClick(420, 0.16, 0.05);
 
@@ -3236,14 +3280,14 @@ function throwGrenade(type, far = true){
   let speed = far ? 20 : 10;
   if (!player.onGround) speed *= 1.3;
 
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), type === 'smoke' ? smokeGrenadeMat : grenadeMat);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), type === 'smoke' ? smokeGrenadeMat : type === 'flash' ? flashMat : grenadeMat);
   mesh.position.copy(origin);
   mesh.castShadow = true;
   scene.add(mesh);
   grenades.push({ mesh, vel: dir.multiplyScalar(speed), fuse: 1.6, type });
 
   // hands go empty until the throw lands - auto-switch back to whatever was equipped before
-  equipSlot(lastSlot === 'grenade' || lastSlot === 'smoke' ? 'melee' : lastSlot);
+  equipSlot(lastSlot === 'grenade' || lastSlot === 'smoke' || lastSlot === 'flash' ? 'melee' : lastSlot);
 }
 
 function updateGrenades(dt){
@@ -3263,6 +3307,7 @@ function updateGrenades(dt){
 
     if (g.fuse <= 0) {
       if (g.type === 'smoke') deploySmoke(g.mesh.position.clone());
+      else if (g.type === 'flash') detonateFlash(g.mesh.position.clone());
       else explodeGrenade(g.mesh.position.clone());
       scene.remove(g.mesh);
       grenades.splice(i, 1);
@@ -3291,6 +3336,51 @@ function explodeGrenade(point){
 
   spawnExplosionFlash(point);
   for (let i = 0; i < 10; i++) spawnDustPuff(point);
+}
+
+// distance+line-of-sight check shared by every target a flashbang can blind: calls onHit(intensity)
+// - 1 at point-blank, fading to 0 at the edge of def.radius - only if `from` is within radius AND
+// nothing in envMeshes blocks the straight line to `point` (ducking behind a wall/crate defeats it
+// entirely, same as a real flashbang)
+function applyFlashTo(from, point, def, onHit){
+  const toPoint = new THREE.Vector3().subVectors(point, from);
+  const dist = toPoint.length();
+  if (dist > def.radius) return;
+  if (dist < 0.05) { onHit(1); return; }
+  toPoint.normalize();
+  raycaster.set(from, toPoint);
+  raycaster.far = Math.max(0.05, dist - 0.15);
+  if (raycaster.intersectObjects(envMeshes, false).length > 0) return; // blocked by a wall/obstacle
+  onHit(1 - dist / def.radius);
+}
+
+function detonateFlash(point){
+  if (!audio.playSample('explosion', 0.5)) audio.explosion();
+  const light = new THREE.PointLight(0xffffff, 9, 22);
+  light.position.copy(point);
+  scene.add(light);
+  setTimeout(() => scene.remove(light), 90);
+  spawnFlashPop(point);
+
+  const def = WEAPONS.flash;
+  const eye = camera.getWorldPosition(new THREE.Vector3());
+  applyFlashTo(eye, point, def, intensity => {
+    playerFlashMax = def.duration * intensity;
+    playerFlashT = Math.max(playerFlashT, playerFlashMax);
+  });
+
+  enemies.forEach(enemy => {
+    if (!enemy.alive) return;
+    const eyePos = enemy.mesh.position.clone().add(new THREE.Vector3(0, soldierHeight * 0.85, 0));
+    applyFlashTo(eyePos, point, def, intensity => {
+      if (enemy.isRemote) {
+        // only that enemy's own client can white out their own screen - tell them to
+        netBroadcast({ type: 'flash', targetId: enemy.netId, intensity });
+      } else {
+        enemy.flashedT = Math.max(enemy.flashedT || 0, def.duration * intensity);
+      }
+    });
+  });
 }
 
 // approximate volumetric smoke with a cluster of soft grey sprites rather than a raymarched shader -
@@ -4376,7 +4466,7 @@ function handleNetMessage(msg, fromId){
         if (entry) {
           entry.name = msg.name || entry.name;
           entry.country = String(msg.country || '').slice(0, 2);
-          entry.clan = String(msg.clan || '').slice(0, 5).toUpperCase();
+          entry.clan = String(msg.clan || '').slice(0, 4).toUpperCase();
           entry.founder = !!msg.founder;
           broadcastRoster();
         }
@@ -4401,6 +4491,15 @@ function handleNetMessage(msg, fromId){
       if (msg.targetId === netMyId && Number.isFinite(msg.dmg) && msg.dmg > 0 && roundState.phase !== 'ended') {
         lastDamageMeta = { weaponName: msg.weaponName, headshot: !!msg.isHeadshot };
         damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
+      }
+      break;
+    case 'flash':
+      // the thrower already did our distance/line-of-sight check on their own client (same static
+      // map geometry on both ends) - just apply the intensity they computed to our own screen
+      if (msg.targetId === netMyId && Number.isFinite(msg.intensity) && msg.intensity > 0) {
+        const dur = WEAPONS.flash.duration * msg.intensity;
+        playerFlashMax = Math.max(playerFlashMax, dur);
+        playerFlashT = Math.max(playerFlashT, dur);
       }
       break;
     case 'knifeThrow': {
@@ -4629,11 +4728,13 @@ function beginRematch(map, epoch){
   recoilKick = 0; recoilYaw = 0; shakeIntensity = 0; regenDelayT = 0;
   player.crouching = false;
   inventory.primary = null; inventory.secondary = null;
-  grenadeCount = 0; smokeCount = 0;
+  grenadeCount = 0; smokeCount = 0; flashCount = 0;
   Object.keys(ammoState).forEach(key => delete ammoState[key]);
   Object.assign(sessionMetrics, { shots: 0, hits: 0, headshots: 0 });
   document.getElementById('killfeed').replaceChildren();
   document.getElementById('smokeOverlay').style.opacity = 0;
+  document.getElementById('flashOverlay').style.opacity = 0;
+  playerFlashT = 0; playerFlashMax = 0;
   document.getElementById('waveBanner').style.opacity = 0;
   buildMap(map);
   // Reuse round spawn/equipment setup, then enter warmup rather than live play.
@@ -4649,7 +4750,7 @@ function startPvpMatch(warmupSeconds = WARMUP_FULL){
   if (selectedRuleset === 'knife') {
     warmupSeconds = 15;
     inventory.primary = null; inventory.secondary = null;
-    grenadeCount = 0; smokeCount = 0;
+    grenadeCount = 0; smokeCount = 0; flashCount = 0;
     resetKnifeSupply();
     equipSlot('melee', true);
   }
@@ -4933,6 +5034,7 @@ function updateEnemies(dt){
     if (enemy.isRemote) return; // driven entirely by network state in applyRemoteState, not local AI
     if (enemy.isStatic) return; // practice-mode target dummy - doesn't move, aim, or shoot back
     if (gameMode === 'bomb' && enemy.isCarrier && roundState.phase === 'live') return; // handled by updateCarrierEnemy instead
+    if (enemy.flashedT > 0) enemy.flashedT = Math.max(0, enemy.flashedT - dt); // blinded - can still move, can't shoot (see below)
     const ePos = enemy.mesh.position;
     const toPlayer = new THREE.Vector3().subVectors(playerPos, ePos);
     const dist = toPlayer.length();
@@ -4953,7 +5055,7 @@ function updateEnemies(dt){
       ePos.y = groundHeightAt(ePos.x, ePos.z);
 
       enemy.fireCooldown -= dt;
-      if (enemy.fireCooldown <= 0 && dist < 45) {
+      if (enemy.fireCooldown <= 0 && dist < 45 && !(enemy.flashedT > 0)) {
         const eyeOrigin = ePos.clone().add(new THREE.Vector3(0, soldierHeight * 0.85, 0));
         const toP = new THREE.Vector3().subVectors(playerPos, eyeOrigin);
         const losDist = toP.length();
@@ -5247,7 +5349,7 @@ function updatePlayer(dt){
 // ============================================================
 function updateAmmoHUD(){
   const def = currentWeaponDef();
-  const remaining = currentSlot === 'melee' ? knifeCount : currentSlot === 'grenade' ? grenadeCount : currentSlot === 'smoke' ? smokeCount : ammoState[currentSlot]?.mag;
+  const remaining = currentSlot === 'melee' ? knifeCount : currentSlot === 'grenade' ? grenadeCount : currentSlot === 'smoke' ? smokeCount : currentSlot === 'flash' ? flashCount : ammoState[currentSlot]?.mag;
   const capacity = currentSlot === 'melee' ? knifeCapacity() : def.mag || 1;
   const ammoPanel = document.getElementById('ammo');
   ammoPanel.dataset.empty = String(remaining === 0);
@@ -5263,6 +5365,9 @@ function updateAmmoHUD(){
   } else if (currentSlot === 'smoke') {
     document.getElementById('ammoCount').textContent = smokeCount;
     document.getElementById('ammoReserve').textContent = '';
+  } else if (currentSlot === 'flash') {
+    document.getElementById('ammoCount').textContent = flashCount;
+    document.getElementById('ammoReserve').textContent = '';
   } else {
     const state = ammoState[currentSlot];
     document.getElementById('ammoCount').textContent = reloadRuntime.reloading ? '...' : state.mag;
@@ -5272,7 +5377,8 @@ function updateAmmoHUD(){
 function updateGrenadeHUD(){
   document.getElementById('grenadeCount').textContent = grenadeCount;
   document.getElementById('smokeCount').textContent = smokeCount;
-  if (currentSlot === 'grenade' || currentSlot === 'smoke') updateAmmoHUD();
+  document.getElementById('flashCount').textContent = flashCount;
+  if (currentSlot === 'grenade' || currentSlot === 'smoke' || currentSlot === 'flash') updateAmmoHUD();
 }
 function updateMoneyHUD(){
   document.getElementById('moneyDisplay').textContent = '$' + money;
@@ -5573,6 +5679,17 @@ function buySmoke(){
   renderBuyMenu();
 }
 
+function buyFlash(){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
+  const def = WEAPONS.flash;
+  if (money < def.price || flashCount >= MAX_FLASHES) return;
+  money -= def.price;
+  flashCount++;
+  updateMoneyHUD();
+  updateGrenadeHUD();
+  renderBuyMenu();
+}
+
 function renderBuyMenu(){
   const primaryList = document.getElementById('primaryList');
   const secondaryList = document.getElementById('secondaryList');
@@ -5604,6 +5721,14 @@ function renderBuyMenu(){
   scard.innerHTML = `<div class="wName">${sdef.name} (${smokeCount}/${MAX_SMOKES})</div><div class="wPrice">${smaxed ? 'MAX' : '$' + sdef.price}</div>`;
   if (!smaxed) scard.addEventListener('click', buySmoke);
   grenadeList.appendChild(scard);
+
+  const fdef = WEAPONS.flash;
+  const fmaxed = flashCount >= MAX_FLASHES;
+  const fcard = document.createElement('div');
+  fcard.className = 'weaponCard' + (fmaxed ? ' owned' : '');
+  fcard.innerHTML = `<div class="wName">${fdef.name} (${flashCount}/${MAX_FLASHES})</div><div class="wPrice">${fmaxed ? 'MAX' : '$' + fdef.price}</div>`;
+  if (!fmaxed) fcard.addEventListener('click', buyFlash);
+  grenadeList.appendChild(fcard);
 }
 
 document.getElementById('closeBuyMenu').addEventListener('click', toggleBuyMenu);
@@ -5624,6 +5749,8 @@ function animate(){
     updateGrenades(dt);
     updateSmokes(dt);
     document.getElementById('smokeOverlay').style.opacity = pointInAnySmoke(player.pos.x, player.pos.z) ? 1 : 0;
+    if (playerFlashT > 0) playerFlashT = Math.max(0, playerFlashT - dt);
+    document.getElementById('flashOverlay').style.opacity = playerFlashMax > 0 ? playerFlashT / playerFlashMax : 0;
     if (gameMode === 'bomb') updateRound(dt);
     if (gameMode === 'pvp') updatePvpRound(dt);
     if (gameMode === 'practice') {

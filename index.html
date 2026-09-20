@@ -63,6 +63,7 @@
   #waveBanner{position:absolute;top:40%;left:50%;transform:translate(-50%,-50%);font-size:46px;color:#fff;text-shadow:0 0 20px #f33;letter-spacing:6px;opacity:0;transition:opacity .5s;font-weight:800;font-family:'Arial Narrow',Inter,'Segoe UI',Arial,sans-serif;}
   #hitFlash{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.0);pointer-events:none;transition:background .1s;}
   #smokeOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(210,212,208,0.88);pointer-events:none;opacity:0;transition:opacity .6s;z-index:9;}
+  #flashOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:#fff;pointer-events:none;opacity:0;z-index:16;}
   #vignette{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;box-shadow:inset 0 0 0 0 rgba(160,0,0,0);transition:box-shadow .3s;}
   #startScreen{position:fixed;top:0;left:0;width:100%;height:100%;overflow-y:auto;background:linear-gradient(120deg,rgba(5,6,7,.98),rgba(20,6,6,.9)),radial-gradient(circle at 50% 20%,#5b1512,#050505 70%);color:#e7e9eb;display:flex;flex-direction:column;align-items:center;padding:24px 0 50px;box-sizing:border-box;}
   #startScreen h1{font-size:64px;letter-spacing:10px;color:#e5473c;text-shadow:0 0 30px #a00;margin-bottom:0;}
@@ -434,9 +435,11 @@
       <span id="moneyDisplay">$0</span>
       <span id="grenadeCount">0</span>
       <span id="smokeCount">0</span>
+      <span id="flashCount">0</span>
     </div>
   </div>
   <div id="smokeOverlay"></div>
+  <div id="flashOverlay"></div>
   <canvas id="minimap" width="170" height="170"></canvas>
   <div id="waveBanner"></div>
   <div id="killfeed"></div>
