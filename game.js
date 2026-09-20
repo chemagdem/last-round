@@ -4172,7 +4172,14 @@ async function hostRoom(teamSize){
     netMyId = id;
     const shortCode = id.replace('lr-', '');
     netRoster = [{ id, team: 'A', isBot: false, name: localPlayerName, country: playerProfile.country || '', clan: playerProfile.clan || '', founder: !!playerProfile.isFounder }];
-    document.getElementById('pvpStatus').textContent = `Room code: ${shortCode} — waiting for players...`;
+    document.getElementById('pvpStatus').textContent = 'Waiting for players...';
+    // a link is one click for whoever receives it - no code to mistype or copy/paste around
+    const linkBox = document.getElementById('pvpRoomLink');
+    const linkInput = document.getElementById('pvpRoomLinkInput');
+    if (linkBox && linkInput) {
+      linkInput.value = `${location.origin}${location.pathname}?room=${shortCode}`;
+      linkBox.style.display = 'flex';
+    }
     updateScoreboardNames();
     updateStartButtonState();
   });
@@ -5652,12 +5659,15 @@ function renderProfileUI(){
   if (rankEl) rankEl.firstChild.textContent = profileRank(playerProfile.rating) + ' ';
   if (ratingEl) ratingEl.textContent = playerProfile.rating;
   if (recordEl) recordEl.textContent = `${playerProfile.wins}W — ${playerProfile.losses}L · ${playerProfile.matches} MATCHES`;
+  // read-only echo in the room-control card - editing your name there was removed on purpose
+  // (retyping a gametag right before creating a match read as unpolished); it's now account-only
+  const pvpIdentityEl = document.getElementById('pvpIdentityDisplay');
+  if (pvpIdentityEl) pvpIdentityEl.textContent = nameTag(playerProfile) + name;
 }
 
-// shared by the landing's quick-edit select and the account dialog's signup/identity select -
-// `live` wires it to save immediately on change (the landing one); the dialog one only applies
-// when the form is actually submitted (see account.js's applyLocalFields call)
-function populateCountrySelect(id, live){
+// populates the account dialog's flag/country select - it only ever applies when the form is
+// actually submitted (see account.js's applyLocalFields call), never live
+function populateCountrySelect(id){
   const select = document.getElementById(id);
   if (!select || select.dataset.populated) return;
   select.dataset.populated = '1';
@@ -5670,14 +5680,8 @@ function populateCountrySelect(id, live){
     select.appendChild(opt);
   });
   select.value = playerProfile.country || '';
-  if (live) select.addEventListener('change', () => {
-    playerProfile.country = select.value;
-    savePlayerProfile();
-    renderProfileUI();
-  });
 }
-populateCountrySelect('countrySelect', true);
-populateCountrySelect('accountCountry', false);
+populateCountrySelect('accountCountry');
 
 async function openLadderDialog(){
   const dialog = document.getElementById('ladderDialog');
@@ -5868,13 +5872,10 @@ document.querySelectorAll('.pvpChoiceBtn').forEach(btn => {
   });
 });
 
-document.getElementById('playerNameInput').addEventListener('input', e => {
-  localPlayerName = e.target.value.trim() || 'Player';
-  playerProfile.name = localPlayerName;
-  savePlayerProfile();
-  renderProfileUI();
-});
-document.getElementById('playerNameInput').value = playerProfile.name === 'Player' ? '' : playerProfile.name;
+// name/clan/flag are no longer editable from the room-control card (retyping a gametag right
+// before creating a match read as unpolished) - the account dialog's SAVE PROFILE/SIGN IN/REGISTER
+// buttons are now the only way to change them, for both guests and cloud accounts alike
+localPlayerName = playerProfile.name;
 const CLOUD_ACCOUNTS_ENABLED = true;
 if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   readProfile: () => playerProfile,
@@ -5886,9 +5887,6 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
     // derived from the verified session email, never persisted - see FOUNDER_EMAIL's comment
     playerProfile.isFounder = email === FOUNDER_EMAIL;
     localPlayerName = playerProfile.name;
-    document.getElementById('playerNameInput').value = localPlayerName;
-    const countrySelect = document.getElementById('countrySelect');
-    if (countrySelect) countrySelect.value = playerProfile.country || '';
     document.querySelector('#profileDock .profileEyebrow').textContent = 'CLOUD PROFILE · PROVISIONAL';
     applyEquippedSkin();
     renderProfileUI();
@@ -5898,12 +5896,9 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   // registration seed those straight into the brand-new cloud row instead of leaving it blank
   applyLocalFields: patch => {
     playerProfile.name = (patch.name || '').trim() || playerProfile.name || 'Player';
-    playerProfile.clan = (patch.clan || '').slice(0, 5).toUpperCase();
+    playerProfile.clan = (patch.clan || '').slice(0, 4).toUpperCase();
     playerProfile.country = patch.country || '';
     localPlayerName = playerProfile.name;
-    document.getElementById('playerNameInput').value = localPlayerName;
-    const countrySelect = document.getElementById('countrySelect');
-    if (countrySelect) countrySelect.value = playerProfile.country;
     savePlayerProfile();
     renderProfileUI();
   }
@@ -5917,6 +5912,37 @@ document.getElementById('pvpJoinBtn').addEventListener('click', () => {
   const code = document.getElementById('pvpJoinCode').value;
   if (code.trim()) { document.getElementById('pvpStatus').textContent = 'Setting up...'; joinRoom(code); }
 });
+document.getElementById('pvpIdentityAccountBtn').addEventListener('click', () => {
+  document.getElementById('accountButton').click();
+});
+document.getElementById('pvpCopyLinkBtn').addEventListener('click', async () => {
+  const input = document.getElementById('pvpRoomLinkInput');
+  const btn = document.getElementById('pvpCopyLinkBtn');
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch (err) {
+    input.select(); // clipboard API unavailable/blocked - fall back to a manual copy
+  }
+  btn.textContent = 'COPIED!';
+  setTimeout(() => { btn.textContent = 'COPY LINK'; }, 1500);
+});
+
+// a room link is one click for whoever receives it instead of typing/pasting a code - land on
+// ?room=CODE, switch straight to the join view with the code prefilled, and connect immediately
+(function autoJoinFromRoomLink(){
+  const room = new URLSearchParams(location.search).get('room');
+  if (!room) return;
+  history.replaceState(null, '', location.pathname); // don't re-trigger this on a later refresh
+  document.querySelectorAll('.pvpChoiceBtn').forEach(b => b.classList.toggle('selected', b.dataset.choice === 'join'));
+  document.getElementById('pvpHostSection').style.display = 'none';
+  document.getElementById('pvpJoinSection').style.display = 'flex';
+  document.getElementById('mapSelect').style.display = 'none';
+  document.getElementById('modeSelect').style.display = 'none';
+  selectedMap = 'arena'; selectedMode = 'pvp'; mapChosen = true;
+  document.getElementById('pvpJoinCode').value = room.toUpperCase();
+  document.getElementById('pvpStatus').textContent = 'Joining room from link...';
+  joinRoom(room);
+})();
 
 document.getElementById('startBtn').addEventListener('click', () => {
   if (document.getElementById('startBtn').disabled) return;

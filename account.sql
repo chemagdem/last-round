@@ -50,3 +50,10 @@ create policy "Update own ladder row" on public.ladder_entries for update to aut
 -- name in the Tab scoreboard and the ladder. `if not exists` makes this safe to run again.
 alter table public.player_profiles add column if not exists clan text not null default '' check (char_length(clan) <= 5);
 alter table public.ladder_entries add column if not exists clan text not null default '' check (char_length(clan) <= 5);
+
+-- Migration 3: tightens the clan tag from 5 to 4 characters. Postgres names an inline column
+-- check constraint "<table>_<column>_check" by default, which is what Migration 2 above created.
+alter table public.player_profiles drop constraint if exists player_profiles_clan_check;
+alter table public.player_profiles add constraint player_profiles_clan_check check (char_length(clan) <= 4);
+alter table public.ladder_entries drop constraint if exists ladder_entries_clan_check;
+alter table public.ladder_entries add constraint ladder_entries_clan_check check (char_length(clan) <= 4);

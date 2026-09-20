@@ -29,7 +29,7 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying, apply
   const setBusy = value => { busy = value; buttons().forEach(b => { b.disabled = value; }); };
   const fields = profile => ({ name: String(profile.name || 'Player').slice(0,16), rating: profile.rating,
     wins: profile.wins, losses: profile.losses, matches: profile.matches, equippedSkin: profile.equippedSkin,
-    country: String(profile.country || '').slice(0,2), clan: String(profile.clan || '').slice(0,5).toUpperCase() });
+    country: String(profile.country || '').slice(0,2), clan: String(profile.clan || '').slice(0,4).toUpperCase() });
 
   // the weekly ladder is a separate table (see account.sql) keyed by (user, season_id) - writing
   // to it is best-effort and never blocks the main profile save if it fails
@@ -107,13 +107,20 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying, apply
     // gametag/clan/flag apply locally right away regardless of action - for signup this is what
     // seeds the brand-new cloud row (see loadUser above); for an existing account it's just a
     // convenient way to update your identity from the same dialog
-    if ((action === 'signup' || action === 'signin') && applyLocalFields) {
+    if ((action === 'signup' || action === 'signin' || action === 'saveProfile') && applyLocalFields) {
       applyLocalFields({ name: identityName.value, clan: identityClan.value, country: identityCountry.value });
     }
     setBusy(true);
     try {
       let result;
-      if (action === 'signout') {
+      if (action === 'saveProfile') {
+        // no auth call at all - just re-applies the gametag/clan/flag fields (done above) and,
+        // if already signed in, pushes them to the cloud right away instead of waiting for the
+        // usual debounce. Works for a guest too (applyLocalFields alone already saved locally).
+        if (userId && loaded) save();
+        say(userId ? 'Profile saved - syncing to the cloud.' : 'Profile saved on this device.');
+        return;
+      } else if (action === 'signout') {
         clearTimeout(timer); await queue;
         if (userId && loaded) {
           const saved = await client.from('player_profiles').update(fields(readProfile())).eq('user_id', userId);
