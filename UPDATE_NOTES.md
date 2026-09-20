@@ -1,5 +1,13 @@
 # Visual update and Knife Throwing
 
+## Teammate spectator
+
+- Eliminated PvP players follow a living teammate's eye position, view direction and networked FOV. Crouching uses the teammate's eye height.
+- The English banner reads SPECTATING with the teammate's name and health. Without a living teammate, the camera stays put and displays a waiting message.
+- The observed avatar is hidden locally to avoid rendering inside its head. The dead player's weapon and personal combat HUD are hidden; spectator mode does not reconstruct the teammate's first-person weapon or scope overlay.
+- Camera/HUD return automatically on respawn. Spectating never changes the dead player's network position and cannot target enemies or disconnected teammates.
+- Existing checks and a teammate-selection regression test pass; live two-client camera verification remains pending. Update all clients to share pitch/FOV correctly.
+
 ## 2v2 round resolution and player names
 
 - Removed host-only bot filling from PvP: those bots were not visible to clients but still kept teams alive. Standard 2v2 now waits for four human players; use 1v1 for two players.

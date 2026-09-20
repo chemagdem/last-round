@@ -15,7 +15,7 @@ function fixture() {
     copy(v) { this.set(v.x, v.y, v.z); } });
   const avatar = { alive: true, dying: false, deathT: 0, isRemote: true,
     targetPos: vector(), mesh: { position: vector(), rotation: vector() } };
-  const context = vm.createContext({ netMyId: 'local', roundState: { roundNum: 2 },
+  const context = vm.createContext({ netMyId: 'local', baseFov: 75, roundState: { roundNum: 2 },
     netRoster: [{ id: 'remote', team: 'B', name: 'Opponent' }],
     player: { height: 1.8, crouchHeight: 1 },
     getOrCreateRemoteAvatar: () => avatar,

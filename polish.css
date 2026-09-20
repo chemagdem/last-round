@@ -43,3 +43,6 @@
 button:focus-visible{outline:2px solid #d7b66c;outline-offset:4px}
 @media(max-width:1000px){#profileDock{position:relative!important;top:auto;right:auto;width:min(92vw,340px);margin:10px auto}#trainingStats{top:76px;font-size:9px;max-width:94vw;white-space:normal;text-align:center}}
 @media(prefers-reduced-motion:reduce){#logo{animation:none}.mapCard,.skinCard{transition:none}}
+
+#spectatorBanner{position:absolute;bottom:42px;left:50%;transform:translateX(-50%);padding:14px 24px;background:rgba(8,14,20,.92);border:1px solid #ffffff24;border-top:2px solid #82d9cd;color:#e9f4f3;font:600 13px 'Segoe UI',sans-serif;letter-spacing:1.8px;text-align:center;max-width:85vw;pointer-events:none;z-index:30}
+#spectatorBanner[hidden]{display:none}

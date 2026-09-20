@@ -4,6 +4,7 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { TeammateSpectator } from './spectator.js';
 import { PlayerLabels } from './player-labels.js';
 import { RoundLives, roundOutcome } from './pvp-life.js';
 import { sightOffset } from './weapon-aim.js';
@@ -2331,6 +2332,7 @@ for (let i = 0; i < 4; i++) {
 const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(.016, .04, 4, 10), playerGloveMat);
 thumb.position.set(.184, -.31, -.135); thumb.rotation.z = -.65; armGroup.add(thumb);
 weaponGroup.add(armGroup);
+const spectator = new TeammateSpectator(camera, weaponGroup, armGroup);
 
 // ============================================================
 // INPUT
@@ -2438,7 +2440,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!mouseLocked) clearGameplayInput();
 });
 document.addEventListener('mousemove', e => {
-  if (!mouseLocked || socialUI.blocked) return;
+  if (!mouseLocked || socialUI.blocked || !player.alive) return;
   // sensitivity scales down with the current zoom level - a tighter scope (lower fov) turns the
   // mouse slower, so a heavily-zoomed AWP feels far more controlled than a lightly-zoomed pistol
   const sens = (player.ads ? 0.0022 * (camera.fov / baseFov) : 0.0022) * settings.sensitivity;
@@ -4421,7 +4423,7 @@ function updateNetworking(dt){
   const msg = {
     type: 'state', id: netMyId, roundNum: roundState.roundNum,
     pos: [player.pos.x, player.pos.y, player.pos.z],
-    yaw: player.yaw, pitch: player.pitch,
+    yaw: player.yaw, pitch: player.pitch, fov: player.alive ? camera.fov : baseFov,
     crouching: player.crouching,
     health: player.health, alive: player.alive,
     weaponId: currentSlot === 'melee' ? 'knife' : (inventory[currentSlot] || 'knife')
@@ -4514,6 +4516,8 @@ function applyRemoteState(msg){
   const remoteHeight = msg.crouching ? player.crouchHeight : player.height;
   avatar.targetPos.set(msg.pos[0], msg.pos[1] - remoteHeight, msg.pos[2]);
   avatar.targetYaw = msg.yaw;
+  avatar.targetPitch = Number.isFinite(msg.pitch) ? Math.max(-Math.PI / 2, Math.min(Math.PI / 2, msg.pitch)) : 0;
+  avatar.targetFov = Number.isFinite(msg.fov) ? Math.max(10, Math.min(100, msg.fov)) : baseFov;
   avatar.targetCrouching = !!msg.crouching;
   if (!avatar.interpStarted) { avatar.mesh.position.copy(avatar.targetPos); avatar.mesh.rotation.y = avatar.targetYaw; avatar.interpStarted = true; }
   if (roundState.phase === 'live' && msg.alive === false) roundLives.eliminate(msg.id, msg.roundNum);
@@ -5558,6 +5562,10 @@ function animate(){
 
     drawMinimap();
   }
+
+  spectator.update({ dead: gameStarted && gameMode === 'pvp' && !player.alive,
+    enemies, team: myTeam(), roster: netRoster, phase: roundState.phase, baseFov, dt,
+    standingHeight: player.height, crouchingHeight: player.crouchHeight });
 
   // Finish cosmetic death/shot effects even when the final round freezes gameplay.
   if (gameStarted) {
