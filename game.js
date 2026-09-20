@@ -4,6 +4,8 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { sightOffset } from './weapon-aim.js';
+import { attachWeaponSight } from './weapon-sights.js';
 import { CombatMotion } from './combat-motion.js';
 import { createImpactMarks } from './combat-effects.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -2097,17 +2099,11 @@ function buildWeaponVisual(id){
       magazineFloor.position.set(0.24, -0.53, -0.52);
       const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.008, 8, 16, Math.PI * 1.35), akMetalMat);
       triggerGuard.rotation.z = Math.PI * 0.35; triggerGuard.position.set(0.24, -0.285, -0.255);
-      const rearSight = weaponBox(0.025, 0.03, 0.09, akMetalMat, 0.008);
-      rearSight.position.set(0.24, -0.105, -0.29); rearSight.rotation.x = -0.24;
-      const frontSightBase = weaponBox(0.055, 0.035, 0.06, akMetalMat, 0.01);
-      frontSightBase.position.set(0.24, -0.145, -1.18);
-      const frontSightPost = weaponBox(0.016, 0.06, 0.018, akMetalMat, 0.006);
-      frontSightPost.position.set(0.24, -0.1, -1.18);
       const muzzleBrake = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.026, 0.11, 16), akMetalMat);
       muzzleBrake.rotation.x = Math.PI / 2; muzzleBrake.position.set(0.24, -0.185, -1.25);
       const chargingHandle2 = weaponBox(0.025, 0.025, 0.08, akMetalMat, 0.008);
       chargingHandle2.position.set(0.185, -0.19, -0.3);
-      group.add(receiver, dustCover, stock, grip, handguard, barrel, gasTube, magazine, magazineFloor, triggerGuard, rearSight, frontSightBase, frontSightPost, muzzleBrake, chargingHandle2);
+      group.add(receiver, dustCover, stock, grip, handguard, barrel, gasTube, magazine, magazineFloor, triggerGuard, muzzleBrake, chargingHandle2);
       chargingHandle = chargingHandle2;
       muzzle.set(0.24, -0.185, -1.305);
       break;
@@ -2127,15 +2123,7 @@ function buildWeaponVisual(id){
       }
       const topRail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.015, 0.34), gunMatLight);
       topRail.position.set(0.24, -0.135, -0.42);
-      const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.03, 0.02), gunMatLight);
-      rearSight.position.set(0.24, -0.11, -0.3);
-      group.add(topRail, rearSight);
-      // A-frame front sight tower near the muzzle: a triangular post on a small base
-      const sightBase = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.05, 3), gunMatLight);
-      sightBase.position.set(0.24, -0.145, -0.92);
-      const sightPostTop = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.05, 0.012), gunMatLight);
-      sightPostTop.position.set(0.24, -0.1, -0.92);
-      group.add(sightBase, sightPostTop);
+      group.add(topRail);
       // collapsible carbine stock in place of the fixed rifle stock
       const stockTube = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 8), gunMatLight);
       stockTube.rotation.x = Math.PI / 2;
@@ -2164,13 +2152,7 @@ function buildWeaponVisual(id){
       }
       const topRail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.015, 0.34), gunMatLight);
       topRail.position.set(0.24, -0.135, -0.42);
-      const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.03, 0.02), gunMatLight);
-      rearSight.position.set(0.24, -0.11, -0.3);
-      const sightBase = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.05), gunMat);
-      sightBase.position.set(0.24, -0.11, -0.44);
-      const sightRing = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.005, 6, 10), gunMatLight);
-      sightRing.position.set(0.24, -0.085, -0.44);
-      group.add(topRail, rearSight, sightBase, sightRing);
+      group.add(topRail);
       // collapsible carbine stock in place of the fixed rifle stock: a thin tube plus a shoulder pad
       const stockTube = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.16, 8), gunMatLight);
       stockTube.rotation.x = Math.PI / 2;
@@ -2277,11 +2259,13 @@ function buildWeaponVisual(id){
     }
   }
 
+  const sight = attachWeaponSight(group, id, gunMatLight);
+  const aimOffset = sight ? sightOffset(sight, weaponGroup.scale.x) : null;
   flashLight.position.copy(muzzle || new THREE.Vector3(0.22, -0.2, -0.6));
   flashSprite.position.copy(flashLight.position);
   group.add(flashLight, flashSprite);
   return {
-    group, magazine, chargingHandle, magRestY: magazine ? magazine.position.y : 0, chargeRestX: chargingHandle ? chargingHandle.position.x : 0, muzzle, knifeParts,
+    group, sight, aimOffset, magazine, chargingHandle, magRestY: magazine ? magazine.position.y : 0, chargeRestX: chargingHandle ? chargingHandle.position.x : 0, muzzle, knifeParts,
     boltHandle, boltRestZ: boltHandle ? boltHandle.position.z : 0, boltRestX: boltHandle ? boltHandle.position.x : 0
   };
 }
@@ -5017,7 +5001,7 @@ function updatePlayer(dt){
 
   const scoped = player.ads && weaponDef.scope && player.adsT > 0.9;
   document.getElementById('scopeOverlay').style.display = scoped ? 'block' : 'none';
-  document.getElementById('adsDot').style.display = (player.ads && !weaponDef.scope) ? 'block' : 'none';
+  document.getElementById('adsDot').style.display = (player.ads && !weaponDef.scope && !currentVisual.sight) ? 'block' : 'none';
   document.getElementById('crosshair').style.opacity = player.ads ? 0 : 1;
   weaponGroup.visible = !scoped;
 
@@ -5092,7 +5076,13 @@ function updatePlayer(dt){
 
   // Smooth transitions and bounded inertia affect the model only, never camera aim.
   const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion);
-  const targetPos = player.ads ? adsPos : hipPos;
+  const targetPos = player.ads ? (currentVisual.aimOffset || adsPos) : hipPos;
+  // Procedural sway must disappear at full ADS or the physical sights drift
+  // away from the camera ray even while the player's aim remains stationary.
+  const sightMotion = currentVisual.sight ? Math.pow(1 - player.adsT, 2) : 1;
+  motion.x *= sightMotion;
+  motion.y *= sightMotion;
+  motion.roll *= sightMotion;
   const poseBlend = 1 - Math.exp(-18 * dt);
   weaponGroup.position.x += (targetPos.x + motion.x - weaponGroup.position.x) * poseBlend;
   weaponGroup.position.y += (targetPos.y + motion.y - weaponGroup.position.y) * poseBlend;

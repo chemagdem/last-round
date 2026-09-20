@@ -1,5 +1,14 @@
 # Visual update and Knife Throwing
 
+## Rifle sight alignment
+
+- AK-47 now has an open U-notch rear sight aligned with the front post tip.
+- M4A4 now uses a rear aperture with a matching front post; M4A1 uses an open reflex housing and an in-model red dot.
+- Per-weapon ADS offsets account for the viewmodel scale and retain sufficient eye relief beyond the camera near plane.
+- Cosmetic sway fades out during ADS on these rifles; the HUD aiming dot is hidden so the physical sight provides the reference. Existing recoil remains visible and recovers normally.
+- AWP scope and other weapons retain their previous aiming behaviour.
+- Three projection tests validate alignment at multiple scales and fields of view. These mathematical checks do not replace visual browser verification, which remains pending.
+
 ## Combat presentation follow-up
 
 - First-person weapon inertia, subtle breathing and movement offsets, with smooth ADS positioning. Cosmetic offsets never modify camera aim and respect reduced-motion settings.
