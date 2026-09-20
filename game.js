@@ -3289,8 +3289,12 @@ function throwGrenade(type, far = true){
   if (type === 'smoke') { smokeCount--; updateGrenadeHUD(); }
   else if (type === 'flash') { flashCount--; updateGrenadeHUD(); }
   else { grenadeCount--; updateGrenadeHUD(); }
-  const throwSample = type === 'flash' ? 'flashbang' : 'grenadeThrow';
-  if (!audio.playSample(throwSample, 0.85)) audio.mechClick(420, 0.16, 0.05);
+  if (type === 'flash') {
+    // one clip covers both the toss and the pop - delaying it half a second lines its own
+    // internal timing up with roughly when the thing actually lands and goes off, instead of
+    // playing a separate (and now removed) detonation sound on top of it
+    setTimeout(() => { if (!audio.playSample('flashbang', 0.85)) audio.mechClick(420, 0.16, 0.05); }, 500);
+  } else if (!audio.playSample('grenadeThrow', 0.85)) audio.mechClick(420, 0.16, 0.05);
 
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
   dir.y += 0.18;
@@ -3377,7 +3381,8 @@ function applyFlashTo(from, point, def, onHit){
 }
 
 function detonateFlash(point){
-  if (!audio.playSample('explosion', 0.5)) audio.explosion();
+  // no detonation sound here on purpose - the throw sound (see throwGrenade) is delayed half a
+  // second so its own clip already covers the pop
   const light = new THREE.PointLight(0xffffff, 9, 22);
   light.position.copy(point);
   scene.add(light);
