@@ -82,12 +82,14 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying, apply
     if (userId !== id) return;
     // Fail closed if the migration is missing or the entitlement RPC fails.
     let founderAccess = false;
+    let founderStatus = 'FOUNDER ACCESS: NOT GRANTED';
     try {
       const permission = await client.rpc('has_founder_skin');
       founderAccess = !permission.error && permission.data === true;
-    } catch { /* Standard skins and account login remain available. */ }
+      founderStatus = permission.error ? 'FOUNDER ACCESS: DATABASE CHECK FAILED — RUN founder-access.sql' : founderAccess ? 'FOUNDER ACCESS: VERIFIED' : 'FOUNDER ACCESS: NOT GRANTED — CHECK ACCOUNT AND EMAIL CONFIRMATION';
+    } catch { founderStatus = 'FOUNDER ACCESS: CONNECTION FAILED — SIGN IN AGAIN'; }
     if (userId !== id) return;
-    applyProfile({ ...fields(profile), email: session.user.email, founderAccess }); loaded = true;
+    applyProfile({ ...fields(profile), email: session.user.email, founderAccess, founderStatus }); loaded = true;
     badge.textContent = 'Cloud profile · unverified statistics';
     say('Signed in. Cloud profile loaded.');
     upsertLadder(id, fields(profile)); // refresh/create this week's ladder row on every sign-in

@@ -4,6 +4,8 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { addMapFinish } from './map-finish.js';
+import { findClearSpawn } from './map-spawns.js';
 import { createFounderFinish } from './founder-skin.js';
 import { buildFoundry } from './foundry-map.js';
 import { FOUNDRY } from './foundry-layout.js';
@@ -1116,12 +1118,12 @@ function buildArenaMap(){
   // center cluster - crates and big drums close together, not perfectly mirrored (matches the
   // reference sketch), sitting in its own open lane well clear of the spawn-exit rows
   makeBoxProp(-3, -4, 1.6, 1.6, 1.6, crateMat);
-  makeBoxProp(7, 3, 1.6, 1.6, 1.6, crateMat);
-  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x, z));
+  makeBoxProp(-3, 4, 1.6, 1.6, 1.6, crateMat);
+  [[4, -5], [4, 5], [9, 0]].forEach(([x, z]) => addBarrel(x, z));
 
   // two crates up on the elevated strip
   makeBoxProp(ELEV_CX, -10, 1.5, 1.5, 1.5, crateMat);
-  makeBoxProp(ELEV_CX, 3, 1.5, 1.5, 1.5, crateMat);
+  makeBoxProp(ELEV_CX, 10, 1.5, 1.5, 1.5, crateMat);
 
   // low walls (~60% of player height, so they crouch-cover but not stand-cover) right where each
   // ramp meets the main floor
@@ -1227,7 +1229,7 @@ function buildWarehouseMap(){
   // so the two spawns still get equivalent cover, just laid out differently each match
   const jit = n => (mapRandom() - 0.5) * n;
 
-  const rowXs = [-11, -7.55, -4.1, -0.65].map(x => x + jit(1.2));
+  const rowXs = [-11, -7, -3, 1];
   rowXs.forEach(x => {
     const zj = jit(2);
     makeBoxProp(x, -15 + zj, 1.7, 1.7, 1.7, crateMat);
@@ -1244,7 +1246,7 @@ function buildWarehouseMap(){
     addBox(barrel);
   }
 
-  const entryRowXs = [-9, -5, -1, 3, 7, 11].map(x => x + jit(1.4));
+  const entryRowXs = [-9, -5, -1, 3, 7, 11];
   entryRowXs.forEach(x => {
     const zj = jit(1.5);
     makeBoxProp(x, -18.5 + zj, 1.6, 1.6, 1.6, crateMat);
@@ -1252,12 +1254,15 @@ function buildWarehouseMap(){
   });
   [[14, -19], [14, 19]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(1.5)));
 
-  makeBoxProp(-3 + jit(2.5), -4 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
-  makeBoxProp(7 + jit(2.5), 3 + jit(2.5), 1.6, 1.6, 1.6, crateMat);
-  [[2, -2], [5, 1.5], [-1, 3]].forEach(([x, z]) => addBarrel(x + jit(2), z + jit(2)));
+  // Offset machinery forms two short crossing lanes instead of random clutter.
+  const machineryMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/metal.jpg', 2, 2), color: 0x657c79, roughness: 0.65, metalness: 0.35 });
+  machineryMat.userData.minimapProp = true;
+  makeBoxProp(-4, -5, 3, 2.3, 5, machineryMat);
+  makeBoxProp(-4, 5, 3, 2.3, 5, machineryMat);
+  [[5, -5], [5, 5], [11, 0]].forEach(([x, z]) => addBarrel(x, z));
 
   makeBoxProp(ELEV_CX, -10 + jit(3), 1.5, 1.5, 1.5, crateMat);
-  makeBoxProp(ELEV_CX, 3 + jit(3), 1.5, 1.5, 1.5, crateMat);
+  makeBoxProp(ELEV_CX, 10 + jit(3), 1.5, 1.5, 1.5, crateMat);
 
   makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, -17, 2.6, 1.05, 1.1, lowWallMat);
   makeBoxProp(ELEV_CX + ELEV_HALF_W + 1.5, 17, 2.6, 1.05, 1.1, lowWallMat);
@@ -1559,13 +1564,14 @@ function getTeamSpawnPos(meta, team){
     // jitter), so a spawn zone that was clear last game can have a prop sitting in it this time -
     // retry a handful of random spots and skip any that land inside a collider, rather than
     // trapping the player inside a crate the moment they spawn
-    let x, z;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      x = zone.xMin + Math.random() * (zone.xMax - zone.xMin);
-      z = zone.zMin + Math.random() * (zone.zMax - zone.zMin);
-      if (!checkCollision(new THREE.Vector3(x, 2, z))) break;
-    }
-    return new THREE.Vector3(x, 2, z);
+    const point = findClearSpawn(zone, (x, z) => {
+      const feet = groundHeightAt(x, z);
+      const bounds = new THREE.Box3(new THREE.Vector3(x - 0.6, feet + 0.02, z - 0.6),
+        new THREE.Vector3(x + 0.6, feet + player.height, z + 0.6));
+      return colliders.some(box => bounds.intersectsBox(box));
+    });
+    if (!point) throw new Error('Map spawn zone has no safe standing position');
+    return new THREE.Vector3(point.x, 2, point.z);
   }
   return (team === 'A' ? meta.tSpawn : meta.ctSpawn).clone();
 }
@@ -1614,11 +1620,15 @@ function buildSkylineMap(){
   crateMat.userData.penetrable = true; crateMat.userData.minimapProp = true;
   concreteMat.userData.minimapProp = true;
 
-  // central service block: three-sided cover leaves four clear routes through the map
-  makeBoxProp(0, -3.8, 16, 2.8, 1.2, concreteMat);
-  makeBoxProp(0, 3.8, 16, 2.8, 1.2, concreteMat);
-  makeBoxProp(-7.4, 0, 1.2, 2.8, 6.4, concreteMat);
-  makeBoxProp(7.4, 0, 1.2, 2.8, 6.4, concreteMat);
+  // Four usable entrances replace the sealed central box. A service core breaks
+  // the direct spawn-to-spawn sightline while allowing rotations around it.
+  for (const side of [-1, 1]) {
+    makeBoxProp(-4.9, side * 3.8, 6.2, 2.8, 1.2, concreteMat);
+    makeBoxProp(4.9, side * 3.8, 6.2, 2.8, 1.2, concreteMat);
+    makeBoxProp(side * 7.4, -2.5, 1.2, 2.8, 1.8, concreteMat);
+    makeBoxProp(side * 7.4, 2.5, 1.2, 2.8, 1.8, concreteMat);
+  }
+  makeBoxProp(0, 0, 2.4, 2.1, 2.4, concreteMat);
   [[-20, -18], [20, -18], [-20, 18], [20, 18]].forEach(([x, z]) => makeBoxProp(x, z, 3.2, 2.1, 3.2, crateMat));
   [[-13, -13], [13, -13], [-13, 13], [13, 13], [-25, 0], [25, 0]].forEach(([x, z]) => makeBoxProp(x, z, 2.2, 1.5, 2.2, concreteMat));
 
@@ -1689,6 +1699,7 @@ function buildMap(id){
       object.traverse(child => {
         if (child.isInstancedMesh) child.dispose();
         if (child.geometry) geometries.add(child.geometry);
+        if (child.userData.disposeMapMaterial) { child.material.map?.dispose(); child.material.dispose(); }
         // Maps and actors share materials/textures: retain those caches across matches.
       });
     }
@@ -1704,6 +1715,7 @@ function buildMap(id){
   const result = MAPS[id].build();
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
+  addMapFinish(scene, id, groundHeightAt);
   currentMapMeta = result;
   player.pos.copy(result.spawn);
   player.pos.y = groundHeightAt(result.spawn.x, result.spawn.z) + player.height;
@@ -1834,6 +1846,7 @@ const goldWeaponMat = new THREE.MeshPhysicalMaterial({
 const goldTexture = goldWeaponMat.map;
 const founderTexture = createFounderFinish();
 let founderEntitled = false;
+let founderStatus = 'FOUNDER ACCESS: SIGN IN REQUIRED';
 const SKIN_CATALOG = {
   founder: { name: 'First Light · 001', meta: 'FOUNDER EXCLUSIVE · Obsidian / gold inlay', preview: 'founder', color: 0xffffff, roughness: 0.3, metalness: 0.82 },
   gold: { name: 'Gold Standard', meta: 'Metallic gold · equipped by default', preview: 'gold', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.88 },
@@ -2555,6 +2568,7 @@ let knifeFlipT = -1;
 let weaponInspectT = -1;
 let weaponInspectId = null;
 let weaponRecoilT = -1;
+let shotVisualScale = 1;
 
 function currentWeaponDef(){
   if (currentSlot === 'melee') return WEAPONS.knife;
@@ -2690,12 +2704,12 @@ function updateWeaponRecoil(dt){
     const rise = 0.125;
     const kick = p < rise ? Math.sin((p / rise) * Math.PI / 2)
       : Math.pow(1 - (p - rise) / (1 - rise), 2);
-    const tilt = kick * 0.38;
+    const tilt = kick * 0.38 * shotVisualScale;
     currentVisual.group.rotation.x = tilt;
     // Rotate around the grip at y=-0.34, z=-0.20 rather than the camera origin.
     const gripY = -0.34, gripZ = -0.20;
     currentVisual.group.position.y = gripY - (Math.cos(tilt) * gripY - Math.sin(tilt) * gripZ);
-    currentVisual.group.position.z = gripZ - (Math.sin(tilt) * gripY + Math.cos(tilt) * gripZ) + kick * 0.045;
+    currentVisual.group.position.z = gripZ - (Math.sin(tilt) * gripY + Math.cos(tilt) * gripZ) + kick * 0.045 * shotVisualScale;
     if (p >= 1) {
       weaponRecoilT = -1;
       currentVisual.group.rotation.x = 0;
@@ -2708,7 +2722,7 @@ function updateWeaponRecoil(dt){
   const p = Math.min(1, weaponRecoilT / duration);
   const impulse = p < 0.16 ? p / 0.16 : 1 - ((p - 0.16) / 0.84);
   const clamped = Math.max(0, impulse);
-  const strength = currentWeaponDef().boltAction ? 1 : 0.45;
+  const strength = (currentWeaponDef().boltAction ? 1 : 0.45) * shotVisualScale;
   currentVisual.group.position.z = clamped * 0.105 * strength;
   currentVisual.group.rotation.x = clamped * 0.19 * strength;
   if (p >= 1) {
@@ -2945,6 +2959,8 @@ function fireWeapon(){
     }
     state.mag--;
   }
+  const aimedShot = player.ads;
+  shotVisualScale = aimedShot ? 0.55 : 1;
   fireCooldown = def.fireRate;
   updateAmmoHUD();
   if (gameMode !== 'practice' && state.mag <= 0 && state.reserve > 0) startReload(); // out of ammo in the mag - reload without waiting for another trigger pull
@@ -2962,9 +2978,10 @@ function fireWeapon(){
   sessionMetrics.shots++;
   combatMotion.shot();
   if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
-  flashLight.intensity = 5;
-  flashSpriteMat.opacity = 1;
-  flashSprite.scale.set(0.5 + Math.random() * 0.2, 0.5 + Math.random() * 0.2, 1);
+  flashLight.intensity = aimedShot ? 2.5 : 5;
+  flashSpriteMat.opacity = aimedShot ? 0.45 : 1;
+  const flashSize = (0.5 + Math.random() * 0.2) * (aimedShot ? 0.55 : 1);
+  flashSprite.scale.set(flashSize, flashSize, 1);
   setTimeout(() => { flashLight.intensity = 0; flashSpriteMat.opacity = 0; }, 45);
 
   const now = performance.now() / 1000;
@@ -2973,22 +2990,22 @@ function fireWeapon(){
   const pattern = SPRAY_PATTERNS[weaponId] || [];
   const sprayStep = pattern[Math.min(sprayIndex, pattern.length - 1)] || { dy: 0.02, dx: 0 };
   sprayIndex++;
-  const adsMul = player.ads ? 0.45 : 1;
+  const adsMul = aimedShot ? 0.30 : 1;
   if (weaponId !== 'deagle') {
     recoilKick += sprayStep.dy * adsMul;
     recoilYaw += sprayStep.dx * adsMul;
-    shakeIntensity = Math.min(shakeIntensity + (player.ads ? 0.15 : 0.28), 1.2);
+    shakeIntensity = Math.min(shakeIntensity + (aimedShot ? 0.07 : 0.28), 1.2);
   }
   // per-weapon visual kick on the gun model itself - snappy shove back + muzzle-up tilt, both
   // spring back to rest via the existing lerps in updatePlayer (AWP kicks by far the hardest)
   // The Deagle uses its grip-pivot animation only, without a second downward tilt.
   if (weaponId !== 'deagle') {
-    weaponGroup.position.z += def.kickPush ?? 0.06;
-    weaponGroup.rotation.x += def.kickTilt ?? 0.05;
+    weaponGroup.position.z += (def.kickPush ?? 0.06) * shotVisualScale;
+    weaponGroup.rotation.x += (def.kickTilt ?? 0.05) * shotVisualScale;
   }
   weaponRecoilT = 0;
 
-  spawnMuzzleSmoke();
+  spawnMuzzleSmoke(aimedShot);
   spawnShellCasing();
 
   const horizontalSpeed = Math.hypot(movementVelocity.x, movementVelocity.z);
@@ -3089,16 +3106,19 @@ const dustTex = softDiscTexture('rgba(190,170,140,0.9)');
 const casingGeo = new THREE.BoxGeometry(0.02, 0.05, 0.02);
 const casingMat = new THREE.MeshStandardMaterial({ color: 0xcaa544, metalness: 0.8, roughness: 0.3 });
 
-function spawnMuzzleSmoke(){
-  for (let i = 0; i < 3; i++) {
-    const mat = new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity: 0.45, depthWrite: false });
+function spawnMuzzleSmoke(aimed = false){
+  const opacity = aimed ? 0.12 : 0.45;
+  const lifetime = aimed ? 0.22 : 0.5;
+  const size = aimed ? 0.08 : 0.15;
+  for (let i = 0; i < (aimed ? 1 : 3); i++) {
+    const mat = new THREE.SpriteMaterial({ map: smokeTex, transparent: true, opacity, depthWrite: false });
     const s = new THREE.Sprite(mat);
-    s.scale.set(0.15, 0.15, 1);
+    s.scale.set(size, size, 1);
     const worldPos = new THREE.Vector3(); flashSprite.getWorldPosition(worldPos);
     s.position.copy(worldPos);
     scene.add(s);
     particles.push({
-      obj: s, type: 'smoke', life: 0.5, maxLife: 0.5,
+      obj: s, type: 'smoke', life: lifetime, maxLife: lifetime, initialOpacity: aimed ? opacity : 0.5,
       vel: new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.6 + Math.random() * 0.3, (Math.random() - 0.5) * 0.3)
     });
   }
@@ -3185,7 +3205,7 @@ function updateParticles(dt){
       p.vel.y -= 1.5 * dt;
       p.obj.position.addScaledVector(p.vel, dt);
       const fade = p.life / p.maxLife;
-      p.obj.material.opacity = fade * (p.type === 'blood' ? 0.9 : 0.5);
+      p.obj.material.opacity = fade * (p.initialOpacity ?? (p.type === 'blood' ? 0.9 : 0.5));
       const growth = 1 + (1 - fade) * 1.5;
       if (p.obj.scale) {
         if (!p.initialScale) p.initialScale = p.obj.scale.clone();
@@ -5734,6 +5754,9 @@ document.getElementById('ladderClose').addEventListener('click', () => document.
 function renderInventory(){
   const grid = document.getElementById('inventoryGrid');
   if (!grid) return;
+  let status = document.getElementById('founderAccessStatus');
+  if (!status) { status = document.createElement('p'); status.id = 'founderAccessStatus'; grid.before(status); }
+  status.textContent = `BUILD FOUNDER-002 · ${founderStatus}`;
   grid.innerHTML = Object.entries(SKIN_CATALOG).filter(([id]) => id !== 'founder' || founderEntitled).map(([id, skin]) => `
     <button class="skinCard ${playerProfile.equippedSkin === id ? 'equipped' : ''}" type="button" data-skin="${id}">
       <span class="skinPreview ${skin.preview}"></span>
@@ -5917,7 +5940,8 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   isPlaying: () => gameStarted,
   applyProfile: profile => {
     cloudProfileActive = true;
-    const { email, founderAccess, ...cloudFields } = profile;
+    const { email, founderAccess, founderStatus: accessStatus, ...cloudFields } = profile;
+    founderStatus = accessStatus || 'FOUNDER ACCESS: CHECK UNAVAILABLE';
     founderEntitled = founderAccess === true;
     playerProfile = { ...DEFAULT_PROFILE, ...cloudFields };
     // The server checks the confirmed Auth identity before granting this entitlement.
@@ -6043,7 +6067,11 @@ function startPractice(){
   money = 9999999;
   updateMoneyHUD();
   practiceTimer = PRACTICE_DURATION;
-  (selectedMap === 'foundry' ? FOUNDRY.practiceTargets : PRACTICE_TARGET_POS).forEach(([x, z]) => spawnPracticeTarget(new THREE.Vector3(x, 2, z)));
+  (selectedMap === 'foundry' ? FOUNDRY.practiceTargets : PRACTICE_TARGET_POS).forEach(([x, z]) => {
+    const point = findClearSpawn({ xMin: x - 2, xMax: x + 2, zMin: z - 2, zMax: z + 2 },
+      (px, pz) => checkCollision(new THREE.Vector3(px, 2, pz)), () => 0.5);
+    if (point) spawnPracticeTarget(new THREE.Vector3(point.x, 2, point.z));
+  });
 }
 
 function updatePractice(dt){

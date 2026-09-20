@@ -1,5 +1,16 @@
 # Visual update and Knife Throwing
 
+## Map refinement pass
+
+- Skyline: replaced the sealed central service block with four entrances and a smaller central core. Side-entry lintels and route signs identify crossings.
+- Desert: mirrored central crates and elevated-strip cover along the spawn axis; separated barrel positions; added east-wall masonry detail and navigation sign.
+- Warehouse: removed lateral jitter from spawn-cover rows to preserve gaps; replaced random central clutter with two machinery blocks, with overhead service lines and machine trim.
+- Subway: added platform direction signs, wall trim and repeated edge markers.
+- Foundry: added flank signage and lower wall trim.
+- All maps: spawn selection falls back to a deterministic clearance scan after failed random attempts. A fully blocked zone no longer returns a position inside cover. Practice targets also search for clear positions.
+- Architectural details are instanced and their map-owned resources released at rebuild. Collision-critical geometry remains separate.
+- All 27 tests pass. This is a code/layout refinement pass: browser visual inspection and live playtesting remain pending, so visual perfection and competitive balance are not claimed.
+
 ## Foundry — based on the FireZone (3) upload
 
 - Preserved the uploaded account and ladder changes before adding this map.
