@@ -4,6 +4,8 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { buildFoundry } from './foundry-map.js';
+import { FOUNDRY } from './foundry-layout.js';
 import { TeammateSpectator } from './spectator.js';
 import { PlayerLabels } from './player-labels.js';
 import { RoundLives, roundOutcome } from './pvp-life.js';
@@ -921,6 +923,7 @@ const MAP_TEXTURE_URLS = {
   arena: ['assets/textures/sand.jpg', 'assets/textures/wall.jpg', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
   warehouse: ['assets/textures/warehouse_floor.avif', 'assets/textures/warehouse_wall.avif', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
   subway: ['assets/textures/subway_floor.webp', 'assets/textures/subway_walls.jpg', 'assets/textures/train.png', 'assets/textures/trainfront.png', 'assets/textures/metal.jpg'],
+  foundry: ['assets/textures/wall.jpg', 'assets/textures/subway_floor.webp', 'assets/textures/metal.jpg'],
   skyline: []
 };
 const texturePreloadState = new Map();
@@ -1641,11 +1644,23 @@ function buildSkylineMap(){
   };
 }
 
+function buildFoundryMap(){
+  WORLD_SIZE = 58;
+  groundHeightAt = () => 0;
+  sky.material.map = desertSkyGradientTexture(); sky.material.needsUpdate = true;
+  scene.fog.color.set(0x829796); scene.fog.density = 0.003;
+  hemi.color.set(0xc9e6e5); hemi.groundColor.set(0x424039); hemi.intensity = 1.05;
+  sun.color.set(0xffdeba); sun.intensity = 1.3;
+  fillLight.color.set(0xa6c9da); fillLight.intensity = 0.45;
+  return buildFoundry({ scene, floorMeshes, addBox, makeBoxProp, loadTiledTexture, hazardStripeTexture });
+}
+
 const MAPS = {
   arena: { name: 'Desert', build: buildArenaMap },
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
   subway: { name: 'Subway', build: buildSubwayMap },
-  skyline: { name: 'Skyline', build: buildSkylineMap }
+  skyline: { name: 'Skyline', build: buildSkylineMap },
+  foundry: { name: 'Foundry', build: buildFoundryMap }
 };
 let selectedMap = 'arena';
 
@@ -1671,6 +1686,7 @@ function buildMap(id){
         continue;
       }
       object.traverse(child => {
+        if (child.isInstancedMesh) child.dispose();
         if (child.geometry) geometries.add(child.geometry);
         // Maps and actors share materials/textures: retain those caches across matches.
       });
@@ -1683,7 +1699,7 @@ function buildMap(id){
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
-  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211 })[id]);
+  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317 })[id]);
   const result = MAPS[id].build();
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
@@ -5830,6 +5846,19 @@ function renderSkylineThumbnail(){
   return cvs.toDataURL();
 }
 document.querySelector('.mapCard[data-map="skyline"] .swatch').style.backgroundImage = `url(${renderSkylineThumbnail()})`;
+function renderFoundryThumbnail(){
+  const canvas = document.createElement('canvas'); canvas.width = 220; canvas.height = 260;
+  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#17272d'; ctx.fillRect(0, 0, 220, 260);
+  ctx.fillStyle = '#6e7976'; ctx.fillRect(8, 8, 204, 244);
+  for (const cover of FOUNDRY.cover) {
+    ctx.fillStyle = cover.kind === 'reactor' ? '#e89b53' : cover.x < 0 ? '#287d7b' : '#bc6b40';
+    ctx.fillRect((cover.x - cover.w / 2 + 22) * 5, (cover.z - cover.d / 2 + 26) * 5, cover.w * 5, cover.d * 5);
+  }
+  ctx.fillStyle = '#a8e1d7'; ctx.fillRect(95, 14, 30, 10);
+  ctx.fillStyle = '#ffb786'; ctx.fillRect(95, 236, 30, 10);
+  return canvas.toDataURL();
+}
+document.querySelector('.mapCard[data-map="foundry"] .swatch').style.backgroundImage = `url(${renderFoundryThumbnail()})`;
 
 document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
@@ -6007,7 +6036,7 @@ function startPractice(){
   money = 9999999;
   updateMoneyHUD();
   practiceTimer = PRACTICE_DURATION;
-  PRACTICE_TARGET_POS.forEach(([x, z]) => spawnPracticeTarget(new THREE.Vector3(x, 2, z)));
+  (selectedMap === 'foundry' ? FOUNDRY.practiceTargets : PRACTICE_TARGET_POS).forEach(([x, z]) => spawnPracticeTarget(new THREE.Vector3(x, 2, z)));
 }
 
 function updatePractice(dt){

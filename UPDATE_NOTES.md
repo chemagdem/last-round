@@ -1,5 +1,18 @@
 # Visual update and Knife Throwing
 
+## Foundry — based on the FireZone (3) upload
+
+- Preserved the uploaded account and ladder changes before adding this map.
+- New 44 × 52 m industrial courtyard, available on the landing page and rematch selector for standard PvP, Knife Throwing and practice.
+- Mirrored spawn screens, four container blocks, two tank flanks and a central core create short connected rotations and multiple approach angles. The map has no moving hazards or elevated playable platforms.
+- Teal/copper containers, overhead gantries, illuminated clerestory panels, hazard bands and ground markings provide distinct landmarks.
+- Reuses packaged textures with selected-map preloading; no new external asset downloads.
+- Repeated architectural details use instancing. Map cleanup releases instance buffers.
+- Dedicated collision-free practice target positions and a thumbnail generated from the gameplay layout.
+- All 25 tests pass, including spawn clearance, symmetry, route connectivity and blocked spawn sightlines. These layout checks are not a substitute for live balance testing. Browser visual inspection and multiplayer playtesting remain pending.
+
+Distribute this build to every player before selecting Foundry. No deployment was performed.
+
 ## Teammate spectator
 
 - Eliminated PvP players follow a living teammate's eye position, view direction and networked FOV. Crouching uses the teammate's eye height.
