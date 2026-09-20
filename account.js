@@ -2,25 +2,34 @@ import { authConfig } from './auth-config.js';
 import { currentSeasonId, seasonWindow } from './ladder.js';
 
 // Loading this module does not load the remote SDK unless configured.
-export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
+export async function mountAccount({ readProfile, applyProfile, isPlaying, applyLocalFields }) {
   const dialog = document.getElementById('accountDialog');
   const form = document.getElementById('accountForm');
   const status = document.getElementById('accountStatus');
   const badge = document.getElementById('accountState');
   const email = document.getElementById('accountEmail');
   const password = document.getElementById('accountPassword');
+  const identityName = document.getElementById('accountName');
+  const identityClan = document.getElementById('accountClan');
+  const identityCountry = document.getElementById('accountCountry');
   let client, userId = null, loaded = false, recovery = false, busy = false;
   let timer, queue = Promise.resolve();
   const say = message => { status.textContent = message; };
   const redirectTo = location.origin + location.pathname;
-  document.getElementById('accountButton').onclick = () => dialog.showModal();
+  document.getElementById('accountButton').onclick = () => {
+    const profile = readProfile();
+    if (identityName && !identityName.value) identityName.value = profile.name === 'Player' ? '' : profile.name;
+    if (identityClan) identityClan.value = profile.clan || '';
+    if (identityCountry) identityCountry.value = profile.country || '';
+    dialog.showModal();
+  };
   document.getElementById('accountClose').onclick = () => dialog.close();
   dialog.addEventListener('close', () => { password.value = ''; });
   const buttons = () => [...form.querySelectorAll('button')];
   const setBusy = value => { busy = value; buttons().forEach(b => { b.disabled = value; }); };
   const fields = profile => ({ name: String(profile.name || 'Player').slice(0,16), rating: profile.rating,
     wins: profile.wins, losses: profile.losses, matches: profile.matches, equippedSkin: profile.equippedSkin,
-    country: String(profile.country || '').slice(0,2) });
+    country: String(profile.country || '').slice(0,2), clan: String(profile.clan || '').slice(0,5).toUpperCase() });
 
   // the weekly ladder is a separate table (see account.sql) keyed by (user, season_id) - writing
   // to it is best-effort and never blocks the main profile save if it fails
@@ -28,7 +37,7 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
     if (!client) return;
     const seasonId = currentSeasonId();
     await client.from('ladder_entries').upsert({
-      user_id: id, season_id: seasonId, name: snapshot.name, country: snapshot.country,
+      user_id: id, season_id: seasonId, name: snapshot.name, country: snapshot.country, clan: snapshot.clan,
       rating: snapshot.rating, wins: snapshot.wins, losses: snapshot.losses, matches: snapshot.matches,
       updated_at: new Date().toISOString()
     }, { onConflict: 'user_id,season_id' }).then(({ error }) => {
@@ -40,7 +49,7 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
     const seasonId = currentSeasonId();
     if (!client) return { entries: [], seasonId, window: seasonWindow(seasonId), selfId: null };
     const { data, error } = await client.from('ladder_entries')
-      .select('user_id,name,country,rating,wins,losses,matches')
+      .select('user_id,name,country,clan,rating,wins,losses,matches')
       .eq('season_id', seasonId).order('rating', { ascending: false }).limit(limit);
     if (error) throw error;
     return { entries: data || [], seasonId, window: seasonWindow(seasonId), selfId: userId };
@@ -60,14 +69,18 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
     if (error) throw error;
     let profile = data;
     if (!profile) {
-      const result = await client.from('player_profiles').upsert({ user_id: id }, { onConflict: 'user_id', ignoreDuplicates: true });
+      // seed the brand-new row from whatever's already in the local/guest profile - the gametag,
+      // clan and flag the signup form just applied via applyLocalFields land here instead of
+      // being silently discarded in favour of blank defaults
+      const result = await client.from('player_profiles')
+        .upsert({ user_id: id, ...fields(readProfile()) }, { onConflict: 'user_id', ignoreDuplicates: true });
       if (result.error) throw result.error;
       const fresh = await client.from('player_profiles').select('*').eq('user_id', id).single();
       if (fresh.error) throw fresh.error;
       profile = fresh.data;
     }
     if (userId !== id) return;
-    applyProfile(fields(profile)); loaded = true;
+    applyProfile({ ...fields(profile), email: session.user.email }); loaded = true;
     badge.textContent = 'Cloud profile · unverified statistics';
     say('Signed in. Cloud profile loaded.');
     upsertLadder(id, fields(profile)); // refresh/create this week's ladder row on every sign-in
@@ -91,6 +104,12 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying }) {
     if (!client || busy) return;
     if (isPlaying()) { say('Return to the landing before changing accounts.'); return; }
     const action = event.submitter?.value || 'signin';
+    // gametag/clan/flag apply locally right away regardless of action - for signup this is what
+    // seeds the brand-new cloud row (see loadUser above); for an existing account it's just a
+    // convenient way to update your identity from the same dialog
+    if ((action === 'signup' || action === 'signin') && applyLocalFields) {
+      applyLocalFields({ name: identityName.value, clan: identityClan.value, country: identityCountry.value });
+    }
     setBusy(true);
     try {
       let result;

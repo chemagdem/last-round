@@ -5,14 +5,14 @@
 account. Existing guest statistics are not imported into accounts. The three current
 finishes remain free prototype cosmetics.
 
-**One manual step is still required before sign-in will actually work**: `account.sql`
-has not been run against the project yet. Automated deployment could not reach the
-database directly (the direct host resolves IPv6-only from this environment, and the
-connection pooler didn't recognize the project as a tenant, likely because it's brand
-new) - open the project's SQL editor at
-https://supabase.com/dashboard/project/teromfegnfmbxeyppcie/sql/new, paste the full
-contents of `account.sql`, and press Run. That single step creates `player_profiles`
-and the new `ladder_entries` table (see below) with their RLS policies.
+The base schema (`player_profiles` + `ladder_entries`) has already been run once
+against the project. **One more manual step is needed for the new clan tag**: open
+https://supabase.com/dashboard/project/teromfegnfmbxeyppcie/sql/new, paste and run
+just the "Migration 2" block at the bottom of `account.sql` (two `alter table ... add
+column if not exists clan ...` statements - safe to run even if you're not sure it's
+already applied). Automated deployment still can't reach the database directly from
+this environment (the direct host resolves IPv6-only here, and the connection pooler
+doesn't recognize this project as a tenant).
 
 Remaining one-time setup in the Supabase dashboard:
 1. Enable email/password authentication and email confirmation
@@ -37,9 +37,24 @@ current bucket. Old weeks' rows are kept, not deleted. The table is public-read 
 signed-out visitors can load the ladder dialog) but write-restricted to each row's own
 owner, same RLS pattern as `player_profiles`.
 
+## Identity: gametag, clan, flag, founder badge
+
+The registration form (and sign-in, for editing) collects a gametag, an optional
+5-character clan tag and a country/flag, applied to the local profile immediately on
+submit so a brand-new cloud row is seeded with them instead of blank defaults (see
+`account.js`'s `applyLocalFields`/`loadUser`). These show next to the player's name in
+the Tab scoreboard and the weekly ladder. Country/clan are self-reported per client,
+same unverified trust model as every other stat here - purely cosmetic, never used for
+scoring.
+
+The account signed in as `josemgarciademarina@hotmail.com` gets a ★ founder badge.
+This is derived from the verified session email at load time (`FOUNDER_EMAIL` in
+`game.js`), not stored as an editable column, so it can't be granted by editing a
+database row - only by actually controlling that mailbox.
+
 ## Current boundaries
 
-Profiles save name, equipped finish and client-reported wins/losses/matches/rating.
+Profiles save name, clan, country, equipped finish and client-reported wins/losses/matches/rating.
 RLS isolates each user's record; it does NOT validate whether a win really happened.
 There is no verified ranked leaderboard, paid inventory, anti-cheat or authoritative
 match server. The provisional calculation still assumes an opponent rating of 1000.

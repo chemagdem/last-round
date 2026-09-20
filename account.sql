@@ -44,3 +44,9 @@ grant insert, update on public.ladder_entries to authenticated;
 create policy "Anyone can read the ladder" on public.ladder_entries for select to anon, authenticated using (true);
 create policy "Create own ladder row" on public.ladder_entries for insert to authenticated with check ((select auth.uid()) = user_id);
 create policy "Update own ladder row" on public.ladder_entries for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+
+-- Migration 2 (run this separately if player_profiles/ladder_entries already exist from an
+-- earlier run of the script above): adds an optional short clan/team tag, shown next to the
+-- name in the Tab scoreboard and the ladder. `if not exists` makes this safe to run again.
+alter table public.player_profiles add column if not exists clan text not null default '' check (char_length(clan) <= 5);
+alter table public.ladder_entries add column if not exists clan text not null default '' check (char_length(clan) <= 5);

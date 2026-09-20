@@ -1823,7 +1823,11 @@ const SKIN_CATALOG = {
 const PROFILE_STORAGE_KEY = 'lastRoundProfile';
 let cloudAccount = null;
 let cloudProfileActive = false;
-const DEFAULT_PROFILE = { name: 'Player', country: '', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
+const DEFAULT_PROFILE = { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
+// Founder recognition is derived from the verified session email at load time (see the
+// applyProfile callback below), never stored as an editable profile column - so it can't be
+// spoofed by editing a database row, only by actually controlling that mailbox.
+const FOUNDER_EMAIL = 'josemgarciademarina@hotmail.com';
 let playerProfile = { ...DEFAULT_PROFILE };
 try {
   const savedProfile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
@@ -4167,7 +4171,7 @@ async function hostRoom(teamSize){
   netPeer.on('open', id => {
     netMyId = id;
     const shortCode = id.replace('lr-', '');
-    netRoster = [{ id, team: 'A', isBot: false, name: localPlayerName }];
+    netRoster = [{ id, team: 'A', isBot: false, name: localPlayerName, country: playerProfile.country || '', clan: playerProfile.clan || '', founder: !!playerProfile.isFounder }];
     document.getElementById('pvpStatus').textContent = `Room code: ${shortCode} — waiting for players...`;
     updateScoreboardNames();
     updateStartButtonState();
@@ -4179,7 +4183,7 @@ async function hostRoom(teamSize){
     conn.on('error', err => { document.getElementById('pvpStatus').textContent = 'A player failed to connect: ' + err.type; });
     conn.on('open', () => {
       const team = netRoster.filter(p => p.team === 'A').length <= netRoster.filter(p => p.team === 'B').length ? 'A' : 'B';
-      netRoster.push({ id: conn.peer, team, isBot: false, name: 'Player' });
+      netRoster.push({ id: conn.peer, team, isBot: false, name: 'Player', country: '', clan: '', founder: false });
       document.getElementById('pvpStatus').textContent = `${netRoster.length} player(s) connected`;
       broadcastRoster();
       if (roundState.phase === 'warmup' && !warmupDroppedToShort && netRoster.filter(p => !p.isBot).length >= 2) {
@@ -4216,7 +4220,7 @@ async function joinRoom(code){
       settled = true;
       clearTimeout(connectTimeout);
       document.getElementById('pvpStatus').textContent = 'Connected - waiting for the host to start...';
-      netSend(netHostConn, { type: 'name', name: localPlayerName });
+      netSend(netHostConn, { type: 'name', name: localPlayerName, country: playerProfile.country || '', clan: playerProfile.clan || '', founder: !!playerProfile.isFounder });
       updateStartButtonState();
     });
     netHostConn.on('data', data => handleNetMessage(data, 'host'));
@@ -4318,7 +4322,16 @@ function handleNetMessage(msg, fromId){
     case 'name':
       if (netRole === 'host') {
         const entry = netRoster.find(p => p.id === fromId);
-        if (entry) { entry.name = msg.name || entry.name; broadcastRoster(); }
+        // country/clan/founder are self-reported by each client, same "unverified" trust model
+        // as every other client-reported stat in this game - purely cosmetic (a flag/tag/star
+        // next to a name), never used for scoring or matchmaking
+        if (entry) {
+          entry.name = msg.name || entry.name;
+          entry.country = String(msg.country || '').slice(0, 2);
+          entry.clan = String(msg.clan || '').slice(0, 5).toUpperCase();
+          entry.founder = !!msg.founder;
+          broadcastRoster();
+        }
       }
       break;
     case 'warmup':
@@ -5459,7 +5472,8 @@ function renderTabScoreboard(){
   if (gameMode === 'pvp') {
     netRoster.filter(p => !p.isBot).forEach(p => {
       const s = ensureStats(p.id);
-      addRow(p.name + (p.id === netMyId ? ' (you)' : ''), p.team, s.kills, s.assists, s.deaths);
+      const tag = (p.founder ? '★ ' : '') + (p.country ? flagEmoji(p.country) + ' ' : '') + (p.clan ? `[${p.clan}] ` : '');
+      addRow(tag + p.name + (p.id === netMyId ? ' (you)' : ''), p.team, s.kills, s.assists, s.deaths);
     });
   } else {
     addRow('You', '-', kills, 0, localDeaths);
@@ -5622,20 +5636,29 @@ soldierReadyPromise.then(() => {
 
 let selectedMode = 'pvp';
 
+function nameTag(profile){
+  const star = profile.isFounder ? '★ ' : '';
+  const flag = profile.country ? flagEmoji(profile.country) + ' ' : '';
+  const clan = profile.clan ? `[${profile.clan}] ` : '';
+  return star + flag + clan;
+}
 function renderProfileUI(){
   const name = (playerProfile.name || 'Player').trim() || 'Player';
   const nameEl = document.getElementById('profileName');
   const rankEl = document.getElementById('profileRank');
   const ratingEl = document.getElementById('profileRating');
   const recordEl = document.getElementById('profileRecord');
-  if (nameEl) nameEl.textContent = (playerProfile.country ? flagEmoji(playerProfile.country) + ' ' : '') + name;
+  if (nameEl) nameEl.textContent = nameTag(playerProfile) + name;
   if (rankEl) rankEl.firstChild.textContent = profileRank(playerProfile.rating) + ' ';
   if (ratingEl) ratingEl.textContent = playerProfile.rating;
   if (recordEl) recordEl.textContent = `${playerProfile.wins}W — ${playerProfile.losses}L · ${playerProfile.matches} MATCHES`;
 }
 
-function populateCountrySelect(){
-  const select = document.getElementById('countrySelect');
+// shared by the landing's quick-edit select and the account dialog's signup/identity select -
+// `live` wires it to save immediately on change (the landing one); the dialog one only applies
+// when the form is actually submitted (see account.js's applyLocalFields call)
+function populateCountrySelect(id, live){
+  const select = document.getElementById(id);
   if (!select || select.dataset.populated) return;
   select.dataset.populated = '1';
   const blank = document.createElement('option');
@@ -5647,13 +5670,14 @@ function populateCountrySelect(){
     select.appendChild(opt);
   });
   select.value = playerProfile.country || '';
-  select.addEventListener('change', () => {
+  if (live) select.addEventListener('change', () => {
     playerProfile.country = select.value;
     savePlayerProfile();
     renderProfileUI();
   });
 }
-populateCountrySelect();
+populateCountrySelect('countrySelect', true);
+populateCountrySelect('accountCountry', false);
 
 async function openLadderDialog(){
   const dialog = document.getElementById('ladderDialog');
@@ -5673,7 +5697,7 @@ async function openLadderDialog(){
       <tr class="${row.user_id === selfId ? 'ladderSelf' : ''}">
         <td>${i + 1}</td>
         <td>${row.country ? flagEmoji(row.country) : '🏳'}</td>
-        <td>${(row.name || 'Player').replace(/</g, '&lt;')}</td>
+        <td>${row.clan ? '[' + row.clan.replace(/</g, '&lt;') + '] ' : ''}${(row.name || 'Player').replace(/</g, '&lt;')}</td>
         <td>${row.rating}</td>
         <td>${row.wins}-${row.losses}</td>
       </tr>`).join('');
@@ -5857,7 +5881,10 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   isPlaying: () => gameStarted,
   applyProfile: profile => {
     cloudProfileActive = true;
-    playerProfile = { ...DEFAULT_PROFILE, ...profile };
+    const { email, ...cloudFields } = profile;
+    playerProfile = { ...DEFAULT_PROFILE, ...cloudFields };
+    // derived from the verified session email, never persisted - see FOUNDER_EMAIL's comment
+    playerProfile.isFounder = email === FOUNDER_EMAIL;
     localPlayerName = playerProfile.name;
     document.getElementById('playerNameInput').value = localPlayerName;
     const countrySelect = document.getElementById('countrySelect');
@@ -5866,6 +5893,19 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
     applyEquippedSkin();
     renderProfileUI();
     renderInventory();
+  },
+  // called on every signup/signin submit from the dialog's own gametag/clan/flag fields - lets
+  // registration seed those straight into the brand-new cloud row instead of leaving it blank
+  applyLocalFields: patch => {
+    playerProfile.name = (patch.name || '').trim() || playerProfile.name || 'Player';
+    playerProfile.clan = (patch.clan || '').slice(0, 5).toUpperCase();
+    playerProfile.country = patch.country || '';
+    localPlayerName = playerProfile.name;
+    document.getElementById('playerNameInput').value = localPlayerName;
+    const countrySelect = document.getElementById('countrySelect');
+    if (countrySelect) countrySelect.value = playerProfile.country;
+    savePlayerProfile();
+    renderProfileUI();
   }
 }).then(account => { cloudAccount = account; });
 

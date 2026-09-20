@@ -346,6 +346,9 @@
   <form id="accountForm">
     <label for="accountEmail">EMAIL</label><input id="accountEmail" type="email" autocomplete="email" required>
     <label for="accountPassword">PASSWORD</label><input id="accountPassword" type="password" autocomplete="current-password" minlength="12" required>
+    <label for="accountName">GAMERTAG</label><input id="accountName" maxlength="16" placeholder="YOUR NAME" autocomplete="nickname">
+    <label for="accountClan">CLAN TAG (optional)</label><input id="accountClan" maxlength="5" placeholder="e.g. QDSH">
+    <label for="accountCountry">FLAG / COUNTRY</label><select id="accountCountry"></select>
     <button value="signin">SIGN IN</button><button value="signup">REGISTER</button>
     <button value="reset" formnovalidate>RESET PASSWORD</button>
     <button value="signout" formnovalidate>SIGN OUT</button>

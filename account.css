@@ -3,7 +3,7 @@
 #accountDialog::backdrop{background:#000b;backdrop-filter:blur(6px)}
 #accountDialog h2{margin:0 0 12px;letter-spacing:2px}
 #accountDialog label{display:block;margin:14px 0 6px;color:#bdc4c8}
-#accountDialog input{width:100%;padding:12px;background:#080b0d;border:1px solid #454b50;color:white;border-radius:4px}
+#accountDialog input,#accountDialog select{width:100%;padding:12px;background:#080b0d;border:1px solid #454b50;color:white;border-radius:4px}
 #accountDialog button{padding:10px 12px;margin:10px 6px 0 0;background:#30201e;border:1px solid #94603f;color:white;cursor:pointer}
 #accountDialog button:disabled{opacity:.5;cursor:wait}
 #accountStatus{line-height:1.5;color:#d7b66c;min-height:40px}
