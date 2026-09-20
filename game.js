@@ -1644,6 +1644,7 @@ function buildMap(id){
     colliders.length = 0; envMeshes.length = 0; floorMeshes.length = 0;
     enemies.length = 0; particles.length = 0; grenades.length = 0;
     activeSmokes.length = 0; bulletTracers.length = 0; decals.length = 0;
+    thrownKnives.length = 0;
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
@@ -2391,7 +2392,9 @@ document.addEventListener('mousedown', e => {
   if (e.button === 2) {
     const def = currentWeaponDef();
     // right click on a grenade/smoke throws short instead of aiming down sights
-    if (currentSlot === 'grenade' || currentSlot === 'smoke') {
+    if (currentSlot === 'melee') {
+      throwKnife();
+    } else if (currentSlot === 'grenade' || currentSlot === 'smoke') {
       if (player.alive && !reloadRuntime.reloading && fireCooldown <= 0) {
         fireCooldown = def.fireRate;
         throwGrenade(currentSlot === 'grenade' ? 'frag' : 'smoke', false);
@@ -2673,6 +2676,70 @@ function updateKnifeSwing(dt){
 }
 
 const raycaster = new THREE.Raycaster();
+const thrownKnives = [];
+const thrownKnifeRay = new THREE.Raycaster();
+const thrownKnifeGeometry = new THREE.ConeGeometry(0.035, 0.35, 4);
+const thrownKnifeGrip = new THREE.BoxGeometry(0.045, 0.14, 0.04);
+
+function createThrownKnife(origin, direction, damaging = false){
+  const mesh = new THREE.Group();
+  const blade = new THREE.Mesh(thrownKnifeGeometry, bladeMat);
+  blade.rotation.x = -Math.PI / 2;
+  const grip = new THREE.Mesh(thrownKnifeGrip, knifeHandleMat);
+  grip.rotation.x = Math.PI / 2;
+  grip.position.z = 0.24;
+  mesh.add(blade, grip);
+  mesh.position.copy(origin);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), direction);
+  scene.add(mesh);
+  thrownKnives.push({ mesh, direction, damaging, life: 2, epoch: matchEpoch, round: roundState.roundNum });
+}
+
+function throwKnife(){
+  if (matchFinished || fireCooldown > 0 || reloadRuntime.reloading) return;
+  weaponInspectT = -1; weaponInspectId = null; weaponRecoilT = -1;
+  currentVisual.group.position.set(0, 0, 0);
+  currentVisual.group.rotation.set(0, 0, 0);
+  player.ads = false;
+  fireCooldown = 1.2;
+  playKnifeSwing();
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+  createThrownKnife(origin, direction, true);
+  if (gameMode === 'pvp') netBroadcast({ type: 'knifeThrow', origin: origin.toArray(), direction: direction.toArray() });
+  audio.playSample('knifeSlash', 0.8);
+}
+
+function updateThrownKnives(dt){
+  for (let i = thrownKnives.length - 1; i >= 0; i--) {
+    const knife = thrownKnives[i];
+    knife.life -= dt;
+    const distance = 42 * dt;
+    // Sweep the entire step so fast knives cannot skip thin walls or soldiers.
+    thrownKnifeRay.set(knife.mesh.position, knife.direction);
+    thrownKnifeRay.far = distance;
+    const walls = thrownKnifeRay.intersectObjects(envMeshes.concat(floorMeshes), false);
+    const targets = enemies.filter(enemy => enemy.alive && !(gameMode === 'pvp' && enemy.team === myTeam()));
+    const hits = thrownKnifeRay.intersectObjects(targets.map(enemy => enemy.mesh), true);
+    const hit = hits[0];
+    const blocked = walls.length && (!hit || walls[0].distance <= hit.distance);
+    if (hit && !blocked && knife.damaging && knife.epoch === matchEpoch && knife.round === roundState.roundNum) {
+      let object = hit.object;
+      while (object && !object.userData.enemyRef) object = object.parent;
+      const enemy = object?.userData.enemyRef;
+      if (enemy) {
+        const killed = damageEnemy(enemy, Math.max(enemy.health, enemy.maxHealth, 100) + 1, hit.point,
+          { weaponName: 'Throwing Knife', instantKill: true });
+        showHitMarker(false, killed);
+        audio.playSample('knifeStab', 0.8);
+      }
+    }
+    if (hit || blocked || knife.life <= 0 || knife.epoch !== matchEpoch || knife.round !== roundState.roundNum) {
+      scene.remove(knife.mesh);
+      thrownKnives.splice(i, 1);
+    } else knife.mesh.position.addScaledVector(knife.direction, distance);
+  }
+}
 const bulletTracers = [];
 const particles = []; // {mesh/sprite, vel, life, maxLife, type}
 
@@ -3468,7 +3535,7 @@ function damageEnemy(enemy, dmg, point, meta){
     // don't own their health - tell their real client what happened and let their own broadcast update us.
     // netBroadcast reaches them directly if we're the host, or reaches the host if we're a client, which
     // then relays it onward (see the generic relay in handleNetMessage) - either way it arrives once.
-    netBroadcast({ type: 'hit', targetId: enemy.netId, fromId: netMyId, dmg, isHeadshot: !!(meta && meta.headshot) });
+    netBroadcast({ type: 'hit', targetId: enemy.netId, fromId: netMyId, dmg, isHeadshot: !!(meta && meta.headshot), instantKill: meta?.instantKill === true });
     return false;
   }
   enemy.health -= dmg;
@@ -4096,8 +4163,17 @@ function handleNetMessage(msg, fromId){
       applyRemoteState(msg);
       break;
     case 'hit':
-      if (msg.targetId === netMyId) damagePlayer(msg.dmg, msg.fromId);
+      if (msg.targetId === netMyId) damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
       break;
+    case 'knifeThrow': {
+      const validVector = value => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
+      if (validVector(msg.origin) && validVector(msg.direction) && thrownKnives.length < 32) {
+        const direction = new THREE.Vector3().fromArray(msg.direction);
+        if (direction.lengthSq() > 0.9 && direction.lengthSq() < 1.1)
+          createThrownKnife(new THREE.Vector3().fromArray(msg.origin), direction.normalize());
+      }
+      break;
+    }
     case 'kill':
       applyKillMessage(msg);
       break;
@@ -4360,6 +4436,8 @@ function startPvpRoundAsHost(){
 }
 
 function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
+  thrownKnives.forEach(knife => scene.remove(knife.mesh));
+  thrownKnives.length = 0;
   reloadGeneration++;
   reloadRuntime.reloading = false;
   document.getElementById('reloadLabel').style.opacity = 0;
@@ -5198,6 +5276,7 @@ function animate(){
     updateDyingEnemies(dt);
     updateHealthHUD();
     updateParticles(dt);
+    updateThrownKnives(dt);
     updateDecals(dt);
     updateGraffitiDecals(dt);
     updateGrenades(dt);
