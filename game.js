@@ -4,6 +4,8 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { PlayerLabels } from './player-labels.js';
+import { RoundLives, roundOutcome } from './pvp-life.js';
 import { sightOffset } from './weapon-aim.js';
 import { attachWeaponSight } from './weapon-sights.js';
 import { CombatMotion } from './combat-motion.js';
@@ -744,6 +746,7 @@ const reflectionEnvironment = createReflectionEnvironment(renderer);
 scene.environment = reflectionEnvironment.texture;
 const impactMarks = createImpactMarks(scene);
 const combatMotion = new CombatMotion();
+const playerLabels = new PlayerLabels();
 
 // post-processing (bloom for muzzle flash / sun glow)
 // Note: SSAO was tried here for contact-shadow realism, but three.js's SSAOPass reads the whole
@@ -1647,6 +1650,7 @@ let selectedMap = 'arena';
 let currentMapMeta = null;
 let persistentSceneObjects = null;
 function buildMap(id){
+  playerLabels.clear();
   impactMarks.clear();
   combatMotion.reset();
   // Dispose transient allocations before removing scene children on a rematch.
@@ -4234,12 +4238,14 @@ function broadcastRoster(){
 // never loops a message back to its own sender, same as the roster/warmup broadcasts above)
 let netStats = {};
 const receivedKills = new Set();
+const roundLives = new RoundLives();
 let lastDamageMeta = {};
 function ensureStats(id){
   if (!netStats[id]) netStats[id] = { kills: 0, assists: 0, deaths: 0 };
   return netStats[id];
 }
 function applyKillMessage(msg){
+  if (roundState.phase === 'live') roundLives.eliminate(msg.victimId, msg.roundNum);
   if (msg.deathId && receivedKills.has(msg.deathId)) return;
   if (msg.deathId) receivedKills.add(msg.deathId);
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
@@ -4269,7 +4275,8 @@ function handleNetMessage(msg, fromId){
   }
   if ((msg.matchEpoch ?? 0) !== matchEpoch) return;
   if (['hit', 'shot', 'kill', 'roundEnd'].includes(msg.type) && msg.roundNum !== roundState.roundNum) return;
-  if (netRole === 'host' && msg.type === 'shot' && msg.id !== fromId) return;
+  if (netRole === 'host' && ['shot', 'state'].includes(msg.type) && msg.id !== fromId) return;
+  if (netRole === 'host' && msg.type === 'kill' && msg.victimId !== fromId) return;
   if (netRole === 'host' && msg.type === 'hit' && msg.fromId !== fromId) return;
   if (['roundStart', 'roundEnd', 'warmup'].includes(msg.type)
     && (netRole !== 'client' || fromId !== 'host')) return;
@@ -4509,11 +4516,13 @@ function applyRemoteState(msg){
   avatar.targetYaw = msg.yaw;
   avatar.targetCrouching = !!msg.crouching;
   if (!avatar.interpStarted) { avatar.mesh.position.copy(avatar.targetPos); avatar.mesh.rotation.y = avatar.targetYaw; avatar.interpStarted = true; }
-  avatar.health = msg.health;
-  avatar.alive = msg.alive;
-  if (!msg.alive && !avatar.dying) {
+  if (roundState.phase === 'live' && msg.alive === false) roundLives.eliminate(msg.id, msg.roundNum);
+  const alive = roundState.phase === 'live' ? roundLives.alive(msg.id) : msg.alive;
+  avatar.health = alive ? msg.health : 0;
+  avatar.alive = alive;
+  if (!alive && !avatar.dying) {
     avatar.dying = true; avatar.deathT = 0; avatar.fallDir = msg.yaw;
-  } else if (msg.alive && avatar.dying) {
+  } else if (alive && avatar.dying) {
     // Warmup respawns must clear the death pose, not merely set alive=true.
     avatar.dying = false; avatar.deathT = 0;
     avatar.mesh.rotation.set(0, msg.yaw, 0);
@@ -4617,13 +4626,14 @@ function applyWarmup(timer){
 
 function updateWarmup(dt){
   if (netRole !== 'host') return;
-  if (selectedRuleset === 'knife' && ['A','B'].some(team => netRoster.filter(p => p.team === team && !p.isBot).length < netTeamSize)) {
+  if (['A','B'].some(team => netRoster.filter(p => p.team === team && !p.isBot).length < netTeamSize)) {
     warmupTimer = 15;
     warmupBroadcastT -= dt;
     if (warmupBroadcastT <= 0) { warmupBroadcastT = 1; broadcastWarmup(); }
-    document.getElementById('centerMessage').textContent = `Waiting for ${netTeamSize * 2} players · KNIFE THROWING`;
+    document.getElementById('centerMessage').textContent = `WAITING FOR PLAYERS · ${netRoster.filter(p => !p.isBot).length}/${netTeamSize * 2}`;
     return;
   }
+  document.getElementById('centerMessage').textContent = '';
   warmupTimer -= dt;
   warmupBroadcastT -= dt;
   if (warmupBroadcastT <= 0) { warmupBroadcastT = 1; broadcastWarmup(); }
@@ -4631,30 +4641,17 @@ function updateWarmup(dt){
   if (warmupTimer <= 0) startPvpRoundAsHost();
 }
 
-// bots only ever exist on the host (the only peer that simulates them) - they fill whichever team
-// is short of real players in 2v2. Known simplification: their combat AI still targets the host's
-// own local player specifically (the same targeting the single-player horde mode always used),
-// rather than picking whichever opposing player is actually nearest.
-function ensureBotFill(){
-  if (selectedRuleset === 'knife') return;
-  if (netTeamSize !== 2) return;
-  const teamACount = netRoster.filter(p => p.team === 'A').length;
-  const teamBCount = netRoster.filter(p => p.team === 'B').length;
-  const haveA = enemies.filter(e => e.isBot && e.team === 'A').length;
-  const haveB = enemies.filter(e => e.isBot && e.team === 'B').length;
-  const meta = currentMapMeta;
-  for (let i = haveA; i < Math.max(0, 2 - teamACount); i++) {
-    const bot = spawnEnemy(meta.tSpawn.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)));
-    bot.isBot = true; bot.team = 'A';
-  }
-  for (let i = haveB; i < Math.max(0, 2 - teamBCount); i++) {
-    const bot = spawnEnemy(meta.ctSpawn.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, (Math.random() - 0.5) * 4)));
-    bot.isBot = true; bot.team = 'B';
+// Unsynchronised host-only bots must never count as multiplayer teammates.
+function removePvpBots(){
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    if (!enemies[i].isBot) continue;
+    scene.remove(enemies[i].mesh);
+    enemies.splice(i, 1);
   }
 }
 
 function startPvpRoundAsHost(){
-  ensureBotFill();
+  removePvpBots();
   const weapon = selectedRuleset === 'knife' ? 'knife' : nextRoundWeapon();
   const msg = { type: 'roundStart', roundNum: roundState.roundNum, weapon, scoreA: roundState.ctWins, scoreB: roundState.tWins };
   applyPvpRoundStart(msg.roundNum, msg.weapon, msg.scoreA, msg.scoreB);
@@ -4662,6 +4659,7 @@ function startPvpRoundAsHost(){
 }
 
 function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
+  roundLives.start(roundNum, netRoster);
   receivedKills.clear();
   damagePulse = 0;
   damageIndicatorTime = 0;
@@ -4732,25 +4730,20 @@ function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
 
 function checkPvpRoundEnd(){
   if (netRole !== 'host' || roundState.phase !== 'live') return;
-  const teamAAlive = (myTeam() === 'A' && player.alive)
-    || netRoster.some(p => p.team === 'A' && p.id !== netMyId && isNetPlayerAlive(p.id))
-    || enemies.some(e => e.isBot && e.team === 'A' && e.alive);
-  const teamBAlive = (myTeam() === 'B' && player.alive)
-    || netRoster.some(p => p.team === 'B' && p.id !== netMyId && isNetPlayerAlive(p.id))
-    || enemies.some(e => e.isBot && e.team === 'B' && e.alive);
-  if (!teamAAlive || !teamBAlive) {
-    const winner = teamAAlive ? 'A' : 'B';
-    endPvpRoundAsHost(winner, 'Team eliminated');
-  }
+  if (!player.alive) roundLives.eliminate(netMyId, roundState.roundNum);
+  const winner = roundOutcome(countAliveOnTeam('A'), countAliveOnTeam('B'));
+  if (winner !== undefined) endPvpRoundAsHost(winner, winner === null ? 'Both teams eliminated' : 'Team eliminated');
 }
 function isNetPlayerAlive(id){
+  if (roundState.phase === 'live' || roundState.phase === 'ended') return roundLives.alive(id);
   const avatar = enemies.find(e => e.isRemote && e.netId === id);
   return avatar ? avatar.alive : true;
 }
 
 function endPvpRoundAsHost(winnerTeam, reason){
   if (roundState.phase !== 'live') return; // already ending/ended this round - don't score or broadcast it twice
-  if (winnerTeam === 'A') roundState.ctWins++; else roundState.tWins++;
+  if (winnerTeam === 'A') roundState.ctWins++;
+  else if (winnerTeam === 'B') roundState.tWins++;
   const msg = { type: 'roundEnd', roundNum: roundState.roundNum, winnerTeam, reason, scoreA: roundState.ctWins, scoreB: roundState.tWins };
   applyPvpRoundEnd(winnerTeam, reason, roundState.ctWins, roundState.tWins);
   netBroadcast(msg);
@@ -4764,8 +4757,8 @@ function applyPvpRoundEnd(winnerTeam, reason, scoreA, scoreB){
   document.getElementById('tWins').textContent = scoreA;
   document.getElementById('ctWins').textContent = scoreB;
   const youWon = winnerTeam === myTeam();
-  showWaveBanner(`${youWon ? 'ROUND WON' : 'ROUND LOST'} — ${reason}`);
-  document.getElementById('bombStatusLabel').textContent = `${player.alive ? 'SURVIVED' : 'ELIMINATED'} · TEAM ${winnerTeam} WINS`;
+  showWaveBanner(`${winnerTeam === null ? 'ROUND DRAW' : youWon ? 'ROUND WON' : 'ROUND LOST'} — ${reason}`);
+  document.getElementById('bombStatusLabel').textContent = `${player.alive ? 'SURVIVED' : 'ELIMINATED'} · ${winnerTeam === null ? 'DRAW — NO POINT AWARDED' : `TEAM ${winnerTeam} WINS`}`;
   document.getElementById('roundPhaseLabel').textContent = 'ROUND OVER';
   if (scoreA >= roundState.roundsToWin || scoreB >= roundState.roundsToWin) {
     matchFinished = true;
@@ -4799,11 +4792,7 @@ function applyPvpRoundEnd(winnerTeam, reason, scoreA, scoreB){
 const PVP_ROUND_DURATION = 90; // 1:30 max per round
 
 function countAliveOnTeam(team){
-  let count = 0;
-  if (myTeam() === team && player.alive) count++;
-  netRoster.forEach(p => { if (p.team === team && p.id !== netMyId && isNetPlayerAlive(p.id)) count++; });
-  enemies.forEach(e => { if (e.isBot && e.team === team && e.alive) count++; });
-  return count;
+  return roundLives.count(team, netRoster);
 }
 
 function updatePvpRound(dt){
@@ -4818,7 +4807,7 @@ function updatePvpRound(dt){
     checkPvpRoundEnd();
     if (netRole === 'host' && roundState.phase === 'live' && roundState.phaseT >= PVP_ROUND_DURATION) {
       const aliveA = countAliveOnTeam('A'), aliveB = countAliveOnTeam('B');
-      endPvpRoundAsHost(aliveA >= aliveB ? 'A' : 'B', 'Time expired');
+      endPvpRoundAsHost(roundOutcome(aliveA, aliveB, true), 'Time expired');
     }
   }
 }
@@ -4983,6 +4972,7 @@ function updatePlayerRegen(dt){
 
 function playerDie(){
   player.alive = false;
+  if (gameMode === 'pvp' && roundState.phase === 'live') roundLives.eliminate(netMyId, roundState.roundNum);
   if (socialUI.wheelOpen) socialUI.closeWheel(false);
   clearGameplayInput();
   if (gameMode === 'bomb') return; // round loss is handled by the round system, not the horde game-over screen
@@ -5572,6 +5562,7 @@ function animate(){
   // Finish cosmetic death/shot effects even when the final round freezes gameplay.
   if (gameStarted) {
     updateDyingEnemies(dt);
+    playerLabels.update(enemies, camera, envMeshes, myTeam(), dt);
     updateParticles(dt);
     for (let i = bulletTracers.length - 1; i >= 0; i--) {
       bulletTracers[i].life -= dt;

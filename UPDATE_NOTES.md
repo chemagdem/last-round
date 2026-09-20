@@ -1,5 +1,16 @@
 # Visual update and Knife Throwing
 
+## 2v2 round resolution and player names
+
+- Removed host-only bot filling from PvP: those bots were not visible to clients but still kept teams alive. Standard 2v2 now waits for four human players; use 1v1 for two players.
+- Round life tracking is independent of scene avatars. Both death events and dead state snapshots mark a player eliminated; later alive snapshots cannot revive that player in the same live round.
+- A new round resets lives. Old-round deaths are rejected. State and death sender identities are checked by the host.
+- Equal survivors at timeout and mutual elimination produce a draw with no score awarded; the previous timeout rule favoured team A.
+- Remote player names appear above their heads: teal for teammates and coral for opponents. Names follow crouching, hide on death or behind cover, and cannot intercept hit detection.
+- Five new round-rule tests cover both 2v2 winners, duplicate deaths, resets, stale messages, invisible bots, disconnections and draws. The complete 20-test suite passes. Visual nameplate and live four-player verification remain pending.
+
+All players must update to this build. No deployment has been performed.
+
 ## Multiplayer death and shot feedback
 
 - Remote corpses remain registered until respawn/round reset, preventing repeated collapse animations and incorrect alive-player counts.
