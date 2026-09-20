@@ -3290,10 +3290,10 @@ function throwGrenade(type, far = true){
   else if (type === 'flash') { flashCount--; updateGrenadeHUD(); }
   else { grenadeCount--; updateGrenadeHUD(); }
   if (type === 'flash') {
-    // one clip covers both the toss and the pop - delaying it half a second lines its own
-    // internal timing up with roughly when the thing actually lands and goes off, instead of
-    // playing a separate (and now removed) detonation sound on top of it
-    setTimeout(() => { if (!audio.playSample('flashbang', 0.85)) audio.mechClick(420, 0.16, 0.05); }, 500);
+    // one clip covers both the toss and the pop - delaying it lines its own internal timing up
+    // with roughly when the thing actually lands and goes off, instead of playing a separate
+    // (and now removed) detonation sound on top of it
+    setTimeout(() => { if (!audio.playSample('flashbang', 0.85)) audio.mechClick(420, 0.16, 0.05); }, 750);
   } else if (!audio.playSample('grenadeThrow', 0.85)) audio.mechClick(420, 0.16, 0.05);
 
   const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
