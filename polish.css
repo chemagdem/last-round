@@ -1,4 +1,12 @@
 /* Tactical hierarchy with restrained accents and readable numeric information. */
+#damageDirection{position:absolute;left:50%;top:50%;width:180px;height:180px;margin:-90px 0 0 -90px;opacity:0;pointer-events:none}
+#damageDirection span{display:block;position:absolute;left:65px;top:0;width:50px;height:9px;background:linear-gradient(90deg,transparent,#ff7565,transparent);clip-path:polygon(0 0,100% 0,85% 60%,50% 100%,15% 60%);filter:drop-shadow(0 0 4px #e5473c)}
+#ammo[data-empty="true"]{border-right-color:#ff7565}
+#ammo[data-low="true"] #ammoCount{color:#ffb08b}
+#hitmarker:before,#hitmarker:after{background:linear-gradient(to bottom,#fff 0 27%,transparent 27% 73%,#fff 73%);width:2px}
+#hitmarker:after{background:linear-gradient(to right,#fff 0 27%,transparent 27% 73%,#fff 73%);height:2px;width:100%}
+#hitmarker.kill:before{background:linear-gradient(to bottom,#ff7565 0 27%,transparent 27% 73%,#ff7565 73%)}
+#hitmarker.kill:after{background:linear-gradient(to right,#ff7565 0 27%,transparent 27% 73%,#ff7565 73%)}
 #ammo{bottom:27px;right:28px;padding:12px 18px;background:linear-gradient(110deg,#101418e8,#181214ce);border-right:3px solid #d7b66c;border-bottom:1px solid #ffffff20;min-width:164px;line-height:1.2;font-variant-numeric:tabular-nums}
 #ammo #ammoLabel{font-size:11px;letter-spacing:2px;color:#bbc3c8}
 #ammo #ammoCount{font-size:34px;font-weight:700;color:#f5f6f7}

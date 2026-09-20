@@ -4,6 +4,8 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { CombatMotion } from './combat-motion.js';
+import { createImpactMarks } from './combat-effects.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -738,6 +740,8 @@ document.body.appendChild(renderer.domElement);
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 const reflectionEnvironment = createReflectionEnvironment(renderer);
 scene.environment = reflectionEnvironment.texture;
+const impactMarks = createImpactMarks(scene);
+const combatMotion = new CombatMotion();
 
 // post-processing (bloom for muzzle flash / sun glow)
 // Note: SSAO was tried here for contact-shadow realism, but three.js's SSAOPass reads the whole
@@ -1641,6 +1645,12 @@ let selectedMap = 'arena';
 let currentMapMeta = null;
 let persistentSceneObjects = null;
 function buildMap(id){
+  impactMarks.clear();
+  combatMotion.reset();
+  // Dispose transient allocations before removing scene children on a rematch.
+  particles.forEach(p => { if (p.type !== 'casing') p.obj.material.dispose(); });
+  bulletTracers.forEach(t => { t.line.geometry.dispose(); t.line.material.dispose(); });
+  decals.forEach(d => d.mesh.material.dispose());
   if (!persistentSceneObjects) persistentSceneObjects = new Set(scene.children);
   else {
     // Keep sky, global lights and the camera; remove the previous arena and effects.
@@ -1792,7 +1802,7 @@ const weaponWoodBump = woodBumpTexture();
 const goldWeaponMat = new THREE.MeshStandardMaterial({
   map: loadTiledTexture('assets/textures/gold.png', 1.2, 2.2),
   bumpMap: weaponMetalBump,
-  bumpScale: 0.008,
+  bumpScale: 0.0008,
   roughness: 0.3,
   metalness: 0.88
 });
@@ -1834,25 +1844,25 @@ function applyEquippedSkin(){
   goldWeaponMat.needsUpdate = true;
 }
 applyEquippedSkin();
-const gunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.7, metalness: 0.4 });
-const gunMatLight = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#33352f'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.75, metalness: 0.35 });
-const woodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#5a3d24'), bumpMap: weaponWoodBump, bumpScale: 0.01, roughness: 0.6 });
-const akWoodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#8f5a2e', 3), bumpMap: weaponWoodBump, bumpScale: 0.012, roughness: 0.58, metalness: 0.02 }); // visible laminate furniture, not an unreadable black blob
-const akMetalMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#50575a'), bumpMap: weaponMetalBump, bumpScale: 0.012, roughness: 0.42, metalness: 0.72 }); // parkerized steel with highlights that survive the FPS lighting
-const pistolMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#24241f'), bumpMap: weaponMetalBump, bumpScale: 0.006, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.45 });
-const awpStockMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#4d5937', '#657044', '#313a28', '#1f271c']), bumpMap: weaponWoodBump, bumpScale: 0.006, roughness: 0.72, metalness: 0.04 }); // textured olive precision-rifle polymer stock
-const scopeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#202625'), bumpMap: weaponMetalBump, bumpScale: 0.008, roughness: 0.32, metalness: 0.82 });
+const gunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.7, metalness: 0.4 });
+const gunMatLight = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#33352f'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.75, metalness: 0.35 });
+const woodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#5a3d24'), bumpMap: weaponWoodBump, bumpScale: 0.001, roughness: 0.6 });
+const akWoodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#8f5a2e', 3), bumpMap: weaponWoodBump, bumpScale: 0.0012, roughness: 0.58, metalness: 0.02 }); // visible laminate furniture, not an unreadable black blob
+const akMetalMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#50575a'), bumpMap: weaponMetalBump, bumpScale: 0.0012, roughness: 0.42, metalness: 0.72 }); // parkerized steel with highlights that survive the FPS lighting
+const pistolMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#24241f'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.45 });
+const awpStockMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#4d5937', '#657044', '#313a28', '#1f271c']), bumpMap: weaponWoodBump, bumpScale: 0.0006, roughness: 0.72, metalness: 0.04 }); // textured olive precision-rifle polymer stock
+const scopeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#202625'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughness: 0.32, metalness: 0.82 });
 const scopeGlassMat = new THREE.MeshStandardMaterial({ color: 0x173e4c, roughness: 0.08, metalness: 0.35, transparent: true, opacity: 0.88, emissive: 0x06252f, emissiveIntensity: 0.65 });
-const chromeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d4d4d4'), bumpMap: weaponMetalBump, bumpScale: 0.004, roughness: 0.2, metalness: 0.95 }); // bright polished slide finish, for the Berettas
+const chromeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d4d4d4'), bumpMap: weaponMetalBump, bumpScale: 0.0004, roughness: 0.2, metalness: 0.95 }); // bright polished slide finish, for the Berettas
 const deagleMat = chromeMat; // brushed stainless finish, matching the real Desert Eagle's signature silver slide
 const skinMat = new THREE.MeshStandardMaterial({ color: 0xb98862, roughness: 0.8 });
 const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3a3a35, roughness: 0.9 });
 const camoGreenMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#2f3a1e', '#5a6b34', '#1c2412', '#0d0d0d']), roughness: 0.8 });
-const bladeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#b23a3a'), bumpMap: metalBumpTexture(), bumpScale: 0.01, roughness: 0.25, metalness: 0.85 });
+const bladeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#b23a3a'), bumpMap: metalBumpTexture(), bumpScale: 0.001, roughness: 0.25, metalness: 0.85 });
 const handleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.55 });
-const knifeHandleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, bumpMap: checkeredGripTexture(), bumpScale: 0.004, roughness: 0.75 });
-const grenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#384a24'), bumpMap: weaponMetalBump, bumpScale: 0.008, roughnessMap: weaponMetalBump, roughness: 0.65, metalness: 0.15 });
-const smokeGrenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#8a8f88'), bumpMap: weaponMetalBump, bumpScale: 0.008, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.2 });
+const knifeHandleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, bumpMap: checkeredGripTexture(), bumpScale: 0.0004, roughness: 0.75 });
+const grenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#384a24'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.65, metalness: 0.15 });
+const smokeGrenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#8a8f88'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.2 });
 
 // weapon aim position (hip vs ADS)
 const hipPos = new THREE.Vector3(0, 0, 0);
@@ -2401,6 +2411,7 @@ document.addEventListener('keydown', e => keys[e.code] = true);
 document.addEventListener('keyup', e => keys[e.code] = false);
 
 function clearGameplayInput(){
+  combatMotion.reset();
   Object.keys(keys).forEach(key => { keys[key] = false; });
   mouseDown = false;
   movementVelocity.set(0, 0, 0);
@@ -2443,6 +2454,7 @@ document.addEventListener('mousemove', e => {
   // sensitivity scales down with the current zoom level - a tighter scope (lower fov) turns the
   // mouse slower, so a heavily-zoomed AWP feels far more controlled than a lightly-zoomed pistol
   const sens = (player.ads ? 0.0022 * (camera.fov / baseFov) : 0.0022) * settings.sensitivity;
+  combatMotion.look(e.movementX * settings.sensitivity, e.movementY * settings.sensitivity);
   player.yaw -= e.movementX * sens;
   player.pitch -= e.movementY * sens;
   player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch));
@@ -2920,6 +2932,7 @@ function fireWeapon(){
 
   const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
   sessionMetrics.shots++;
+  combatMotion.shot();
   if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
   flashLight.intensity = 5;
   flashSpriteMat.opacity = 1;
@@ -2964,8 +2977,9 @@ function fireWeapon(){
   raycaster.set(origin, dir);
   raycaster.far = def.range;
 
-  const enemyHits = raycaster.intersectObjects(enemies.map(e => e.mesh), true);
-  const envHits = raycaster.intersectObjects(envMeshes, false);
+  const hittableEnemies = enemies.filter(e => e.alive);
+  const enemyHits = raycaster.intersectObjects(hittableEnemies.map(e => e.mesh), true);
+  const envHits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
 
   let tracerLen = def.range;
   let hitPoint = null;
@@ -2990,11 +3004,12 @@ function fireWeapon(){
   if (envHitIsFirst && envHits[0].object.material?.userData?.penetrable) {
     // bullet punches through thin cover (wood crates/doors) and keeps going with reduced damage
     spawnDustPuff(envHits[0].point);
+    impactMarks.add(envHits[0]);
     const behindOrigin = envHits[0].point.clone().addScaledVector(dir, 0.05);
     raycaster.set(behindOrigin, dir);
     raycaster.far = Math.max(0, def.range - envHits[0].distance);
-    const behindEnemyHits = raycaster.intersectObjects(enemies.map(e => e.mesh), true);
-    const behindEnvHits = raycaster.intersectObjects(envMeshes, false);
+    const behindEnemyHits = raycaster.intersectObjects(hittableEnemies.map(e => e.mesh), true);
+    const behindEnvHits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
     if (behindEnemyHits.length > 0 && (behindEnvHits.length === 0 || behindEnemyHits[0].distance < behindEnvHits[0].distance)) {
       tracerLen = envHits[0].distance + behindEnemyHits[0].distance + 0.05;
       hitPoint = behindEnemyHits[0].point;
@@ -3003,6 +3018,7 @@ function fireWeapon(){
       tracerLen = envHits[0].distance + behindEnvHits[0].distance + 0.05;
       hitPoint = behindEnvHits[0].point;
       spawnDustPuff(hitPoint);
+      impactMarks.add(behindEnvHits[0]);
     } else {
       tracerLen = def.range;
     }
@@ -3014,9 +3030,17 @@ function fireWeapon(){
     tracerLen = envHits[0].distance;
     hitPoint = envHits[0].point;
     spawnDustPuff(hitPoint);
+    impactMarks.add(envHits[0]);
   }
 
-  drawTracer(origin, dir, tracerLen);
+  // The camera ray decides the hit; the visual tracer starts at the barrel.
+  const tracerEnd = origin.clone().addScaledVector(dir, tracerLen);
+  const barrelOrigin = flashSprite.getWorldPosition(new THREE.Vector3());
+  // Very close surfaces can sit behind the barrel: avoid a backwards tracer.
+  const tracerOrigin = tracerLen < origin.distanceTo(barrelOrigin) ? origin : barrelOrigin;
+  const tracerDirection = tracerEnd.sub(tracerOrigin);
+  const visualDistance = tracerDirection.length();
+  drawTracer(tracerOrigin, tracerDirection.normalize(), visualDistance);
 }
 
 function drawTracer(origin, dir, length){
@@ -3107,6 +3131,8 @@ function updateParticles(dt){
     p.life -= dt;
     if (p.life <= 0) {
       scene.remove(p.obj);
+      // Casing material/geometry are shared; sprite materials are per-particle.
+      if (p.type !== 'casing') p.obj.material.dispose();
       particles.splice(i, 1);
       continue;
     }
@@ -3131,7 +3157,10 @@ function updateParticles(dt){
       const fade = p.life / p.maxLife;
       p.obj.material.opacity = fade * (p.type === 'blood' ? 0.9 : 0.5);
       const growth = 1 + (1 - fade) * 1.5;
-      if (p.obj.scale) p.obj.scale.set(p.obj.scale.x, p.obj.scale.y, 1);
+      if (p.obj.scale) {
+        if (!p.initialScale) p.initialScale = p.obj.scale.clone();
+        p.obj.scale.set(p.initialScale.x * growth, p.initialScale.y * growth, 1);
+      }
     }
   }
 }
@@ -3275,14 +3304,16 @@ function segmentCrossesSmoke(ax, az, bx, bz){
   return false;
 }
 
+let hitMarkerTimer;
 function showHitMarker(isHeadshot, isKill = false){
+  clearTimeout(hitMarkerTimer);
   if (isHeadshot) audio.headshot(); else audio.hitmarker();
   const el = document.getElementById('hitmarker');
   el.classList.toggle('kill', isKill);
   el.style.opacity = 1;
   el.style.transform = `translate(-50%,-50%) rotate(45deg) scale(${isHeadshot ? 1.7 : 1.3})`;
   el.style.filter = isHeadshot ? 'drop-shadow(0 0 4px #ff0) brightness(1.5)' : 'none';
-  setTimeout(() => {
+  hitMarkerTimer = setTimeout(() => {
     el.style.opacity = 0;
     el.style.transform = 'translate(-50%,-50%) rotate(45deg) scale(1)';
     el.style.filter = 'none';
@@ -3693,7 +3724,7 @@ function updateDecals(dt){
     const d = decals[i];
     d.life -= dt;
     if (d.life < 3) d.mesh.material.opacity = Math.max(0, d.life / 3) * 0.85;
-    if (d.life <= 0) { scene.remove(d.mesh); decals.splice(i, 1); }
+    if (d.life <= 0) { scene.remove(d.mesh); d.mesh.geometry.dispose(); d.mesh.material.dispose(); decals.splice(i, 1); }
   }
 }
 
@@ -4857,6 +4888,9 @@ function drawEnemyTracer(origin, dir){
 // tracks who's hit the local player recently (PvP only) so a death can credit a kill to whoever
 // landed the finishing blow and an assist to anyone else who damaged them in the last few seconds
 const ASSIST_WINDOW = 8;
+let damageBearing = 0;
+let damageIndicatorTime = 0;
+let damageFlashTimer;
 let recentAttackers = []; // [{id, t}], most recent last
 function damagePlayer(dmg, fromId){
   if (!player.alive) return;
@@ -4864,8 +4898,14 @@ function damagePlayer(dmg, fromId){
   regenDelayT = REGEN_DELAY;
   audio.playerHurt();
   shakeIntensity = Math.min(shakeIntensity + 0.5, 1.5);
-  document.getElementById('hitFlash').style.background = 'rgba(255,0,0,0.35)';
-  setTimeout(() => document.getElementById('hitFlash').style.background = 'rgba(255,0,0,0)', 120);
+  clearTimeout(damageFlashTimer);
+  document.getElementById('hitFlash').style.background = 'radial-gradient(ellipse, transparent 45%, rgba(190,35,25,.38))';
+  damageFlashTimer = setTimeout(() => document.getElementById('hitFlash').style.background = 'transparent', 160);
+  const source = enemies.find(enemy => enemy.netId === fromId && fromId);
+  if (source) {
+    damageBearing = Math.atan2(source.mesh.position.x - player.pos.x, -(source.mesh.position.z - player.pos.z));
+    damageIndicatorTime = 0.8;
+  }
   if (fromId) {
     const now = performance.now() / 1000;
     recentAttackers = recentAttackers.filter(a => a.id !== fromId && now - a.t < ASSIST_WINDOW);
@@ -5006,7 +5046,7 @@ function updatePlayer(dt){
   movementVelocity.x = THREE.MathUtils.lerp(movementVelocity.x, desiredVelocity.x, blend);
   movementVelocity.z = THREE.MathUtils.lerp(movementVelocity.z, desiredVelocity.z, blend);
   const horizontalSpeed = Math.hypot(movementVelocity.x, movementVelocity.z);
-  const crosshairGap = 4 + THREE.MathUtils.clamp(horizontalSpeed / player.speed, 0, 1.7) * 5 + (player.onGround ? 0 : 5);
+  const crosshairGap = 4 + combatMotion.bloom + THREE.MathUtils.clamp(horizontalSpeed / player.speed, 0, 1.7) * 5 + (player.onGround ? 0 : 5);
   document.documentElement.style.setProperty('--crosshair-gap', `${crosshairGap.toFixed(1)}px`);
   const newPos = player.pos.clone().addScaledVector(movementVelocity, dt);
   if (!checkCollision(newPos)) {
@@ -5050,14 +5090,14 @@ function updatePlayer(dt){
     player.footstepTimer = 0;
   }
 
-  // weapon sway / bob / ADS positioning
-  const t = performance.now() * 0.008;
+  // Smooth transitions and bounded inertia affect the model only, never camera aim.
+  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion);
   const targetPos = player.ads ? adsPos : hipPos;
-  const bobY = (moving && player.onGround && !player.ads) ? Math.sin(t * (sprinting ? 1.8 : 1)) * 0.015 : 0;
-  const bobX = (moving && player.onGround && !player.ads) ? Math.cos(t * (sprinting ? 1.8 : 1) * 0.5) * 0.01 : 0;
-  weaponGroup.position.x = targetPos.x + bobX;
-  weaponGroup.position.y = targetPos.y + bobY;
-  weaponGroup.position.z += (targetPos.z - weaponGroup.position.z) * Math.min(1, dt * 15);
+  const poseBlend = 1 - Math.exp(-18 * dt);
+  weaponGroup.position.x += (targetPos.x + motion.x - weaponGroup.position.x) * poseBlend;
+  weaponGroup.position.y += (targetPos.y + motion.y - weaponGroup.position.y) * poseBlend;
+  weaponGroup.position.z += (targetPos.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
+  weaponGroup.rotation.z = motion.roll;
   if (!reloadRuntime.reloading) weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * Math.min(1, dt * 10);
 
   fireCooldown -= dt;
@@ -5076,6 +5116,11 @@ function updatePlayer(dt){
 // ============================================================
 function updateAmmoHUD(){
   const def = currentWeaponDef();
+  const remaining = currentSlot === 'melee' ? knifeCount : currentSlot === 'grenade' ? grenadeCount : currentSlot === 'smoke' ? smokeCount : ammoState[currentSlot]?.mag;
+  const capacity = currentSlot === 'melee' ? knifeCapacity() : def.mag || 1;
+  const ammoPanel = document.getElementById('ammo');
+  ammoPanel.dataset.empty = String(remaining === 0);
+  ammoPanel.dataset.low = String(remaining <= Math.max(1, Math.floor(capacity * 0.2)));
   document.getElementById('ammoLabel').textContent = def.name.toUpperCase();
   if (currentSlot === 'melee') {
     document.getElementById('ammoLabel').textContent = knifeAvailable ? 'KNIFE · RMB THROW' : 'EMPTY HAND · RECOVER KNIFE';
@@ -5443,6 +5488,7 @@ function animate(){
     updateDyingEnemies(dt);
     updateHealthHUD();
     updateParticles(dt);
+    impactMarks.update(dt);
     updateThrownKnives(dt);
     updateDecals(dt);
     updateGraffitiDecals(dt);
@@ -5462,11 +5508,15 @@ function animate(){
 
     for (let i = bulletTracers.length - 1; i >= 0; i--) {
       bulletTracers[i].life -= dt;
-      if (bulletTracers[i].life <= 0) { scene.remove(bulletTracers[i].line); bulletTracers.splice(i, 1); }
+      if (bulletTracers[i].life <= 0) { const line = bulletTracers[i].line; scene.remove(line); line.geometry.dispose(); line.material.dispose(); bulletTracers.splice(i, 1); }
     }
     drawMinimap();
   }
 
+  damageIndicatorTime = Math.max(0, damageIndicatorTime - dt);
+  const damageIndicator = document.getElementById('damageDirection');
+  damageIndicator.style.opacity = gameStarted && player.alive && !matchFinished ? Math.min(1, damageIndicatorTime * 3) : 0;
+  damageIndicator.style.transform = `rotate(${damageBearing + player.yaw}rad)`;
   updateRenderQuality(dt);
 
   composer.render();

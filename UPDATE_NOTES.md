@@ -1,5 +1,19 @@
 # Visual update and Knife Throwing
 
+## Combat presentation follow-up
+
+- First-person weapon inertia, subtle breathing and movement offsets, with smooth ADS positioning. Cosmetic offsets never modify camera aim and respect reduced-motion settings.
+- Reduced excessive bump relief on weapon metal, grips and wood while retaining the equipped skin.
+- Tracers originate at the barrel and converge on the camera-ray endpoint; nearby obstructions use the camera origin to avoid backward tracers.
+- Bullet impact marks on walls and floors use a fixed 96-instance pool and expire after 24 seconds. These are local cosmetic effects.
+- Corpses no longer intercept firearm hit queries. Floors participate in bullet obstruction queries.
+- Crosshair expands on firing and recovers smoothly. Hit markers have an open centre, and repeated hits no longer inherit an earlier marker's hide timer.
+- Low/empty ammunition styling, peripheral damage vignette and a short directional damage indicator for known multiplayer attackers.
+- Smoke and dust now expand over their lifetime. Expired tracer geometry/materials, particle sprite materials and blood decals are released; shared casing resources are retained.
+- Added three motion tests covering bounds, settling, ADS/reduced-motion attenuation and frame-rate-independent crosshair recovery. All eight tests and existing smoke checks pass.
+
+Browser rendering and live multiplayer were not verified in this environment. No deployment was performed. Existing maps, skins, accounts configuration and Knife Throwing are retained.
+
 ## Knife Throwing
 
 Select Knife Throwing on the landing page, choose a map and 1v1 or 2v2, then host a room. Other players join with its code using this same version.
