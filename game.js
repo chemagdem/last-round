@@ -2759,7 +2759,7 @@ function createThrownKnife(origin, direction, damaging = false, id = crypto.rand
 }
 
 function throwKnife(){
-  if (!knifeAvailable || matchFinished || fireCooldown > 0 || reloadRuntime.reloading) return;
+  if ((gameMode === 'pvp' && roundState.phase === 'ended') || !knifeAvailable || matchFinished || fireCooldown > 0 || reloadRuntime.reloading) return;
   weaponInspectT = -1; weaponInspectId = null; weaponRecoilT = -1;
   currentVisual.group.position.set(0, 0, 0);
   currentVisual.group.rotation.set(0, 0, 0);
@@ -2851,7 +2851,7 @@ const bulletTracers = [];
 const particles = []; // {mesh/sprite, vel, life, maxLife, type}
 
 function fireWeapon(){
-  if (!player.alive || matchFinished || reloadRuntime.reloading) return;
+  if (!player.alive || matchFinished || (gameMode === 'pvp' && roundState.phase === 'ended') || reloadRuntime.reloading) return;
   if (weaponInspectT >= 0) {
     weaponInspectT = -1;
     weaponInspectId = null;
@@ -3025,6 +3025,8 @@ function fireWeapon(){
   const tracerDirection = tracerEnd.sub(tracerOrigin);
   const visualDistance = tracerDirection.length();
   drawTracer(tracerOrigin, tracerDirection.normalize(), visualDistance);
+  if (gameMode === 'pvp') netBroadcast({ type: 'shot', id: netMyId, roundNum: roundState.roundNum,
+    weaponId, end: tracerOrigin.clone().addScaledVector(tracerDirection, visualDistance).toArray() });
 }
 
 function drawTracer(origin, dir, length){
@@ -3656,13 +3658,13 @@ function spawnEnemy(spawnPos){
 // on a kill vs. the default grey for a non-lethal hit). Remote players resolve asynchronously
 // over the network, so that path always reports false here.
 function damageEnemy(enemy, dmg, point, meta){
-  if (!enemy.alive) return false;
+  if (!enemy.alive || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
   spawnBlood(point);
   if (enemy.isRemote) {
     // don't own their health - tell their real client what happened and let their own broadcast update us.
     // netBroadcast reaches them directly if we're the host, or reaches the host if we're a client, which
     // then relays it onward (see the generic relay in handleNetMessage) - either way it arrives once.
-    netBroadcast({ type: 'hit', targetId: enemy.netId, fromId: netMyId, dmg, isHeadshot: !!(meta && meta.headshot), instantKill: meta?.instantKill === true });
+    netBroadcast({ type: 'hit', roundNum: roundState.roundNum, weaponName: meta?.weaponName || 'Unknown', targetId: enemy.netId, fromId: netMyId, dmg, isHeadshot: !!(meta && meta.headshot), instantKill: meta?.instantKill === true });
     return false;
   }
   enemy.health -= dmg;
@@ -3810,6 +3812,9 @@ function updateDyingEnemies(dt){
     enemy.mesh.rotation.z = ease * (Math.PI / 2.1) * Math.cos(enemy.fallDir);
     const bounce = Math.sin(Math.min(1, p) * Math.PI) * 0.12;
     enemy.mesh.position.y = groundHeightAt(enemy.mesh.position.x, enemy.mesh.position.z) + bounce;
+    // Retain a remote corpse until respawn/next round. Removing it caused each
+    // new dead snapshot to create another living avatar and replay its collapse.
+    if (enemy.isRemote) continue;
     if (enemy.deathT > 1.6) {
       scene.remove(enemy.mesh);
       enemies.splice(i, 1);
@@ -4228,11 +4233,18 @@ function broadcastRoster(){
 // peers by applying every 'kill' message locally in addition to broadcasting it (broadcasting
 // never loops a message back to its own sender, same as the roster/warmup broadcasts above)
 let netStats = {};
+const receivedKills = new Set();
+let lastDamageMeta = {};
 function ensureStats(id){
   if (!netStats[id]) netStats[id] = { kills: 0, assists: 0, deaths: 0 };
   return netStats[id];
 }
 function applyKillMessage(msg){
+  if (msg.deathId && receivedKills.has(msg.deathId)) return;
+  if (msg.deathId) receivedKills.add(msg.deathId);
+  const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
+  showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD');
+  if (msg.killerId === netMyId) showHitMarker(!!msg.headshot, true);
   ensureStats(msg.victimId).deaths++;
   if (msg.killerId) ensureStats(msg.killerId).kills++;
   (msg.assistIds || []).forEach(id => ensureStats(id).assists++);
@@ -4256,6 +4268,9 @@ function handleNetMessage(msg, fromId){
     return;
   }
   if ((msg.matchEpoch ?? 0) !== matchEpoch) return;
+  if (['hit', 'shot', 'kill', 'roundEnd'].includes(msg.type) && msg.roundNum !== roundState.roundNum) return;
+  if (netRole === 'host' && msg.type === 'shot' && msg.id !== fromId) return;
+  if (netRole === 'host' && msg.type === 'hit' && msg.fromId !== fromId) return;
   if (['roundStart', 'roundEnd', 'warmup'].includes(msg.type)
     && (netRole !== 'client' || fromId !== 'host')) return;
   // Social messages use a separate validated route, before the legacy generic game relay.
@@ -4296,8 +4311,14 @@ function handleNetMessage(msg, fromId){
     case 'state':
       applyRemoteState(msg);
       break;
+    case 'shot':
+      showRemoteShot(msg);
+      break;
     case 'hit':
-      if (msg.targetId === netMyId) damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
+      if (msg.targetId === netMyId && Number.isFinite(msg.dmg) && msg.dmg > 0 && roundState.phase !== 'ended') {
+        lastDamageMeta = { weaponName: msg.weaponName, headshot: !!msg.isHeadshot };
+        damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
+      }
       break;
     case 'knifeThrow': {
       const validVector = value => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
@@ -4407,6 +4428,48 @@ function myTeam(){
   return me ? me.team : 'A';
 }
 
+function showRemoteShot(msg){
+  if (msg.id === netMyId || !netRoster.some(p => p.id === msg.id)) return;
+  const def = WEAPONS[msg.weaponId];
+  if (!def || !['primary', 'secondary'].includes(def.slot)) return;
+  if (!Array.isArray(msg.end) || msg.end.length !== 3 || !msg.end.every(Number.isFinite)) return;
+  const avatar = enemies.find(e => e.isRemote && e.netId === msg.id);
+  if (!avatar) return;
+  const now = performance.now();
+  if (now - (avatar.lastShotAt ?? -Infinity) < 35) return;
+  const muzzle = avatar.mesh.userData.muzzle;
+  const origin = muzzle ? muzzle.getWorldPosition(new THREE.Vector3()) : avatar.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+  const direction = new THREE.Vector3().fromArray(msg.end).sub(origin);
+  const distance = direction.length();
+  if (distance > def.range + 10 || distance < 0.001) return;
+  avatar.lastShotAt = now;
+  // Cosmetics only: the shot event never applies damage a second time.
+  drawTracer(origin, direction.normalize(), distance);
+  const material = flashSpriteMat.clone(); material.opacity = 1;
+  const flash = new THREE.Sprite(material);
+  flash.position.copy(origin); flash.scale.set(0.28, 0.28, 1);
+  scene.add(flash);
+  particles.push({ obj: flash, type: 'remoteFlash', life: 0.065, maxLife: 0.065, vel: new THREE.Vector3() });
+  if (!audio.ctx) return;
+  const samples = { tec9: 'smg', duals: 'smg' };
+  const source = audio.ctx.createBufferSource();
+  source.buffer = audio.samples[samples[msg.weaponId] || msg.weaponId] || audio.noiseBuffer(0.1);
+  const gain = audio.ctx.createGain();
+  const pan = audio.ctx.createStereoPanner();
+  const offset = origin.clone().sub(camera.position);
+  const volume = Math.max(0.025, 0.85 / (1 + offset.length() / 12));
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  pan.pan.value = THREE.MathUtils.clamp(offset.normalize().dot(right), -1, 1);
+  const t = audio.ctx.currentTime;
+  const duration = Math.min(1.5, source.buffer.duration);
+  gain.gain.setValueAtTime(volume, t);
+  gain.gain.setValueAtTime(volume, t + Math.max(0, duration - 0.05));
+  gain.gain.linearRampToValueAtTime(0, t + duration);
+  source.connect(gain); gain.connect(pan); pan.connect(audio.master);
+  source.onended = () => { source.disconnect(); gain.disconnect(); pan.disconnect(); };
+  source.start(t); source.stop(t + duration);
+}
+
 function getOrCreateRemoteAvatar(id, team){
   let avatar = enemies.find(e => e.isRemote && e.netId === id);
   if (avatar) return avatar;
@@ -4431,7 +4494,7 @@ function applyRemoteState(msg){
   // round has already started locally - applying it would re-kill their freshly respawned avatar
   // and made checkPvpRoundEnd() think that team was already eliminated, instantly ending the new
   // round too and skipping straight to the round after it. Drop anything tagged with an older round.
-  if (msg.roundNum !== undefined && msg.roundNum < roundState.roundNum) return;
+  if (msg.roundNum !== roundState.roundNum) return;
   const rosterEntry = netRoster.find(p => p.id === msg.id);
   const team = rosterEntry ? rosterEntry.team : 'B';
   const avatar = getOrCreateRemoteAvatar(msg.id, team);
@@ -4450,11 +4513,11 @@ function applyRemoteState(msg){
   avatar.alive = msg.alive;
   if (!msg.alive && !avatar.dying) {
     avatar.dying = true; avatar.deathT = 0; avatar.fallDir = msg.yaw;
-    // a remote player's death is only ever known through this position/health sync - without this,
-    // the shooter never gets any confirmation a kill happened (no killfeed, no feedback at all),
-    // which combined with the fast warmup respawn makes it look like they never die
-    const weaponName = (WEAPONS[msg.weaponId] && WEAPONS[msg.weaponId].name) || 'Unknown';
-    showKillFeed(weaponName, false, avatar.name || 'Player');
+  } else if (msg.alive && avatar.dying) {
+    // Warmup respawns must clear the death pose, not merely set alive=true.
+    avatar.dying = false; avatar.deathT = 0;
+    avatar.mesh.rotation.set(0, msg.yaw, 0);
+    avatar.mesh.position.copy(avatar.targetPos);
   }
 }
 
@@ -4599,6 +4662,10 @@ function startPvpRoundAsHost(){
 }
 
 function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
+  receivedKills.clear();
+  damagePulse = 0;
+  damageIndicatorTime = 0;
+  lastDamageMeta = {};
   resetKnifeSupply();
   thrownKnives.forEach(knife => scene.remove(knife.mesh));
   thrownKnives.length = 0;
@@ -4624,6 +4691,7 @@ function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
   const bmeta = currentMapMeta;
   enemies.filter(e => e.isBot).forEach(bot => {
     bot.alive = true; bot.dying = false; bot.deathT = 0;
+    bot.mesh.rotation.x = 0; bot.mesh.rotation.z = 0;
     bot.health = bot.maxHealth;
     const spawnPos = getTeamSpawnPos(bmeta, bot.team);
     bot.mesh.position.set(spawnPos.x, groundHeightAt(spawnPos.x, spawnPos.z), spawnPos.z);
@@ -4683,7 +4751,7 @@ function isNetPlayerAlive(id){
 function endPvpRoundAsHost(winnerTeam, reason){
   if (roundState.phase !== 'live') return; // already ending/ended this round - don't score or broadcast it twice
   if (winnerTeam === 'A') roundState.ctWins++; else roundState.tWins++;
-  const msg = { type: 'roundEnd', winnerTeam, reason, scoreA: roundState.ctWins, scoreB: roundState.tWins };
+  const msg = { type: 'roundEnd', roundNum: roundState.roundNum, winnerTeam, reason, scoreA: roundState.ctWins, scoreB: roundState.tWins };
   applyPvpRoundEnd(winnerTeam, reason, roundState.ctWins, roundState.tWins);
   netBroadcast(msg);
 }
@@ -4691,11 +4759,14 @@ function endPvpRoundAsHost(winnerTeam, reason){
 function applyPvpRoundEnd(winnerTeam, reason, scoreA, scoreB){
   if (roundState.phase === 'ended') return;
   roundState.phase = 'ended';
+  clearGameplayInput();
   roundState.ctWins = scoreA; roundState.tWins = scoreB;
   document.getElementById('tWins').textContent = scoreA;
   document.getElementById('ctWins').textContent = scoreB;
   const youWon = winnerTeam === myTeam();
   showWaveBanner(`${youWon ? 'ROUND WON' : 'ROUND LOST'} — ${reason}`);
+  document.getElementById('bombStatusLabel').textContent = `${player.alive ? 'SURVIVED' : 'ELIMINATED'} · TEAM ${winnerTeam} WINS`;
+  document.getElementById('roundPhaseLabel').textContent = 'ROUND OVER';
   if (scoreA >= roundState.roundsToWin || scoreB >= roundState.roundsToWin) {
     matchFinished = true;
     clearGameplayInput();
@@ -4874,17 +4945,15 @@ function drawEnemyTracer(origin, dir){
 const ASSIST_WINDOW = 8;
 let damageBearing = 0;
 let damageIndicatorTime = 0;
-let damageFlashTimer;
+let damagePulse = 0;
 let recentAttackers = []; // [{id, t}], most recent last
 function damagePlayer(dmg, fromId){
-  if (!player.alive) return;
+  if (!player.alive || (gameMode === 'pvp' && (roundState.phase === 'ended' || matchFinished))) return;
   player.health -= dmg;
   regenDelayT = REGEN_DELAY;
   audio.playerHurt();
   shakeIntensity = Math.min(shakeIntensity + 0.5, 1.5);
-  clearTimeout(damageFlashTimer);
-  document.getElementById('hitFlash').style.background = 'radial-gradient(ellipse, transparent 45%, rgba(190,35,25,.38))';
-  damageFlashTimer = setTimeout(() => document.getElementById('hitFlash').style.background = 'transparent', 160);
+  damagePulse = Math.min(1, damagePulse + 0.7);
   const source = enemies.find(enemy => enemy.netId === fromId && fromId);
   if (source) {
     damageBearing = Math.atan2(source.mesh.position.x - player.pos.x, -(source.mesh.position.z - player.pos.z));
@@ -4922,7 +4991,11 @@ function playerDie(){
     // last few seconds with an assist, then tell every peer (see applyKillMessage/'kill' case)
     const killerId = recentAttackers.length ? recentAttackers[recentAttackers.length - 1].id : null;
     const assistIds = recentAttackers.slice(0, -1).map(a => a.id);
-    const killMsg = { type: 'kill', victimId: netMyId, killerId, assistIds };
+    const killMsg = { type: 'kill', roundNum: roundState.roundNum, deathId: crypto.randomUUID(),
+      victimId: netMyId, killerId, assistIds, ...lastDamageMeta };
+    // Publish death immediately, before the host can finish/freeze this match.
+    netStateTimer = 0;
+    updateNetworking(0);
     netBroadcast(killMsg);
     applyKillMessage(killMsg);
     recentAttackers = [];
@@ -5157,15 +5230,14 @@ function showWaveBanner(text){
   el.style.opacity = 1;
   setTimeout(() => el.style.opacity = 0, 1800);
 }
-function showKillFeed(weaponName, isHeadshot, victimName){
+function showKillFeed(weaponName, isHeadshot, victimName, killerName = 'YOU'){
   const feed = document.getElementById('killfeed');
   const entry = document.createElement('div');
   entry.className = 'killEntry';
-  entry.innerHTML = `
-    <span class="kfKiller">TÚ</span>
-    <span class="kfWeapon">${weaponName}${isHeadshot ? '<span class="kfSkull">☠</span>' : ''}</span>
-    <span class="kfVictim">${victimName}</span>
-  `;
+  for (const [className, text] of [['kfKiller', killerName], ['kfWeapon', `${weaponName}${isHeadshot ? ' · HEADSHOT' : ''}`], ['kfVictim', victimName]]) {
+    const span = document.createElement('span'); span.className = className;
+    span.textContent = text; entry.appendChild(span);
+  }
   feed.insertBefore(entry, feed.firstChild);
   while (feed.children.length > 5) feed.removeChild(feed.lastChild);
   setTimeout(() => {
@@ -5475,9 +5547,7 @@ function animate(){
     updatePlayer(dt);
     updatePlayerRegen(dt);
     updateEnemies(dt);
-    updateDyingEnemies(dt);
     updateHealthHUD();
-    updateParticles(dt);
     impactMarks.update(dt);
     updateThrownKnives(dt);
     updateDecals(dt);
@@ -5496,13 +5566,23 @@ function animate(){
     // drifting clouds
     clouds.forEach((c, i) => { c.position.x += dt * (2 + (i % 3)); if (c.position.x > 300) c.position.x = -300; });
 
+    drawMinimap();
+  }
+
+  // Finish cosmetic death/shot effects even when the final round freezes gameplay.
+  if (gameStarted) {
+    updateDyingEnemies(dt);
+    updateParticles(dt);
     for (let i = bulletTracers.length - 1; i >= 0; i--) {
       bulletTracers[i].life -= dt;
       if (bulletTracers[i].life <= 0) { const line = bulletTracers[i].line; scene.remove(line); line.geometry.dispose(); line.material.dispose(); bulletTracers.splice(i, 1); }
     }
-    drawMinimap();
   }
-
+  damagePulse = Math.max(0, damagePulse - dt * 1.5);
+  const lowHealthPulse = gameStarted && player.alive && player.health < 30 && !matchFinished
+    ? (1 - player.health / 30) * (0.14 + 0.10 * Math.sin(performance.now() * 0.008)) : 0;
+  const bloodOpacity = gameStarted ? Math.min(0.7, damagePulse * 0.6 + lowHealthPulse) : 0;
+  document.getElementById('hitFlash').style.background = `radial-gradient(ellipse, transparent 38%, rgba(150,12,8,${bloodOpacity}))`;
   damageIndicatorTime = Math.max(0, damageIndicatorTime - dt);
   const damageIndicator = document.getElementById('damageDirection');
   damageIndicator.style.opacity = gameStarted && player.alive && !matchFinished ? Math.min(1, damageIndicatorTime * 3) : 0;

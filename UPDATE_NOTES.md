@@ -1,5 +1,18 @@
 # Visual update and Knife Throwing
 
+## Multiplayer death and shot feedback
+
+- Remote corpses remain registered until respawn/round reset, preventing repeated collapse animations and incorrect alive-player counts.
+- Respawning clears the death pose. Round-tagged hit, kill and end messages reject stale events. Ended rounds reject new damage and firing.
+- Local deaths publish their state immediately. Cosmetic death animations finish even on the final round.
+- Killfeed uses the reported killer and killing weapon instead of attributing every remote death to the local player; names render as text, not HTML.
+- Round-end HUD distinguishes SURVIVED from ELIMINATED.
+- Damage produces a fading blood vignette; critical health adds a soft edge pulse.
+- Remote firearm events add barrel flashes, tracers and sampled stereo gunshots with distance attenuation. Shot events are cosmetic and do not duplicate damage. Audio uses stereo positioning, not acoustic wall occlusion.
+- Four regression tests cover repeated dead snapshots, revival, stale deaths and damage/fire after round end. All 15 tests pass.
+
+All players must use this version because combat events now carry round identifiers. Live two-client audiovisual verification remains pending. The existing client-authoritative networking is retained; this does not eliminate legitimate simultaneous kills under latency.
+
 ## Rifle sight alignment
 
 - AK-47 now has an open U-notch rear sight aligned with the front post tip.
