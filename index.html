@@ -381,7 +381,7 @@
     </div>
   </div>
   <div id="modeSelect">
-    <div class="modeCard" data-mode="ffa"><h3>FREE FOR ALL</h3><p>Up to 12. Three ready humans + three bots unlock a 15s warmup. Join mid-match and replace a bot. All weapons $0. First to 30 kills or 10 minutes.</p></div>
+    <div class="modeCard" data-mode="ffa"><h3>FREE FOR ALL</h3><p>Up to 12, starting from just 1 player + bots. All weapons $0. Choose a kill limit, a time limit, or unlimited, when creating the room.</p></div>
     <div class="modeCard selected" data-mode="pvp">
       <h3>MULTIPLAYER (PVP)</h3>
       <p>1v1 or 2v2 against a friend via room code. Each round forces a different weapon - the team that wipes the other wins.</p>
@@ -406,6 +406,24 @@
       <div id="pvpTeamSize">
         <button class="teamSizeBtn selected" data-size="1">1v1</button>
         <button class="teamSizeBtn" data-size="2">2v2</button>
+      </div>
+      <div id="ffaOptions" hidden>
+        <label>KILL LIMIT
+          <select id="ffaKillGoalSelect">
+            <option value="15">15 KILLS</option>
+            <option value="30" selected>30 KILLS</option>
+            <option value="50">50 KILLS</option>
+            <option value="0">UNLIMITED</option>
+          </select>
+        </label>
+        <label>TIME LIMIT
+          <select id="ffaTimeLimitSelect">
+            <option value="300">5 MIN</option>
+            <option value="600" selected>10 MIN</option>
+            <option value="900">15 MIN</option>
+            <option value="0">UNLIMITED</option>
+          </select>
+        </label>
       </div>
       <button id="pvpHostBtn">CREATE ROOM</button>
       <div id="pvpRoomLink">
@@ -555,6 +573,12 @@
   <div class="killcamBar killcamBarTop"></div>
   <div class="killcamBar killcamBarBottom"></div>
   <div id="killcamLabel"></div>
+</div>
+
+<div id="ffaRankingOverlay">
+  <div class="rankingEyebrow">MATCH COMPLETE</div>
+  <h2>FINAL STANDINGS</h2>
+  <div id="ffaRankingList"></div>
 </div>
 
 <div id="pauseMenu">

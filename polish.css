@@ -74,3 +74,21 @@ button:focus-visible{outline:2px solid #d7b66c;outline-offset:4px}
 #killcamLabel{position:absolute;bottom:calc(8vh + 18px);left:50%;transform:translateX(-50%);padding:10px 22px;background:#101418dc;border:1px solid #d7b66c55;border-left:3px solid #e5473c;color:#eef1f3;font:700 13px/1.5 system-ui,sans-serif;letter-spacing:.08em;white-space:nowrap;opacity:0;transition:opacity .4s;}
 #killcamOverlay.show #killcamLabel{opacity:1;}
 #killcamLabel .killcamEyebrow{display:block;font-size:10px;letter-spacing:.2em;color:#d7b66c;margin-bottom:2px;}
+
+/* FFA match-end standings: a 5s freeze-frame shown while the render canvas goes grayscale (see
+   playMatchEndSequence), before the killcam and the results dialog. */
+#ffaRankingOverlay{position:fixed;inset:0;z-index:41;display:none;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,rgba(10,13,16,.55),rgba(4,6,8,.85));pointer-events:none;opacity:0;transition:opacity .3s;}
+#ffaRankingOverlay.show{display:flex;opacity:1;}
+#ffaRankingOverlay .rankingEyebrow{font:700 11px/1.5 system-ui,sans-serif;letter-spacing:.3em;color:#d7b66c;}
+#ffaRankingOverlay h2{margin:6px 0 20px;font-family:Baserona,'Segoe UI',sans-serif;font-size:34px;letter-spacing:4px;color:#eef1f3;}
+#ffaRankingList{width:min(420px,88vw);display:flex;flex-direction:column;gap:6px;}
+#ffaRankingList .rankRow{display:grid;grid-template-columns:28px 1fr auto;gap:12px;align-items:center;padding:9px 16px;background:#101418dc;border:1px solid #d7b66c33;border-left:3px solid #69727b;color:#dce2e5;font:600 13px/1.4 system-ui,sans-serif;letter-spacing:.03em;}
+#ffaRankingList .rankRow.rankSelf{border-left-color:#e5473c;background:#1a1214e6;color:#fff;}
+#ffaRankingList .rankPos{color:#d7b66c;font-weight:800;text-align:center;}
+#ffaRankingList .rankKD{font-variant-numeric:tabular-nums;color:#b9bec1;}
+
+/* Host-only FFA kill/time limit pickers, shown next to the (hidden, in FFA) team-size buttons. */
+#ffaOptions{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;}
+#ffaOptions[hidden]{display:none;}
+#ffaOptions label{display:flex;flex-direction:column;gap:5px;font:700 9px/1 Inter,'Segoe UI',sans-serif;letter-spacing:2px;color:#d7b66c;}
+#ffaOptions select{padding:9px 10px;background:#12191e;color:#eee;border:1px solid #58616a;border-radius:4px;font:600 11px system-ui,sans-serif;letter-spacing:.05em;}

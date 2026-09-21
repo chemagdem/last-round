@@ -1916,6 +1916,12 @@ let knifeCount = 1;
 let selectedRuleset = 'standard';
 const isFfa = () => selectedRuleset === 'ffa';
 const ffaState = { phase: 'waiting', timer: FFA.warmup, sendT: 0, active: false, bots: new Map(), navigation: null, respawnT: 0, protection: 0, serial: 0, resultShown: false };
+// Host-chosen kill/time limits, picked from the room-control panel before creating a room and
+// synced to clients via broadcastRoster(). Infinity means "unlimited" - comparisons against it
+// (kills>=Infinity, timer<=0) naturally never trigger, so nothing else needs a special case
+// beyond display (see formatRoundTime) and the wire format (Infinity doesn't serialize, so 0
+// stands in for it in roster messages - see broadcastRoster/handleNetMessage's 'roster' case).
+let ffaKillGoal = FFA.goal, ffaTimeLimit = FFA.duration;
 const weaponPrice = def => isFfa() ? 0 : def.price;
 function knifeCapacity(){ return selectedRuleset === 'knife' && gameMode === 'pvp' ? 5 : 1; }
 function resetKnifeSupply(){ knifeCount = knifeCapacity(); knifeAvailable = true; }
@@ -4376,6 +4382,7 @@ function updateRound(dt){
 }
 
 function formatRoundTime(t){
+  if (!Number.isFinite(t)) return '∞';
   const s = Math.max(0, Math.ceil(t));
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 }
@@ -4525,6 +4532,7 @@ function selectFfaMaps(){
     card.classList.toggle('selected', card.dataset.map === selectedMap);
   });
   document.querySelectorAll('.teamSizeBtn').forEach(button => { button.hidden = isFfa(); });
+  document.getElementById('ffaOptions').hidden = !isFfa();
   document.querySelectorAll('#rematchMap option').forEach(option => {
     option.disabled = !mapStillValid(option.value); option.hidden = option.disabled;
   });
@@ -4763,29 +4771,35 @@ function updateFfaBots(dt){
     }
   }
 }
-// FFA killcam: a short third-person orbit around the match's final kill, played once the match
-// ends and before the results dialog opens. Reuses whatever frozen pose the killer/victim already
-// have at that instant (everything stops moving the moment matchFinished is set) rather than
-// recording a real position history - simpler, and the bodies are already exactly where the kill
-// happened since nothing else updates them once the match is over.
+// FFA match end sequence: a 5s grayscale freeze-frame showing the final standings, then a short
+// killcam replayed from the FIRST-PERSON POV of whoever landed the last kill - every peer plays
+// this independently from their own client, all driven by the same synced lastFfaKill/netStats,
+// so it looks the same for everyone without sending any extra network traffic for it.
+// Reuses whatever frozen pose the killer already has at that instant (everything stops moving the
+// moment matchFinished is set) rather than recording a real position/aim history - simpler, and
+// since finishFfa() runs within a tick of the kill that ended the match, that frozen pose is
+// essentially where the killer really was when they fired the shot.
 function killcamActor(id){
-  if (id === netMyId) return { pos: player.pos.clone(), yaw: player.yaw };
+  if (id === netMyId) return { pos: player.pos.clone(), yaw: player.yaw, pitch: player.pitch };
   const avatar = enemies.find(e => e.netId === id);
   if (!avatar) return null;
-  return { pos: avatar.mesh.position.clone().add(new THREE.Vector3(0, player.height, 0)), yaw: avatar.mesh.rotation.y };
+  const isBot = !!avatar.isBot;
+  return {
+    pos: new THREE.Vector3(avatar.mesh.position.x, avatar.mesh.position.y + player.height, avatar.mesh.position.z),
+    yaw: isBot ? avatar.mesh.rotation.y : (avatar.targetYaw ?? avatar.mesh.rotation.y),
+    pitch: isBot ? 0 : (avatar.targetPitch ?? 0)
+  };
 }
-let killcamActive = false, killcamT = 0, killcamDone = null, killcamVictim = null, killcamAngle0 = 0;
-const KILLCAM_DURATION = 3.2;
+let killcamActive = false, killcamT = 0, killcamDone = null, killcamPose = null;
+const KILLCAM_DURATION = 2.6, RANKING_DURATION = 5;
 function killcamName(id){ return id === netMyId ? 'YOU' : (netRoster.find(p => p.id === id)?.name || 'Player').toUpperCase(); }
 function playKillcam(onDone){
   const kill = lastFfaKill;
-  const victim = kill ? killcamActor(kill.victimId) : null;
-  if (!kill || !victim) { onDone(); return; } // nothing left on screen to show (edge case) - straight to results
-  const killer = killcamActor(kill.killerId);
-  killcamVictim = victim;
-  killcamAngle0 = killer ? Math.atan2(killer.pos.x - victim.pos.x, killer.pos.z - victim.pos.z) : victim.yaw;
+  const killer = kill ? killcamActor(kill.killerId) : null;
+  if (!kill || !killer) { onDone(); return; } // nothing left to reconstruct a POV from (edge case) - straight to results
+  killcamPose = killer;
   killcamT = 0; killcamActive = true; killcamDone = onDone;
-  weaponGroup.visible = false;
+  weaponGroup.visible = false; // it's the killer's POV, not the local viewer's own held weapon
   document.getElementById('hud').style.display = 'none';
   document.getElementById('killcamLabel').innerHTML = `<span class="killcamEyebrow">KILLCAM</span>${killcamName(kill.killerId)} ELIMINATED ${killcamName(kill.victimId)} · ${kill.weaponName.toUpperCase()}${kill.headshot ? ' · HEADSHOT' : ''}`;
   document.getElementById('killcamOverlay').classList.add('show');
@@ -4793,13 +4807,13 @@ function playKillcam(onDone){
 function updateKillcam(dt){
   killcamT += dt;
   const p = Math.min(1, killcamT / KILLCAM_DURATION);
-  const ease = p * p * (3 - 2 * p);
-  const focus = killcamVictim.pos.clone().add(new THREE.Vector3(0, -0.5, 0)); // aim at the body, not the eyeline
-  const angle = killcamAngle0 + ease * 1.1; // slow orbit sweep around the kill
-  const radius = THREE.MathUtils.lerp(5.5, 3, ease);
-  const height = THREE.MathUtils.lerp(1.6, 0.6, ease);
-  camera.position.set(focus.x + Math.sin(angle) * radius, focus.y + height, focus.z + Math.cos(angle) * radius);
-  camera.lookAt(focus);
+  const ease = 1 - Math.pow(1 - p, 2);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = killcamPose.yaw;
+  camera.rotation.x = killcamPose.pitch;
+  // a slow forward dolly (not a real replay, just enough motion to not read as a static photo)
+  const forward = new THREE.Vector3(-Math.sin(killcamPose.yaw), 0, -Math.cos(killcamPose.yaw));
+  camera.position.copy(killcamPose.pos).addScaledVector(forward, ease * 0.7);
   if (p >= 1) {
     killcamActive = false;
     weaponGroup.visible = true;
@@ -4808,6 +4822,23 @@ function updateKillcam(dt){
     const done = killcamDone; killcamDone = null;
     done?.();
   }
+}
+function renderFfaRanking(order){
+  document.getElementById('ffaRankingList').innerHTML = order.map((p, i) => {
+    const s = ensureStats(p.id);
+    const tag = (p.founder ? '★ ' : '') + (p.country ? flagEmoji(p.country) + ' ' : '') + (p.clan ? `[${p.clan}] ` : '');
+    return `<div class="rankRow${p.id === netMyId ? ' rankSelf' : ''}"><span class="rankPos">${i + 1}</span><span class="rankName">${tag}${p.name}${p.id === netMyId ? ' (YOU)' : ''}</span><span class="rankKD">${s.kills}-${s.deaths}</span></div>`;
+  }).join('');
+}
+function playMatchEndSequence(order, onDone){
+  renderFfaRanking(order);
+  document.getElementById('ffaRankingOverlay').classList.add('show');
+  renderer.domElement.style.filter = 'grayscale(1) contrast(1.05)';
+  setTimeout(() => {
+    document.getElementById('ffaRankingOverlay').classList.remove('show');
+    renderer.domElement.style.filter = '';
+    playKillcam(onDone);
+  }, RANKING_DURATION * 1000);
 }
 function finishFfa(){
   if(ffaState.resultShown)return;
@@ -4825,7 +4856,7 @@ function finishFfa(){
   document.getElementById('resultRating').textContent='UNRANKED · FREE LOADOUTS';
   document.getElementById('rematchMap').value=selectedMap;
   document.getElementById('rematchControls').hidden=netRole!=='host';document.getElementById('rematchWaiting').hidden=netRole==='host';
-  playKillcam(() => document.getElementById('matchResult').showModal());
+  playMatchEndSequence(order, () => document.getElementById('matchResult').showModal());
 }
 function updateFfa(dt){
   if(!ffaState.active)return;
@@ -4837,14 +4868,14 @@ function updateFfa(dt){
       if(canStart(humans,ffaState.bots.size)){
         ffaState.phase='warmup';ffaState.timer-=dt;
         if(ffaState.timer<=0){
-          ffaState.phase='live';ffaState.timer=FFA.duration;netStats={};receivedKills.clear();roundState.phase='live';
+          ffaState.phase='live';ffaState.timer=ffaTimeLimit;netStats={};receivedKills.clear();roundState.phase='live';
           respawnFfaPlayer();for(const b of ffaState.bots.values())resetFfaBot(b);
           showWaveBanner('FREE FOR ALL · FIRST TO 30');
         }
       }else{ffaState.phase='waiting';ffaState.timer=FFA.warmup;}
     }else if(ffaState.phase==='live'){
       ffaState.timer=Math.max(0,ffaState.timer-dt);
-      if(ffaState.timer<=0||Object.values(netStats).some(s=>s.kills>=FFA.goal)){finishFfa();sendFfaSnapshot();return;}
+      if(ffaState.timer<=0||Object.values(netStats).some(s=>s.kills>=ffaKillGoal)){finishFfa();sendFfaSnapshot();return;}
     }
     updateFfaBots(dt);ffaState.sendT-=dt;
     if(ffaState.sendT<=0){ffaState.sendT=.1;sendFfaSnapshot();}
@@ -4853,7 +4884,7 @@ function updateFfa(dt){
   document.getElementById('roundPhaseLabel').textContent=ffaState.phase==='live'?'FREE FOR ALL':ffaState.phase==='waiting'?'WAITING':'WARMUP';
   document.getElementById('roundTimer').textContent=formatRoundTime(ffaState.timer);
   const hud=document.getElementById('ffaHud');hud.hidden=false;
-  hud.textContent=`${netRoster.filter(p=>p.ready).length}/12 PLAYERS · YOU ${ensureStats(netMyId).kills}/${FFA.goal} · LEADER ${leader?.name||'—'} ${leader?ensureStats(leader.id).kills:0}`;
+  hud.textContent=`${netRoster.filter(p=>p.ready).length}/12 PLAYERS · YOU ${ensureStats(netMyId).kills}/${Number.isFinite(ffaKillGoal)?ffaKillGoal:'∞'} · LEADER ${leader?.name||'—'} ${leader?ensureStats(leader.id).kills:0}`;
   document.getElementById('centerMessage').textContent=ffaState.phase==='waiting'?`WAITING FOR PLAYERS · ${humans}/${FFA.minHumans} HUMANS · BOTS FILL TO 6`:
     !player.alive?`RESPAWNING IN ${Math.ceil(ffaState.respawnT)}`:ffaState.protection>0?'SPAWN PROTECTION · FIRING CANCELS IT':'';
 }
@@ -4963,7 +4994,10 @@ function broadcastRoster(){
   // carries the host's map choice too - a joining client used to always build its own locally
   // selected map (hardcoded to Desert back when that was the only option), which would silently
   // desync the two peers onto different geometry the moment a second map existed
-  netBroadcast({ type: 'roster', roster: netRoster, teamSize: netTeamSize, map: selectedMap, ruleset: selectedRuleset });
+  // killGoal/timeLimit: 0 stands in for Infinity ("unlimited") since Infinity doesn't survive
+  // the PeerJS data channel's serialization - see ffaKillGoal/ffaTimeLimit's declaration comment.
+  netBroadcast({ type: 'roster', roster: netRoster, teamSize: netTeamSize, map: selectedMap, ruleset: selectedRuleset,
+    killGoal: Number.isFinite(ffaKillGoal) ? ffaKillGoal : 0, timeLimit: Number.isFinite(ffaTimeLimit) ? ffaTimeLimit : 0 });
   updateScoreboardNames();
 }
 
@@ -5063,6 +5097,10 @@ function handleNetMessage(msg, fromId){
       if (netRole === 'client' && msg.map && MAPS[msg.map]) {
         selectedMap = msg.map;
         preloadMapTextures(selectedMap).then(updateStartButtonState);
+      }
+      if (netRole === 'client' && !gameStarted && Number.isFinite(msg.killGoal) && Number.isFinite(msg.timeLimit)) {
+        ffaKillGoal = msg.killGoal > 0 ? msg.killGoal : Infinity;
+        ffaTimeLimit = msg.timeLimit > 0 ? msg.timeLimit : Infinity;
       }
       if (isFfa()) pruneFfaAvatars();
       updateScoreboardNames();
@@ -6731,6 +6769,14 @@ document.querySelectorAll('.teamSizeBtn').forEach(btn => {
     btn.classList.add('selected');
     netTeamSize = parseInt(btn.dataset.size, 10);
   });
+});
+document.getElementById('ffaKillGoalSelect').addEventListener('change', e => {
+  ffaKillGoal = Number(e.target.value) || Infinity;
+  if (netRole === 'host' && !gameStarted) broadcastRoster();
+});
+document.getElementById('ffaTimeLimitSelect').addEventListener('change', e => {
+  ffaTimeLimit = Number(e.target.value) || Infinity;
+  if (netRole === 'host' && !gameStarted) broadcastRoster();
 });
 
 document.querySelectorAll('.pvpChoiceBtn').forEach(btn => {
