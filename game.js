@@ -4615,7 +4615,7 @@ function syncFfaBots(){
 function startFfa(rematch=false){
   if (!currentMapMeta.ffa) return;
   document.body.classList.add('ffaActive');
-  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null;
+  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null; killcamHistory.clear(); killcamRecordT=0;
   ffaState.navigation=currentMapMeta.navigation ? currentMapMeta.navigation() : buildNavigation(currentMapMeta.ffa);
   if (netRole==='host'){
     ffaState.phase='waiting';ffaState.timer=FFA.warmup;ffaState.sendT=0;
@@ -4771,47 +4771,56 @@ function updateFfaBots(dt){
     }
   }
 }
-// FFA match end sequence: a 5s grayscale freeze-frame showing the final standings, then a short
-// killcam replayed from the FIRST-PERSON POV of whoever landed the last kill - every peer plays
-// this independently from their own client, all driven by the same synced lastFfaKill/netStats,
-// so it looks the same for everyone without sending any extra network traffic for it.
-// Reuses whatever frozen pose the killer already has at that instant (everything stops moving the
-// moment matchFinished is set) rather than recording a real position/aim history - simpler, and
-// since finishFfa() runs within a tick of the kill that ended the match, that frozen pose is
-// essentially where the killer really was when they fired the shot.
-// killer's eye position + a fallback facing yaw (used only if the victim can't be located).
-function killcamActor(id){
-  if (id === netMyId) return { pos: player.pos.clone(), yaw: player.yaw };
-  const avatar = enemies.find(e => e.netId === id);
-  if (!avatar) return null;
-  return {
-    pos: new THREE.Vector3(avatar.mesh.position.x, avatar.mesh.position.y + player.height, avatar.mesh.position.z),
-    yaw: avatar.isBot ? avatar.mesh.rotation.y : (avatar.targetYaw ?? avatar.mesh.rotation.y)
-  };
-}
-// where to actually point the camera - aiming at the killer's own frozen yaw/pitch isn't reliable
-// (a bot can keep turning for a tick or two before the freeze, or the fatal shot can land without
-// the reticle being dead-center at that exact instant), so the kill wouldn't reliably be on screen.
-// Aiming at the victim's own frozen position instead guarantees the kill itself is always in frame.
-function killcamAimPoint(id){
-  if (id === netMyId) return player.pos.clone();
-  const avatar = enemies.find(e => e.netId === id);
-  if (!avatar) return null;
-  return new THREE.Vector3(avatar.mesh.position.x, avatar.mesh.position.y + player.height * 0.55, avatar.mesh.position.z);
-}
+// FFA match end sequence: a 5s grayscale freeze-frame showing the final standings, then a real
+// replay of the killer's last ~5 seconds leading up to the last kill, played from their own
+// FIRST-PERSON POV - every peer plays this independently from their own client, all driven by the
+// same synced lastFfaKill/killcamHistory, so it looks the same for everyone without sending any
+// extra network traffic for it (see recordKillcamFrame, sampled at ~10Hz throughout the match).
 function weaponIdFromName(name){
   return Object.entries(WEAPONS).find(([, def]) => def.name === name)?.[0] || null;
 }
-let killcamActive = false, killcamT = 0, killcamDone = null, killcamPose = null, killcamAim = null, killcamWeaponVisual = null;
-const KILLCAM_DURATION = 2.6, RANKING_DURATION = 5;
 function killcamName(id){ return id === netMyId ? 'YOU' : (netRoster.find(p => p.id === id)?.name || 'Player').toUpperCase(); }
+// Interpolates a recorded history array at `elapsedMs` since path[0].t - shortest-path angle
+// interpolation for yaw so it doesn't spin the long way around when crossing the +-pi wrap.
+function sampleKillcamPath(path, elapsedMs){
+  if (path.length === 1) return path[0];
+  const targetT = path[0].t + elapsedMs;
+  let i = 0;
+  while (i < path.length - 2 && path[i + 1].t < targetT) i++;
+  const a = path[i], b = path[i + 1];
+  const span = Math.max(1, b.t - a.t);
+  const lt = Math.max(0, Math.min(1, (targetT - a.t) / span));
+  let yawDiff = ((b.yaw - a.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  return {
+    x: THREE.MathUtils.lerp(a.x, b.x, lt), y: THREE.MathUtils.lerp(a.y, b.y, lt), z: THREE.MathUtils.lerp(a.z, b.z, lt),
+    yaw: a.yaw + yawDiff * lt, pitch: THREE.MathUtils.lerp(a.pitch || 0, b.pitch || 0, lt)
+  };
+}
+const KILLCAM_WINDOW_MS = 5000, RANKING_DURATION = 5;
+let killcamActive = false, killcamT = 0, killcamDone = null, killcamWeaponVisual = null;
+let killcamPath = null, killcamSpanMs = 0, killcamWorldPaths = null;
 function playKillcam(onDone){
   const kill = lastFfaKill;
-  const killer = kill ? killcamActor(kill.killerId) : null;
-  if (!kill || !killer) { onDone(); return; } // nothing left to reconstruct a POV from (edge case) - straight to results
-  const forward = new THREE.Vector3(-Math.sin(killer.yaw), 0, -Math.cos(killer.yaw));
-  killcamPose = killer;
-  killcamAim = killcamAimPoint(kill.victimId) || killer.pos.clone().addScaledVector(forward, 5);
+  const fullPath = kill ? (killcamHistory.get(kill.killerId) || []).filter(s => s.t <= kill.t) : [];
+  const windowStart = kill ? kill.t - KILLCAM_WINDOW_MS : 0;
+  killcamPath = fullPath.filter(s => s.t >= windowStart);
+  if (killcamPath.length < 2) killcamPath = fullPath.slice(-2);
+  if (!kill || killcamPath.length < 2) { onDone(); return; } // not enough recorded history (edge case) - straight to results
+  killcamSpanMs = Math.max(1, killcamPath.at(-1).t - killcamPath[0].t);
+  // replay every other tracked actor over the same window so the world matches what the camera is
+  // seeing (the victim actually being there and going down, not a frozen corpse for 5 seconds) -
+  // their true frozen pose is cached first so it can be restored exactly once the replay ends.
+  killcamWorldPaths = new Map();
+  for (const [id, hist] of killcamHistory) {
+    if (id === kill.killerId) continue;
+    const avatar = enemies.find(e => e.netId === id);
+    if (!avatar) continue;
+    const arr = hist.filter(s => s.t >= killcamPath[0].t && s.t <= kill.t);
+    if (arr.length < 2) continue;
+    avatar._killcamRealPos = avatar.mesh.position.clone();
+    avatar._killcamRealYaw = avatar.mesh.rotation.y;
+    killcamWorldPaths.set(id, arr);
+  }
   killcamT = 0; killcamActive = true; killcamDone = onDone;
   // show the actual weapon the kill was made with, not whatever the local viewer currently has
   // equipped - built fresh here since the killer might be someone else entirely.
@@ -4827,16 +4836,25 @@ function playKillcam(onDone){
 }
 function updateKillcam(dt){
   killcamT += dt;
-  const p = Math.min(1, killcamT / KILLCAM_DURATION);
-  const ease = 1 - Math.pow(1 - p, 2);
-  camera.position.copy(killcamPose.pos);
-  camera.lookAt(killcamAim);
-  // a slow forward dolly along the actual look direction - not a real replay, just enough motion
-  // to not read as a static photo, and it pushes the camera a little closer to the kill over time
-  const dir = new THREE.Vector3().subVectors(killcamAim, killcamPose.pos).normalize();
-  camera.position.addScaledVector(dir, ease * 0.6);
-  if (p >= 1) {
+  const elapsedMs = Math.min(killcamT * 1000, killcamSpanMs);
+  const pose = sampleKillcamPath(killcamPath, elapsedMs);
+  camera.position.set(pose.x, pose.y, pose.z);
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = pose.yaw;
+  camera.rotation.x = pose.pitch;
+  for (const [id, arr] of killcamWorldPaths) {
+    const avatar = enemies.find(e => e.netId === id);
+    if (!avatar) continue;
+    const s = sampleKillcamPath(arr, Math.min(elapsedMs, arr.at(-1).t - arr[0].t));
+    avatar.mesh.position.set(s.x, s.y - player.height, s.z); // recorded y was eye height - back to feet
+    avatar.mesh.rotation.y = s.yaw;
+  }
+  if (elapsedMs >= killcamSpanMs) {
     killcamActive = false;
+    for (const [id] of killcamWorldPaths) {
+      const avatar = enemies.find(e => e.netId === id);
+      if (avatar) { avatar.mesh.position.copy(avatar._killcamRealPos); avatar.mesh.rotation.y = avatar._killcamRealYaw; }
+    }
     if (killcamWeaponVisual) { weaponGroup.remove(killcamWeaponVisual.group); killcamWeaponVisual = null; }
     if (currentVisual) currentVisual.group.visible = true;
     document.getElementById('killcamOverlay').classList.remove('show');
@@ -4882,6 +4900,7 @@ function finishFfa(){
 }
 function updateFfa(dt){
   if(!ffaState.active)return;
+  killcamRecordT-=dt; if(killcamRecordT<=0){killcamRecordT=0.1;recordKillcamFrame();}
   ffaState.protection=Math.max(0,ffaState.protection-dt);
   if(!player.alive){ffaState.respawnT-=dt;if(ffaState.respawnT<=0)respawnFfaPlayer();}
   if(netRole==='host'){
@@ -5032,6 +5051,29 @@ const roundLives = new RoundLives();
 // FFA killcam: always holds the most recent scoring kill (see applyKillMessage), so whatever it
 // points to when the match ends is, by definition, the kill that ended it.
 let lastFfaKill = null;
+// Rolling ~6s position/aim history per actor (local player + every enemies[] entry, netId ->
+// [{t,x,y,z,yaw,pitch}]), sampled at ~10Hz while an FFA match is live (see recordKillcamFrame,
+// called from updateFfa). This is what lets the killcam actually replay the killer's last few
+// seconds instead of just freezing their pose at the instant the match ended.
+const killcamHistory = new Map();
+let killcamRecordT = 0;
+const KILLCAM_HISTORY_MS = 6000;
+function recordKillcamFrame(){
+  const t = performance.now();
+  const push = (id, x, y, z, yaw, pitch) => {
+    let arr = killcamHistory.get(id);
+    if (!arr) { arr = []; killcamHistory.set(id, arr); }
+    arr.push({ t, x, y, z, yaw, pitch });
+    while (arr.length > 1 && t - arr[0].t > KILLCAM_HISTORY_MS) arr.shift();
+  };
+  if (player.alive) push(netMyId, player.pos.x, player.pos.y, player.pos.z, player.yaw, player.pitch);
+  for (const e of enemies) {
+    if (!e.netId || !e.alive) continue;
+    const isBot = !!e.isBot;
+    push(e.netId, e.mesh.position.x, e.mesh.position.y + player.height, e.mesh.position.z,
+      isBot ? e.mesh.rotation.y : (e.targetYaw ?? e.mesh.rotation.y), isBot ? 0 : (e.targetPitch ?? 0));
+  }
+}
 let lastDamageMeta = {};
 // Per-life damage exchange with each opponent, from the local player's own perspective only -
 // keyed by the OTHER party's id, cleared for that id once they die (a fresh life starts clean).
@@ -5061,7 +5103,7 @@ function applyKillMessage(msg){
   // Reaching this point in FFA already guarantees msg.scoring === true (see the early return
   // above), so every kill seen here while in FFA is a candidate - the last one standing when the
   // match ends is the one the killcam replays.
-  if (isFfa()) lastFfaKill = { killerId: msg.killerId, victimId: msg.victimId, weaponName: msg.weaponName || 'Unknown', headshot: !!msg.headshot };
+  if (isFfa()) lastFfaKill = { killerId: msg.killerId, victimId: msg.victimId, weaponName: msg.weaponName || 'Unknown', headshot: !!msg.headshot, t: performance.now() };
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
   showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD');
   if (msg.killerId === netMyId) { showHitMarker(!!msg.headshot, true); showDamageExchange(msg.victimId); }
