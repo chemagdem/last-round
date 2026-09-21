@@ -1957,8 +1957,15 @@ function applyEquippedSkin(){
   goldWeaponMat.roughness = skin.roughness;
   goldWeaponMat.metalness = skin.metalness;
   goldWeaponMat.needsUpdate = true;
+  // The AWP's chassis/handguard/cheek riser use their own material (distinct bump map for the
+  // polymer-stock look) instead of goldWeaponMat, so they need the same skin values copied over
+  // by hand or they stay stuck on the default camo regardless of equipped skin.
+  awpStockMat.map = goldWeaponMat.map;
+  awpStockMat.color.copy(goldWeaponMat.color);
+  awpStockMat.roughness = skin.roughness;
+  awpStockMat.metalness = skin.metalness;
+  awpStockMat.needsUpdate = true;
 }
-applyEquippedSkin();
 const gunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.7, metalness: 0.4 });
 const gunMatLight = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#33352f'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.75, metalness: 0.35 });
 const woodMat = new THREE.MeshStandardMaterial({ map: woodGrainTexture('#5a3d24'), bumpMap: weaponWoodBump, bumpScale: 0.001, roughness: 0.6 });
@@ -1978,6 +1985,7 @@ const handleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0
 const knifeHandleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, bumpMap: checkeredGripTexture(), bumpScale: 0.0004, roughness: 0.75 });
 const grenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#384a24'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.65, metalness: 0.15 });
 const smokeGrenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#8a8f88'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.2 });
+applyEquippedSkin(); // now that awpStockMat (and every other skinnable material) exists
 const flashMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d8d8d0'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.35, metalness: 0.55 });
 
 // weapon aim position (hip vs ADS)
