@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {FFA,botCount,canStart,chooseSpawn,rankPlayers} from '../ffa-rules.js';
 import {FFA_MAPS,blockedAt,buildNavigation} from '../ffa-layouts.js';
 
-test('three humans unlock six participants; humans replace bots through twelve',()=>{
-  assert.equal(botCount(2),0);assert.equal(canStart(2,4),false);
-  for(let humans=3;humans<=12;humans++){
+test('one human unlocks six participants; humans replace bots through twelve',()=>{
+  assert.equal(botCount(0),0);assert.equal(canStart(0,6),false);
+  for(let humans=1;humans<=12;humans++){
     const bots=botCount(humans);
     assert.equal(bots,Math.max(0,6-humans));assert.ok(canStart(humans,bots));assert.ok(humans+bots<=FFA.capacity);
   }
-  assert.equal(canStart(13,0),false);assert.equal(canStart(3,2),false);
+  assert.equal(canStart(13,0),false);assert.equal(canStart(1,2),false);
 });
 test('safe spawn selection prefers cover over a visible alternative',()=>{
   const hidden={x:12,z:0},exposed={x:20,z:0};

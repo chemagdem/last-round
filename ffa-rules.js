@@ -1,5 +1,5 @@
 // Free-for-all policy is independent of rendering and transport.
-export const FFA = Object.freeze({ capacity: 12, minHumans: 3, minPlayers: 6, duration: 600, goal: 30, warmup: 15, respawn: 3, protection: 2 });
+export const FFA = Object.freeze({ capacity: 12, minHumans: 1, minPlayers: 6, duration: 600, goal: 30, warmup: 15, respawn: 3, protection: 2 });
 export function botCount(humans) { return humans >= FFA.minHumans ? Math.max(0, FFA.minPlayers - humans) : 0; }
 export function canStart(humans, bots) { return humans >= FFA.minHumans && humans + bots >= FFA.minPlayers && humans + bots <= FFA.capacity; }
 export function rankPlayers(roster, stats) {

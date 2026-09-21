@@ -63,3 +63,14 @@ button:focus-visible{outline:2px solid #d7b66c;outline-offset:4px}
 #dmgExchange{position:fixed;top:58%;left:50%;transform:translate(-50%,-50%);padding:9px 18px;background:#101418dc;border:1px solid #d7b66c55;border-left:3px solid #e5473c;color:#eef1f3;font:700 13px/1.5 system-ui,sans-serif;letter-spacing:.05em;text-align:center;white-space:nowrap;opacity:0;transition:opacity .35s;pointer-events:none;z-index:20;}
 #dmgExchange.show{opacity:1;}
 #dmgExchange b{color:#f4b85f;}
+
+/* FFA killcam: a short cinematic replay of the match's final kill before the results dialog. */
+#killcamOverlay{position:fixed;inset:0;z-index:40;pointer-events:none;display:none;}
+#killcamOverlay.show{display:block;}
+#killcamOverlay .killcamBar{position:absolute;left:0;right:0;height:8vh;background:#04070a;opacity:0;transition:opacity .4s;}
+#killcamOverlay.show .killcamBar{opacity:1;}
+.killcamBarTop{top:0;}
+.killcamBarBottom{bottom:0;}
+#killcamLabel{position:absolute;bottom:calc(8vh + 18px);left:50%;transform:translateX(-50%);padding:10px 22px;background:#101418dc;border:1px solid #d7b66c55;border-left:3px solid #e5473c;color:#eef1f3;font:700 13px/1.5 system-ui,sans-serif;letter-spacing:.08em;white-space:nowrap;opacity:0;transition:opacity .4s;}
+#killcamOverlay.show #killcamLabel{opacity:1;}
+#killcamLabel .killcamEyebrow{display:block;font-size:10px;letter-spacing:.2em;color:#d7b66c;margin-bottom:2px;}

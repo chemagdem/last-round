@@ -4607,7 +4607,7 @@ function syncFfaBots(){
 function startFfa(rematch=false){
   if (!currentMapMeta.ffa) return;
   document.body.classList.add('ffaActive');
-  matchFinished=false; ffaState.active=true; ffaState.resultShown=false;
+  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null;
   ffaState.navigation=currentMapMeta.navigation ? currentMapMeta.navigation() : buildNavigation(currentMapMeta.ffa);
   if (netRole==='host'){
     ffaState.phase='waiting';ffaState.timer=FFA.warmup;ffaState.sendT=0;
@@ -4763,6 +4763,52 @@ function updateFfaBots(dt){
     }
   }
 }
+// FFA killcam: a short third-person orbit around the match's final kill, played once the match
+// ends and before the results dialog opens. Reuses whatever frozen pose the killer/victim already
+// have at that instant (everything stops moving the moment matchFinished is set) rather than
+// recording a real position history - simpler, and the bodies are already exactly where the kill
+// happened since nothing else updates them once the match is over.
+function killcamActor(id){
+  if (id === netMyId) return { pos: player.pos.clone(), yaw: player.yaw };
+  const avatar = enemies.find(e => e.netId === id);
+  if (!avatar) return null;
+  return { pos: avatar.mesh.position.clone().add(new THREE.Vector3(0, player.height, 0)), yaw: avatar.mesh.rotation.y };
+}
+let killcamActive = false, killcamT = 0, killcamDone = null, killcamVictim = null, killcamAngle0 = 0;
+const KILLCAM_DURATION = 3.2;
+function killcamName(id){ return id === netMyId ? 'YOU' : (netRoster.find(p => p.id === id)?.name || 'Player').toUpperCase(); }
+function playKillcam(onDone){
+  const kill = lastFfaKill;
+  const victim = kill ? killcamActor(kill.victimId) : null;
+  if (!kill || !victim) { onDone(); return; } // nothing left on screen to show (edge case) - straight to results
+  const killer = killcamActor(kill.killerId);
+  killcamVictim = victim;
+  killcamAngle0 = killer ? Math.atan2(killer.pos.x - victim.pos.x, killer.pos.z - victim.pos.z) : victim.yaw;
+  killcamT = 0; killcamActive = true; killcamDone = onDone;
+  weaponGroup.visible = false;
+  document.getElementById('hud').style.display = 'none';
+  document.getElementById('killcamLabel').innerHTML = `<span class="killcamEyebrow">KILLCAM</span>${killcamName(kill.killerId)} ELIMINATED ${killcamName(kill.victimId)} · ${kill.weaponName.toUpperCase()}${kill.headshot ? ' · HEADSHOT' : ''}`;
+  document.getElementById('killcamOverlay').classList.add('show');
+}
+function updateKillcam(dt){
+  killcamT += dt;
+  const p = Math.min(1, killcamT / KILLCAM_DURATION);
+  const ease = p * p * (3 - 2 * p);
+  const focus = killcamVictim.pos.clone().add(new THREE.Vector3(0, -0.5, 0)); // aim at the body, not the eyeline
+  const angle = killcamAngle0 + ease * 1.1; // slow orbit sweep around the kill
+  const radius = THREE.MathUtils.lerp(5.5, 3, ease);
+  const height = THREE.MathUtils.lerp(1.6, 0.6, ease);
+  camera.position.set(focus.x + Math.sin(angle) * radius, focus.y + height, focus.z + Math.cos(angle) * radius);
+  camera.lookAt(focus);
+  if (p >= 1) {
+    killcamActive = false;
+    weaponGroup.visible = true;
+    document.getElementById('killcamOverlay').classList.remove('show');
+    document.getElementById('hud').style.display = 'block';
+    const done = killcamDone; killcamDone = null;
+    done?.();
+  }
+}
 function finishFfa(){
   if(ffaState.resultShown)return;
   ffaState.resultShown=true;ffaState.phase='ended';roundState.phase='ended';matchFinished=true;
@@ -4779,7 +4825,7 @@ function finishFfa(){
   document.getElementById('resultRating').textContent='UNRANKED · FREE LOADOUTS';
   document.getElementById('rematchMap').value=selectedMap;
   document.getElementById('rematchControls').hidden=netRole!=='host';document.getElementById('rematchWaiting').hidden=netRole==='host';
-  document.getElementById('matchResult').showModal();
+  playKillcam(() => document.getElementById('matchResult').showModal());
 }
 function updateFfa(dt){
   if(!ffaState.active)return;
@@ -4927,6 +4973,9 @@ function broadcastRoster(){
 let netStats = {};
 const receivedKills = new Set();
 const roundLives = new RoundLives();
+// FFA killcam: always holds the most recent scoring kill (see applyKillMessage), so whatever it
+// points to when the match ends is, by definition, the kill that ended it.
+let lastFfaKill = null;
 let lastDamageMeta = {};
 // Per-life damage exchange with each opponent, from the local player's own perspective only -
 // keyed by the OTHER party's id, cleared for that id once they die (a fresh life starts clean).
@@ -4953,6 +5002,10 @@ function applyKillMessage(msg){
   if (!isFfa() && roundState.phase === 'live') roundLives.eliminate(msg.victimId, msg.roundNum);
   if (msg.deathId && receivedKills.has(msg.deathId)) return;
   if (msg.deathId) receivedKills.add(msg.deathId);
+  // Reaching this point in FFA already guarantees msg.scoring === true (see the early return
+  // above), so every kill seen here while in FFA is a candidate - the last one standing when the
+  // match ends is the one the killcam replays.
+  if (isFfa()) lastFfaKill = { killerId: msg.killerId, victimId: msg.victimId, weaponName: msg.weaponName || 'Unknown', headshot: !!msg.headshot };
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
   showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD');
   if (msg.killerId === netMyId) { showHitMarker(!!msg.headshot, true); showDamageExchange(msg.victimId); }
@@ -6363,6 +6416,8 @@ document.getElementById('closeBuyMenu').addEventListener('click', toggleBuyMenu)
 function animate(){
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (killcamActive) updateKillcam(dt);
 
   if (gameStarted && !matchFinished && (gameMode === 'pvp' || (!shopOpen && !pauseMenuOpen))) {
     currentMapMeta?.update?.(dt);
