@@ -227,6 +227,87 @@
   #startBtn:disabled{filter:saturate(.45);opacity:.72;}
   #loadingNote{color:rgba(201,205,207,.5);font-size:10px;letter-spacing:1.5px;}
   @media(max-width:760px){#landingRail{left:14px;right:14px;font-size:8px}#landingRail span:last-child{display:none}#logo{width:240px}.mapCard{width:min(92vw,340px);min-height:0}.mapCard img{height:92px}.modeCard{width:min(92vw,340px)}#startScreen{padding-top:46px}}
+
+  /* Room control had never been brought up to the map/mode cards' redesign - same gradient,
+     glow and radius language everywhere now instead of the plain 2px-flat-border 2024 look. */
+  #startScreen{padding-bottom:70px;}
+  .mapCard .swatch{height:118px;border-radius:6px;box-shadow:inset 0 -28px 26px -14px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);}
+  #pvpIdentityHint button,.pvpChoiceBtn,.teamSizeBtn,#pvpHostBtn,#pvpJoinBtn,#pvpCopyLinkBtn{
+    border-radius:7px;font-family:Inter,'Segoe UI',sans-serif;font-weight:700;letter-spacing:1.6px;
+    text-transform:uppercase;cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s,background .15s,filter .15s;
+  }
+  .pvpChoiceBtn,.teamSizeBtn{padding:11px 22px;font-size:11px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.045);color:#d7dbdd;box-shadow:inset 0 1px rgba(255,255,255,.05);}
+  .pvpChoiceBtn:hover,.teamSizeBtn:hover{border-color:rgba(255,105,91,.55);background:rgba(255,255,255,.075);color:#fff;}
+  .pvpChoiceBtn.selected,.teamSizeBtn.selected{
+    border-color:#ff5145;color:#fff;background:linear-gradient(135deg,rgba(91,25,22,.92),rgba(28,14,15,.94));
+    box-shadow:0 0 22px rgba(229,71,60,.2),inset 0 1px rgba(255,150,140,.14);
+  }
+  #pvpHostBtn,#pvpJoinBtn{
+    padding:14px 30px;font-size:12px;border:none;color:#fff;font-family:'Baserona','Arial Narrow',sans-serif;font-weight:800;letter-spacing:2.5px;
+    background:linear-gradient(135deg,#e9473c,#8c1816);box-shadow:0 12px 28px rgba(197,38,31,.26),inset 0 1px rgba(255,255,255,.28);
+  }
+  #pvpHostBtn:hover,#pvpJoinBtn:hover{transform:translateY(-2px);filter:brightness(1.12);box-shadow:0 16px 36px rgba(197,38,31,.38),inset 0 1px rgba(255,255,255,.32);}
+  #pvpCopyLinkBtn{padding:11px 18px;font-size:10px;border:1px solid rgba(215,182,108,.5);background:rgba(215,182,108,.08);color:#e9d9a8;}
+  #pvpCopyLinkBtn:hover{background:rgba(215,182,108,.16);border-color:#d7b66c;}
+  #pvpIdentityAccountBtn{border:none;background:none;color:#ff8f85;letter-spacing:1px;text-transform:none;font-size:11px;padding:0;text-decoration:underline;text-underline-offset:2px;}
+  #pvpJoinCode,#pvpRoomLinkInput{border-radius:7px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.4);color:#e7e9eb;padding:12px 14px;font-size:12px;letter-spacing:2px;}
+  #pvpJoinCode:focus,#pvpRoomLinkInput:focus{outline:none;border-color:rgba(255,105,91,.6);}
+  #pvpEntryChoice,#pvpTeamSize{gap:12px;}
+
+  /* ===== Landing v3: edge-docked HUD layout (profile/promo rail, mode rail, centre stage for
+     the map carousel) instead of one narrow centered column, closer to a console shooter's menu
+     than the plain vertically-stacked page this started as. ===== */
+  #startScreen{
+    display:grid;
+    grid-template-columns:296px 1fr 320px;
+    grid-template-rows:auto 1fr auto auto auto;
+    grid-template-areas:
+      "profile hero  modes"
+      "profile maps  modes"
+      "pvp     pvp   pvp"
+      "ready   ready ready"
+      "note    note  note";
+    column-gap:28px;row-gap:16px;
+    padding:82px 32px 40px;
+    align-items:start;
+    overflow-y:auto;
+  }
+  #profileDock{position:static!important;top:auto!important;right:auto!important;grid-area:profile;width:auto;display:flex;flex-direction:column;gap:10px;text-align:left;}
+  .profileMain{position:relative;padding-left:48px;min-height:38px;display:flex;align-items:center;}
+  .profileMain::before{content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:50%;background:linear-gradient(145deg,#3a3f44,#101214);border:2px solid #d7b66c;box-shadow:0 6px 16px rgba(0,0,0,.4);}
+  .profileMain::after{content:"★";position:absolute;left:0;top:50%;transform:translateY(-50%);width:38px;height:38px;line-height:36px;text-align:center;color:#d7b66c;font-size:15px;}
+  #inventoryBtn,#ladderButton{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:0;padding:14px 16px;background:linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.14);border-left:3px solid #d7b66c;border-radius:8px;color:#f0f2f3;font:700 11px/1 Inter,'Segoe UI',sans-serif;letter-spacing:1.5px;box-shadow:0 10px 24px rgba(0,0,0,.25);transition:transform .15s,border-color .15s,background .15s;}
+  #inventoryBtn:hover,#ladderButton:hover{border-left-color:#ff5145;background:linear-gradient(145deg,rgba(255,255,255,.1),rgba(255,255,255,.03));transform:translateX(3px);}
+  #accountButton{margin-top:2px;padding:10px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.14);border-radius:7px;color:#c9ced0;font:700 10px/1 Inter,'Segoe UI',sans-serif;letter-spacing:1.5px;}
+  #accountButton:hover{border-color:rgba(255,105,91,.5);color:#fff;}
+  #accountState{color:#7f898f;font-size:10px;letter-spacing:.5px;}
+  #heroBlock{grid-area:hero;align-self:end;text-align:center;padding-bottom:6px;}
+  /* overflow:auto zeroes an element's automatic min-size for grid track sizing, so without an
+     explicit min-height the "maps" row collapses to almost nothing whenever no other column in
+     the same row is tall enough to force it open (exactly what happens once the layout drops to
+     a single column on narrow screens) and the actual cards spill downward over the next row. */
+  #mapSelect{grid-area:maps;display:flex;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;padding:6px 6px 16px;margin-top:8px;gap:16px;justify-content:flex-start;min-height:270px;}
+  .mapCard{flex:0 0 248px;scroll-snap-align:start;clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);}
+  #mapSelect::-webkit-scrollbar{height:8px;}
+  #mapSelect::-webkit-scrollbar-thumb{background:rgba(229,71,60,.45);border-radius:4px;}
+  #mapSelect::-webkit-scrollbar-track{background:rgba(255,255,255,.04);}
+  #modeSelect{grid-area:modes;display:flex;flex-direction:column;flex-wrap:nowrap;gap:12px;margin-top:0;width:100%;}
+  .modeCard{width:100%;position:relative;padding-left:24px;clip-path:polygon(14px 0,100% 0,100% 100%,0 100%,0 14px);}
+  .modeCard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(180deg,#ff6a5c,#8c1816);}
+  .modeCard[data-mode="practice"]::before{background:linear-gradient(180deg,#6cc6ff,#1a4c74);}
+  .modeCard[data-mode="knife"]::before{background:linear-gradient(180deg,#d7b66c,#7a5e28);}
+  .modeCard[data-mode="ffa"]::before{background:linear-gradient(180deg,#c771ff,#4a1a74);}
+  #pvpPanel{grid-area:pvp;justify-self:center;width:min(680px,100%);margin-top:4px;}
+  #startBtn{grid-area:ready;justify-self:center;margin-top:6px;background:linear-gradient(135deg,#ffd873,#c9932c);border:1px solid rgba(255,255,255,.4);color:#241505;text-shadow:none;box-shadow:0 14px 34px rgba(201,147,44,.32),inset 0 1px rgba(255,255,255,.5);clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);}
+  #startBtn:not(:disabled):hover{transform:translateY(-3px);filter:brightness(1.08);box-shadow:0 18px 40px rgba(201,147,44,.42),inset 0 1px rgba(255,255,255,.6);}
+  #startBtn:disabled{background:linear-gradient(135deg,#6b5a35,#40331a);color:rgba(255,255,255,.45);}
+  #loadingNote{grid-area:note;justify-self:center;margin-top:0;}
+  @media(max-width:1050px){
+    #startScreen{grid-template-columns:1fr;grid-template-rows:repeat(7,auto);grid-template-areas:"profile" "hero" "maps" "modes" "pvp" "ready" "note";padding-top:64px;}
+    #profileDock{max-width:420px;margin:0 auto;}
+    #modeSelect{flex-direction:row;flex-wrap:wrap;justify-content:center;}
+    .modeCard{width:min(92vw,320px);}
+  }
 </style>
 </head>
 <body>
@@ -259,9 +340,11 @@
     <button id="ladderButton" type="button">WEEKLY LADDER <span aria-hidden="true">↗</span></button>
     <span id="accountState">Guest · saved on this device</span>
   </section>
-  <img id="logo" src="assets/logo.png" alt="LAST ROUND">
-  <h2>No second chances</h2>
-  <p>Choose your battlefield</p>
+  <div id="heroBlock">
+    <img id="logo" src="assets/logo.png" alt="LAST ROUND">
+    <h2>No second chances</h2>
+    <p>Choose your battlefield</p>
+  </div>
   <div id="mapSelect">
     <div class="mapCard" data-map="mall" hidden><div class="swatch"></div><h3>MALL</h3><p>Two shopping levels around an open atrium. Ride the escalators, enter retail stores and flank behind shuttered fronts. FFA · 6–12.</p></div>
     <div class="mapCard" data-map="dockyard" hidden><div class="swatch"></div><h3>DOCKYARD</h3><p>FFA · 6–12 players. Cargo stacks, a port control tower and looping freight lanes. Twelve distributed spawn bays.</p></div>
