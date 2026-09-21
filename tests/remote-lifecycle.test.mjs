@@ -19,7 +19,7 @@ function fixture() {
     netRoster: [{ id: 'remote', team: 'B', name: 'Opponent' }],
     player: { height: 1.8, crouchHeight: 1 },
     getOrCreateRemoteAvatar: () => avatar,
-    enemies: [avatar], groundHeightAt: () => 0,
+    enemies: [avatar], currentMapMeta: null, groundHeightAt: () => 0,
     scene: { remove() { throw new Error('Remote corpse must remain registered'); } }
   });
   vm.runInContext(productionFunction('applyRemoteState') + '\n' + productionFunction('updateDyingEnemies'), context);

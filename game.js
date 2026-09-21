@@ -4,6 +4,8 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { buildMall } from './mall-map.js';
+import { mallWalk } from './mall-layout.js';
 import { FFA, botCount, canStart, rankPlayers, chooseSpawn } from './ffa-rules.js';
 import { FFA_MAPS, buildNavigation, blockedAt, SKI_DROP, SKI_CAFE } from './ffa-layouts.js';
 import { buildFfaMap, ffaThumbnail } from './ffa-maps.js';
@@ -936,7 +938,8 @@ const MAP_TEXTURE_URLS = {
   subway: ['assets/textures/subway_floor.webp', 'assets/textures/subway_walls.jpg', 'assets/textures/train.png', 'assets/textures/trainfront.png', 'assets/textures/metal.jpg'],
   foundry: ['assets/textures/wall.jpg', 'assets/textures/subway_floor.webp', 'assets/textures/metal.jpg'],
   skyline: [],
-  ski: ['assets/textures/snow.png']
+  ski: ['assets/textures/snow.png','assets/textures/cafe.png','assets/textures/mesa.png','assets/textures/arbol_tronco.png','assets/textures/arbol_hojas.png','assets/textures/cafe_gijon.png'],
+  mall: []
 };
 const texturePreloadState = new Map();
 function preloadMapTextures(mapId){
@@ -1677,6 +1680,12 @@ function buildFoundryMap(){
 
 function buildFreeForAllMap(id){
   applyDesertAtmosphere();
+  if (id === 'mall') {
+    WORLD_SIZE=80;groundHeightAt=()=>0;
+    hemi.color.set(0xe3eaf2);hemi.groundColor.set(0x8c8174);hemi.intensity=1.35;
+    sun.color.set(0xffedda);sun.intensity=.7;fillLight.intensity=.55;scene.fog.density=0;
+    return buildMall({scene,addBox,floorMeshes,envMeshes});
+  }
   if (id === 'ski') {
     const L = FFA_MAPS.ski;
     WORLD_SIZE = Math.max(L.halfWidth, L.halfDepth) * 2 + 10;
@@ -1710,6 +1719,7 @@ function buildFreeForAllMap(id){
 }
 
 const MAPS = {
+  mall: { name: 'Mall', ffa: true, build: () => buildFreeForAllMap('mall') },
   dockyard: { name: 'Dockyard', ffa: true, build: () => buildFreeForAllMap('dockyard') },
   atrium: { name: 'Atrium', ffa: true, build: () => buildFreeForAllMap('atrium') },
   ski: { name: 'Ski Station', ffa: true, build: () => buildFreeForAllMap('ski') },
@@ -1757,7 +1767,7 @@ function buildMap(id){
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
-  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317, dockyard: 401, atrium: 503, ski: 601 })[id]);
+  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317, dockyard: 401, atrium: 503, ski: 601, mall: 719 })[id]);
   const result = MAPS[id].build();
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
@@ -3395,6 +3405,18 @@ function updateGrenades(dt){
     g.fuse -= dt;
     g.vel.y -= 18 * dt;
     const nextPos = g.mesh.position.clone().addScaledVector(g.vel, dt);
+    if(selectedMap === 'mall'){
+      const travel=nextPos.clone().sub(g.mesh.position),length=travel.length();
+      if(length>0){
+        const sweep=new THREE.Raycaster(g.mesh.position,travel.normalize(),0,length+.09);
+        const hit=sweep.intersectObjects(envMeshes.concat(floorMeshes),false)[0];
+        if(hit){
+          const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+          if(normal.dot(g.vel)>0)normal.negate();
+          nextPos.copy(hit.point).addScaledVector(normal,.1);g.vel.reflect(normal).multiplyScalar(.45);
+        }
+      }
+    }
     const gy = groundHeightAt(nextPos.x, nextPos.z);
     if (nextPos.y <= gy + 0.09) {
       nextPos.y = gy + 0.09;
@@ -4073,7 +4095,7 @@ function updateDyingEnemies(dt){
     enemy.mesh.rotation.x = ease * (Math.PI / 2.1) * Math.sin(enemy.fallDir);
     enemy.mesh.rotation.z = ease * (Math.PI / 2.1) * Math.cos(enemy.fallDir);
     const bounce = Math.sin(Math.min(1, p) * Math.PI) * 0.12;
-    enemy.mesh.position.y = groundHeightAt(enemy.mesh.position.x, enemy.mesh.position.z) + bounce;
+    enemy.mesh.position.y = (currentMapMeta?.supportHeight ? currentMapMeta.supportHeight(enemy.mesh.position.x, enemy.mesh.position.z, enemy.mesh.position.y) : groundHeightAt(enemy.mesh.position.x, enemy.mesh.position.z)) + bounce;
     // Retain a remote corpse until respawn/next round. Removing it caused each
     // new dead snapshot to create another living avatar and replay its collapse.
     if (enemy.isRemote) continue;
@@ -4444,13 +4466,13 @@ function ffaVisible(a,b){
 function ffaSpawn(id){
   const layout = currentMapMeta.ffa;
   const actors = ffaActors(id).map(a=>a.pos);
-  const spawn = chooseSpawn(layout.spawns,actors,(p,a)=>ffaVisible(new THREE.Vector3(p.x,1.4,p.z),a));
-  return new THREE.Vector3(spawn.x,0,spawn.z);
+  const spawn = chooseSpawn(layout.spawns,actors,(p,a)=>ffaVisible(new THREE.Vector3(p.x,(p.y ?? groundHeightAt(p.x,p.z))+1.4,p.z),a));
+  return new THREE.Vector3(spawn.x,spawn.y ?? groundHeightAt(spawn.x,spawn.z),spawn.z);
 }
 function respawnFfaPlayer(){
   if (matchFinished) return;
   const p=ffaSpawn(netMyId);
-  player.pos.copy(p); player.pos.y=player.height;
+  player.pos.copy(p); player.pos.y+=player.height;
   player.alive=true; player.health=player.maxHealth; player.crouching=false; player.ads=false;
   player.scopeLevel=0; player.pitch=0; player.yaw=Math.atan2(p.x,p.z); player.velY=0;
   movementVelocity.set(0,0,0); camera.position.copy(player.pos);
@@ -4496,7 +4518,7 @@ function startFfa(rematch=false){
   if (!currentMapMeta.ffa) return;
   document.body.classList.add('ffaActive');
   matchFinished=false; ffaState.active=true; ffaState.resultShown=false;
-  ffaState.navigation=buildNavigation(currentMapMeta.ffa);
+  ffaState.navigation=currentMapMeta.navigation ? currentMapMeta.navigation() : buildNavigation(currentMapMeta.ffa);
   if (netRole==='host'){
     ffaState.phase='waiting';ffaState.timer=FFA.warmup;ffaState.sendT=0;
     netStats={};receivedKills.clear();
@@ -4616,23 +4638,31 @@ function updateFfaBots(dt){
     const target=bot.target;
     let goal=target?.pos||(bot.memory>0?bot.lastSeen:null);
     if(!goal){
-      if(!bot.patrol||pos.distanceTo(bot.patrol)<2){const n=ffaState.navigation.nodes[Math.floor(Math.random()*ffaState.navigation.nodes.length)];bot.patrol=new THREE.Vector3(n.x,0,n.z);}
+      if(!bot.patrol||pos.distanceTo(bot.patrol)<2){const n=ffaState.navigation.nodes[Math.floor(Math.random()*ffaState.navigation.nodes.length)];bot.patrol=new THREE.Vector3(n.x,n.y ?? groundHeightAt(n.x,n.z),n.z);}
       goal=bot.patrol;
     }
     let move=new THREE.Vector3();
-    if(target&&eye.distanceTo(target.pos)<22){
+    if(target&&eye.distanceTo(target.pos)<22&&Math.abs(target.pos.y-eye.y)<2){
       const aim=target.pos.clone().sub(eye);aim.y=0;aim.normalize();
       move.set(aim.z,0,-aim.x).multiplyScalar(Math.sin(performance.now()*.001+Number(bot.netId.split('-').at(-1)))>0?1:-1);
       move.multiplyScalar(1.8*dt);
     }else{
       if(bot.pathT<=0){bot.path=ffaState.navigation.path(pos,goal);bot.pathT=.9;}
-      while(bot.path.length&&Math.hypot(bot.path[0].x-pos.x,bot.path[0].z-pos.z)<.5)bot.path.shift();
+      while(bot.path.length&&Math.hypot(bot.path[0].x-pos.x,bot.path[0].z-pos.z)<.5&&Math.abs((bot.path[0].y ?? pos.y)-pos.y)<.6)bot.path.shift();
       if(bot.path.length){const n=bot.path[0];move.set(n.x-pos.x,0,n.z-pos.z);move.normalize().multiplyScalar(Math.min(move.length(),bot.speed*dt));}
     }
     // Swept small steps plus inflated layout obstacles prevent clipping around cover.
     const old=pos.clone();
-    if(!blockedAt(currentMapMeta.ffa,pos.x+move.x,pos.z,.65))pos.x+=move.x;
-    if(!blockedAt(currentMapMeta.ffa,pos.x,pos.z+move.z,.65))pos.z+=move.z;
+    if(selectedMap === 'mall'){
+      const xY=mallWalk(pos.x+move.x,pos.z,pos.y);
+      if(xY!==null){pos.x+=move.x;pos.y=xY;}
+      const zY=mallWalk(pos.x,pos.z+move.z,pos.y);
+      if(zY!==null){pos.z+=move.z;pos.y=zY;}
+    }else{
+      if(!blockedAt(currentMapMeta.ffa,pos.x+move.x,pos.z,.65))pos.x+=move.x;
+      if(!blockedAt(currentMapMeta.ffa,pos.x,pos.z+move.z,.65))pos.z+=move.z;
+      pos.y=groundHeightAt(pos.x,pos.z);
+    }
     const look=(target?.pos||goal).clone().sub(pos),desired=Math.atan2(look.x,look.z);
     const delta=Math.atan2(Math.sin(desired-bot.mesh.rotation.y),Math.cos(desired-bot.mesh.rotation.y));
     bot.mesh.rotation.y+=delta*(1-Math.exp(-10*dt));bot.targetYaw=bot.mesh.rotation.y;bot.targetPos.copy(pos);
@@ -5742,14 +5772,26 @@ function updatePlayer(dt){
   // otherwise reads as an intersection (shared boundary) and freezes all horizontal movement.
   const liveFeetY = player.pos.y - (player.crouching ? player.crouchHeight : player.height) + 0.05;
   const newPos = player.pos.clone().addScaledVector(movementVelocity, dt);
-  if (!checkCollision(newPos, liveFeetY)) {
+  if(player.onGround&&currentMapMeta?.conveyor)newPos.z+=currentMapMeta.conveyor(player.pos.x,player.pos.z,liveFeetY-.05)*dt;
+  const movementFeet = pos => {
+    if(!player.onGround||!currentMapMeta?.supportHeight)return liveFeetY;
+    // Sample the capsule footprint at a ramp landing, not just its centre.
+    // Otherwise its front edge collides with the upper slab before its centre reaches it.
+    let height=liveFeetY;
+    for(const [dx,dz] of [[0,0],[-.5,0],[.5,0],[0,-.5],[0,.5]]){
+      const surface=currentMapMeta.supportHeight(pos.x+dx,pos.z+dz,liveFeetY);
+      if(surface-liveFeetY<=.35)height=Math.max(height,surface+.05);
+    }
+    return height;
+  };
+  if (!checkCollision(newPos, movementFeet(newPos))) {
     player.pos.x = newPos.x; player.pos.z = newPos.z;
   } else {
     const tryX = player.pos.clone(); tryX.x = newPos.x;
-    if (!checkCollision(tryX, liveFeetY)) player.pos.x = newPos.x;
+    if (!checkCollision(tryX, movementFeet(tryX))) player.pos.x = newPos.x;
     else movementVelocity.x = 0;
     const tryZ = player.pos.clone(); tryZ.z = newPos.z;
-    if (!checkCollision(tryZ, liveFeetY)) player.pos.z = newPos.z;
+    if (!checkCollision(tryZ, movementFeet(tryZ))) player.pos.z = newPos.z;
     else movementVelocity.z = 0;
   }
 
@@ -5757,7 +5799,7 @@ function updatePlayer(dt){
   player.pos.x = Math.max(-half, Math.min(half, player.pos.x));
   player.pos.z = Math.max(-half, Math.min(half, player.pos.z));
 
-  const groundY = groundHeightAt(player.pos.x, player.pos.z);
+  const groundY = currentMapMeta?.supportHeight ? currentMapMeta.supportHeight(player.pos.x,player.pos.z,player.pos.y-(player.crouching?player.crouchHeight:player.height)) : groundHeightAt(player.pos.x, player.pos.z);
   const targetHeight = player.crouching ? player.crouchHeight : player.height;
 
   const jumpDown = !!keys[settings.binds.jump];
@@ -6222,6 +6264,7 @@ function animate(){
   const dt = Math.min(clock.getDelta(), 0.05);
 
   if (gameStarted && !matchFinished && (gameMode === 'pvp' || (!shopOpen && !pauseMenuOpen))) {
+    currentMapMeta?.update?.(dt);
     updatePlayer(dt);
     updatePlayerRegen(dt);
     updateEnemies(dt);

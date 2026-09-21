@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {skiMaterials,metricBoxUV} from './surface-materials.js';
 import { FFA_MAPS, SKI_CAFE, SKI_WINDOW_SILL } from './ffa-layouts.js';
 
 const materialCache = new Map();
@@ -29,7 +30,8 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
     return materialCache.get(key);
   };
   const stone=material(isSki?0xeef5f7:port?0xadb7b6:0xe1ded0,'paint');
-  const ground=isSki?material(0xffffff,'snow.png',18,36)
+  const skiSurface=isSki?skiMaterials(loadTiledTexture):null;
+  const ground=isSki?skiSurface.snow
     :material(port?0x747f81:0xc1bba5,'subway_floor.webp',24,24);
   const teal=material(0x4b98a3,'paint',2,3,.18), rust=material(0xd8834d,'paint',2,3,.18);
   const trim=material(0x43575f,'paint',1,1,.25), leaf=material(0x42644a), soil=material(0x33392e);
@@ -37,8 +39,8 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
   const lamp=material(0xd9fff2);lamp.emissive.set(0x91d7c8);lamp.emissiveIntensity=1.1;
   // Ski-only set: photo pine bark/foliage, the café's own wall/furniture photos and its diner tile floor.
   const bark=material(0xffffff,'arbol_tronco.png',1,2.6), pineFoliage=material(0xffffff,'arbol_hojas.png',2,2);
-  const cafeWall=material(0xffffff,'cafe.png',2.6,1.6), tableMat=material(0xffffff,'mesa.png',1.4,1.4);
-  const cafeFloor=material(0xffffff,'mesa.png',3,4);
+  const cafeWall=isSki?skiSurface.wood:stone, tableMat=isSki?skiSurface.table:stone;
+  const cafeFloor=isSki?skiSurface.floor:stone;
   for(const m of [stone,teal,rust,trim])m.userData.minimapProp=true;
   function imageSign(file,x,y,z,w,h,rotation=0){
     const tex=loadTiledTexture(`assets/textures/${file}`,1,1);
@@ -54,7 +56,9 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
   }
   function box(x,y,z,w,h,d,mat,solid=false){
     const gy=y+groundHeightAt(x,z);
-    if(solid){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);mesh.position.set(x,gy,z);
+    if(solid){const geometry=new THREE.BoxGeometry(w,h,d);
+      if(isSki&&mat!==ground)metricBoxUV(geometry,3);
+      const mesh=new THREE.Mesh(geometry,mat);mesh.position.set(x,gy,z);
       mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);addBox(mesh);return mesh;}
     const t=new THREE.Object3D();t.position.set(x,gy,z);t.scale.set(w,h,d);t.updateMatrix();
     if(!batches.has(mat))batches.set(mat,[]);batches.get(mat).push(t.matrix.clone());
@@ -70,7 +74,7 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
   if(isSki){
     // The piste runs downhill along z, so the floor is a subdivided, vertex-displaced mesh
     // (same idiom as the Arena/Skyline elevation) rather than the other FFA maps' flat plane.
-    const segX=Math.round(layout.halfWidth/2), segZ=Math.round(layout.halfDepth/2);
+    const segX=Math.round(layout.halfWidth), segZ=Math.round(layout.halfDepth);
     const floorGeo=new THREE.PlaneGeometry(layout.halfWidth*2,layout.halfDepth*2,segX,segZ);
     floorGeo.rotateX(-Math.PI/2);
     const gPos=floorGeo.attributes.position;
@@ -110,7 +114,25 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
       sign(port?'DOCKYARD / FREIGHT':'ATRIUM / RESEARCH',0,4.5,s*(layout.halfDepth-.56),s<0?0:Math.PI);
     }
   }
+  const pineBatches=new Map(),pineGeometry=new THREE.ConeGeometry(1,1,10,3);
+  const pineTransform=new THREE.Object3D();
+  function pineLayer(x,y,z,r,h,mat,rotation){
+    pineTransform.position.set(x,y,z);pineTransform.scale.set(r,h,r);pineTransform.rotation.y=rotation;pineTransform.updateMatrix();
+    if(!pineBatches.has(mat))pineBatches.set(mat,[]);pineBatches.get(mat).push(pineTransform.matrix.clone());
+  }
   layout.cover.forEach((b,i)=>{
+    if(b.kind==='pine'){
+      const gy=groundHeightAt(b.x,b.z);
+      const trunk=new THREE.Mesh(new THREE.CylinderGeometry(b.w*.24,b.w*.43,b.h,10),bark);
+      trunk.position.set(b.x,gy+b.h/2,b.z);trunk.castShadow=true;trunk.receiveShadow=true;scene.add(trunk);addBox(trunk);
+      for(let level=0;level<4;level++){
+        const radius=b.w*(1.65-level*.28),height=2.5-level*.26;
+        const y=gy+b.h+.5+level*.72;
+        pineLayer(b.x,y,b.z,radius,height,pineFoliage,i*.7+level);
+        pineLayer(b.x,y+height*.17,b.z,radius*.72,height*.69,ground,i*.7+level);
+      }
+      return;
+    }
     const isFurniture=b.kind==='counter'||b.kind==='diner'||b.kind==='chair';
     const m=b.kind==='cargo'?(b.x<0?teal:rust):b.kind==='tower'?trim
       :b.kind==='pine'?bark:b.kind==='snowbank'?ground
@@ -166,7 +188,9 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
     // ffa-layouts.js. The east wall there stops at SKI_WINDOW_SILL over a 6m gap - the lintel
     // above it is built here, shorter than the wall's own height so the gap is a shootable window.
     const {x:cx,z:cz,w:cw,d:cd,h:ch}=SKI_CAFE;
-    box(cx,ch+.2,cz,cw+.6,.3,cd+.6,cafeWall,true);
+    box(cx,ch+.2,cz,cw+.6,.3,cd+.6,skiSurface.roof,true);
+    box(cx,ch+.39,cz,cw+.8,.08,cd+.8,ground);
+    for(let x=cx-cw/2;x<=cx+cw/2;x+=.65)box(x,ch+.45,cz,.025,.03,cd+.8,skiSurface.roof);
     box(cx,.02,cz,cw-1,.03,cd-1,cafeFloor,true);
     const windowH=1.5,lintelH=ch-SKI_WINDOW_SILL-windowH;
     box(cx+cw/2,SKI_WINDOW_SILL+windowH+lintelH/2,cz,.4,lintelH,6,cafeWall,true);
@@ -197,6 +221,10 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
     box(p.x,.012,p.z,2,.018,.09,paint);
     const marker=sign(`F${String(i+1).padStart(2,'0')}`,p.x,.024,p.z,0,'#b6cec4',1.5);marker.rotation.set(-Math.PI/2,0,0);
   });
+  for(const [mat,list] of pineBatches){
+    const trees=new THREE.InstancedMesh(pineGeometry,mat,list.length);
+    list.forEach((m,i)=>trees.setMatrixAt(i,m));trees.castShadow=true;trees.receiveShadow=true;trees.computeBoundingSphere();scene.add(trees);
+  }
   const unit=new THREE.BoxGeometry(1,1,1);
   for(const [mat,list] of batches){const mesh=new THREE.InstancedMesh(unit,mat,list.length);
     list.forEach((m,i)=>mesh.setMatrixAt(i,m));mesh.castShadow=true;mesh.receiveShadow=true;mesh.computeBoundingSphere();scene.add(mesh);}
@@ -206,7 +234,7 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
 
 export function ffaThumbnail(id){
   const l=FFA_MAPS[id],c=document.createElement('canvas');c.width=480;c.height=260;
-  const ctx=c.getContext('2d');ctx.fillStyle={dockyard:'#243c45',atrium:'#444e46',ski:'#d9eaf0'}[id]??'#444e46';ctx.fillRect(0,0,480,260);
+  const ctx=c.getContext('2d');ctx.fillStyle={dockyard:'#243c45',atrium:'#444e46',ski:'#d9eaf0',mall:'#b0b0a4'}[id]??'#444e46';ctx.fillRect(0,0,480,260);
   const scale=Math.min(220/l.halfWidth,110/l.halfDepth),cx=240,cy=130;
   ctx.strokeStyle='#92ab9d';ctx.strokeRect(cx-l.halfWidth*scale,cy-l.halfDepth*scale,l.halfWidth*6.2,l.halfDepth*6.2);
   for(const b of l.cover){

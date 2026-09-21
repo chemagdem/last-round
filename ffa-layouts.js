@@ -1,3 +1,4 @@
+import { MALL } from './mall-layout.js';
 const box = (x,z,w,d,h=3,kind='wall') => ({x,z,w,d,h,kind});
 const ringSpawns = (x,z) => [
   {x:-x,z:-z},{x:0,z:-z},{x:x,z:-z},
@@ -82,6 +83,7 @@ const skiSpawns = [
   {x:-24,z:-40},{x:-24,z:40},{x:20,z:-20},{x:20,z:20},{x:-40,z:0},{x:40,z:-60}
 ];
 export const FFA_MAPS = {
+  mall: MALL,
   dockyard: {name:'Dockyard',halfWidth:36,halfDepth:32,cover:docks,spawns:ringSpawns(32,28)},
   atrium: {name:'Atrium',halfWidth:32,halfDepth:32,cover:atrium,spawns:ringSpawns(28,28)},
   ski: {name:'Ski Station',halfWidth:SKI_HALF_WIDTH,halfDepth:SKI_HALF_DEPTH,cover:ski,spawns:skiSpawns}

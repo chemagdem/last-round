@@ -20,6 +20,7 @@ test('individual ranking includes bots, excludes loading players and breaks ties
   assert.deepEqual(rankPlayers(roster,{a:{kills:3,deaths:2},b:{kills:3,deaths:1},c:{kills:20}}).map(p=>p.id),['b','a']);
 });
 for(const [id,map] of Object.entries(FFA_MAPS)){
+  if (id === 'mall') continue; // Mall has a dedicated multi-level graph test.
   test(`${id}: all twelve spawns clear and connected with navigable escape routes`,()=>{
     assert.equal(map.spawns.length,12);
     const nav=buildNavigation(map);
