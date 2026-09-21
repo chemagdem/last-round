@@ -4779,27 +4779,48 @@ function updateFfaBots(dt){
 // moment matchFinished is set) rather than recording a real position/aim history - simpler, and
 // since finishFfa() runs within a tick of the kill that ended the match, that frozen pose is
 // essentially where the killer really was when they fired the shot.
+// killer's eye position + a fallback facing yaw (used only if the victim can't be located).
 function killcamActor(id){
-  if (id === netMyId) return { pos: player.pos.clone(), yaw: player.yaw, pitch: player.pitch };
+  if (id === netMyId) return { pos: player.pos.clone(), yaw: player.yaw };
   const avatar = enemies.find(e => e.netId === id);
   if (!avatar) return null;
-  const isBot = !!avatar.isBot;
   return {
     pos: new THREE.Vector3(avatar.mesh.position.x, avatar.mesh.position.y + player.height, avatar.mesh.position.z),
-    yaw: isBot ? avatar.mesh.rotation.y : (avatar.targetYaw ?? avatar.mesh.rotation.y),
-    pitch: isBot ? 0 : (avatar.targetPitch ?? 0)
+    yaw: avatar.isBot ? avatar.mesh.rotation.y : (avatar.targetYaw ?? avatar.mesh.rotation.y)
   };
 }
-let killcamActive = false, killcamT = 0, killcamDone = null, killcamPose = null;
+// where to actually point the camera - aiming at the killer's own frozen yaw/pitch isn't reliable
+// (a bot can keep turning for a tick or two before the freeze, or the fatal shot can land without
+// the reticle being dead-center at that exact instant), so the kill wouldn't reliably be on screen.
+// Aiming at the victim's own frozen position instead guarantees the kill itself is always in frame.
+function killcamAimPoint(id){
+  if (id === netMyId) return player.pos.clone();
+  const avatar = enemies.find(e => e.netId === id);
+  if (!avatar) return null;
+  return new THREE.Vector3(avatar.mesh.position.x, avatar.mesh.position.y + player.height * 0.55, avatar.mesh.position.z);
+}
+function weaponIdFromName(name){
+  return Object.entries(WEAPONS).find(([, def]) => def.name === name)?.[0] || null;
+}
+let killcamActive = false, killcamT = 0, killcamDone = null, killcamPose = null, killcamAim = null, killcamWeaponVisual = null;
 const KILLCAM_DURATION = 2.6, RANKING_DURATION = 5;
 function killcamName(id){ return id === netMyId ? 'YOU' : (netRoster.find(p => p.id === id)?.name || 'Player').toUpperCase(); }
 function playKillcam(onDone){
   const kill = lastFfaKill;
   const killer = kill ? killcamActor(kill.killerId) : null;
   if (!kill || !killer) { onDone(); return; } // nothing left to reconstruct a POV from (edge case) - straight to results
+  const forward = new THREE.Vector3(-Math.sin(killer.yaw), 0, -Math.cos(killer.yaw));
   killcamPose = killer;
+  killcamAim = killcamAimPoint(kill.victimId) || killer.pos.clone().addScaledVector(forward, 5);
   killcamT = 0; killcamActive = true; killcamDone = onDone;
-  weaponGroup.visible = false; // it's the killer's POV, not the local viewer's own held weapon
+  // show the actual weapon the kill was made with, not whatever the local viewer currently has
+  // equipped - built fresh here since the killer might be someone else entirely.
+  if (currentVisual) currentVisual.group.visible = false;
+  const wid = weaponIdFromName(kill.weaponName);
+  if (wid) { killcamWeaponVisual = buildWeaponVisual(wid); weaponGroup.add(killcamWeaponVisual.group); }
+  weaponGroup.visible = true;
+  weaponGroup.position.set(0.015, -0.015, 0.04);
+  weaponGroup.rotation.set(0, 0, 0);
   document.getElementById('hud').style.display = 'none';
   document.getElementById('killcamLabel').innerHTML = `<span class="killcamEyebrow">KILLCAM</span>${killcamName(kill.killerId)} ELIMINATED ${killcamName(kill.victimId)} · ${kill.weaponName.toUpperCase()}${kill.headshot ? ' · HEADSHOT' : ''}`;
   document.getElementById('killcamOverlay').classList.add('show');
@@ -4808,15 +4829,16 @@ function updateKillcam(dt){
   killcamT += dt;
   const p = Math.min(1, killcamT / KILLCAM_DURATION);
   const ease = 1 - Math.pow(1 - p, 2);
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = killcamPose.yaw;
-  camera.rotation.x = killcamPose.pitch;
-  // a slow forward dolly (not a real replay, just enough motion to not read as a static photo)
-  const forward = new THREE.Vector3(-Math.sin(killcamPose.yaw), 0, -Math.cos(killcamPose.yaw));
-  camera.position.copy(killcamPose.pos).addScaledVector(forward, ease * 0.7);
+  camera.position.copy(killcamPose.pos);
+  camera.lookAt(killcamAim);
+  // a slow forward dolly along the actual look direction - not a real replay, just enough motion
+  // to not read as a static photo, and it pushes the camera a little closer to the kill over time
+  const dir = new THREE.Vector3().subVectors(killcamAim, killcamPose.pos).normalize();
+  camera.position.addScaledVector(dir, ease * 0.6);
   if (p >= 1) {
     killcamActive = false;
-    weaponGroup.visible = true;
+    if (killcamWeaponVisual) { weaponGroup.remove(killcamWeaponVisual.group); killcamWeaponVisual = null; }
+    if (currentVisual) currentVisual.group.visible = true;
     document.getElementById('killcamOverlay').classList.remove('show');
     document.getElementById('hud').style.display = 'block';
     const done = killcamDone; killcamDone = null;
