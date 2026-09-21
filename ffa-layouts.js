@@ -35,30 +35,48 @@ for (const s of [-1,1]) {
 // reached through a 3m gap in its west wall.
 export const SKI_HALF_WIDTH = 55, SKI_HALF_DEPTH = 110, SKI_DROP = 14;
 export const SKI_CAFE = {x:30,z:60,w:10,d:14,h:3.6};
+export const SKI_WINDOW_SILL = 1.2; // east wall is only built up to here; buildFfaMap adds the lintel above the gap
 const ski = [];
 const {x:cafeX,z:cafeZ,w:cafeW,d:cafeD,h:cafeH} = SKI_CAFE;
+// Small deterministic jitter so the pine columns don't read as a rigid grid.
+let jitterSeed = 8821;
+const jitterRandom = () => ((jitterSeed = (jitterSeed * 1664525 + 1013904223) >>> 0) / 4294967296);
+const jitter = (v, amt) => v + (jitterRandom() - 0.5) * 2 * amt;
 const treeZ = [];
 for (let z = -98; z <= 98; z += 14) treeZ.push(z);
 for (const x of [18, 30, 42]) for (const s of [-1, 1]) {
-  // The middle column on the café's side skips the two rows the building itself occupies.
+  // The middle column on the café's side skips the rows the building itself occupies, with extra
+  // margin so the jitter below can't push a kept tree back into the wall.
   const nearCafe = s > 0 && x === 30;
   for (const z of treeZ) {
-    if (nearCafe && Math.abs(z - cafeZ) < 12) continue;
-    ski.push(box(s * x, z, x === 42 ? 1.6 : 1.2, x === 42 ? 1.6 : 1.2, 3.4 + (x === 42 ? .6 : 0), 'pine'));
+    if (nearCafe && Math.abs(z - cafeZ) < 16) continue;
+    const baseSize = x === 42 ? 1.6 : 1.2, baseH = 3.4 + (x === 42 ? .6 : 0);
+    const sizeMul = 0.85 + jitterRandom() * 0.3;
+    ski.push(box(jitter(s * x, 1.6), jitter(z, 2), baseSize * sizeMul, baseSize * sizeMul, baseH * sizeMul, 'pine'));
   }
 }
 for (const s of [-1, 1]) {
   ski.push(box(s * 52, -55, 5, 34, 2.6, 'snowbank'));
   ski.push(box(s * 52, 55, 5, 34, 2.6, 'snowbank'));
 }
-// Café Gijón: walls modelled as separate segments so the west (piste-facing) wall keeps a 3m doorway.
-ski.push(box(cafeX + cafeW / 2, cafeZ, .4, cafeD, cafeH, 'chalet'));                 // east wall
-ski.push(box(cafeX, cafeZ + cafeD / 2, cafeW, .4, cafeH, 'chalet'));                 // north wall
-ski.push(box(cafeX, cafeZ - cafeD / 2, cafeW, .4, cafeH, 'chalet'));                 // south wall
+// Café Gijón: walls modelled as separate segments so the west (piste-facing) wall keeps a 3m
+// doorway, and the east wall stops at SKI_WINDOW_SILL - buildFfaMap adds a matching lintel above
+// the gap so the rest of that wall stays solid while the gap itself is a shootable window.
+ski.push(box(cafeX + cafeW / 2, cafeZ - cafeD / 2 + 2, .4, 4, cafeH, 'chalet'));      // east wall, south of the window
+ski.push(box(cafeX + cafeW / 2, cafeZ + cafeD / 2 - 2, .4, 4, cafeH, 'chalet'));      // east wall, north of the window
+ski.push(box(cafeX + cafeW / 2, cafeZ, .4, 6, SKI_WINDOW_SILL, 'chalet'));            // east wall, below the window
+ski.push(box(cafeX - cafeW / 2 + 1, cafeZ + cafeD / 2, 2, .4, cafeH, 'chalet'));      // north wall, west of its window
+ski.push(box(cafeX + cafeW / 2 - 1, cafeZ + cafeD / 2, 2, .4, cafeH, 'chalet'));      // north wall, east of its window
+ski.push(box(cafeX, cafeZ + cafeD / 2, 6, .4, SKI_WINDOW_SILL, 'chalet'));            // north wall, below its window
+ski.push(box(cafeX - cafeW / 2 + 1, cafeZ - cafeD / 2, 2, .4, cafeH, 'chalet'));      // south wall, west of its window
+ski.push(box(cafeX + cafeW / 2 - 1, cafeZ - cafeD / 2, 2, .4, cafeH, 'chalet'));      // south wall, east of its window
+ski.push(box(cafeX, cafeZ - cafeD / 2, 6, .4, SKI_WINDOW_SILL, 'chalet'));            // south wall, below its window
 ski.push(box(cafeX - cafeW / 2, cafeZ + 4.25, .4, 5.5, cafeH, 'chalet'));             // west wall, north of the door
 ski.push(box(cafeX - cafeW / 2, cafeZ - 4.25, .4, 5.5, cafeH, 'chalet'));             // west wall, south of the door
 ski.push(box(cafeX + 2, cafeZ, 3, 1, 1.1, 'counter'));
 ski.push(box(cafeX - 2, cafeZ - 5, 1.4, 1.4, .9, 'diner'), box(cafeX - 2, cafeZ + 5, 1.4, 1.4, .9, 'diner'));
+ski.push(box(cafeX - 2.9, cafeZ - 5.8, .5, .5, .8, 'chair'), box(cafeX - 1.1, cafeZ - 5.8, .5, .5, .8, 'chair'));
+ski.push(box(cafeX - 2.9, cafeZ + 5.8, .5, .5, .8, 'chair'), box(cafeX - 1.1, cafeZ + 5.8, .5, .5, .8, 'chair'));
 const skiSpawns = [
   {x:0,z:-95},{x:0,z:-65},{x:0,z:-35},{x:0,z:-5},{x:0,z:55},{x:0,z:85},
   {x:-24,z:-40},{x:-24,z:40},{x:20,z:-20},{x:20,z:20},{x:-40,z:0},{x:40,z:-60}

@@ -1,35 +1,7 @@
 import * as THREE from 'three';
-import { FFA_MAPS, SKI_CAFE } from './ffa-layouts.js';
+import { FFA_MAPS, SKI_CAFE, SKI_WINDOW_SILL } from './ffa-layouts.js';
 
 const materialCache = new Map();
-let woodPlankTexture;
-function woodTexture(){
-  if (woodPlankTexture) return woodPlankTexture;
-  const c=document.createElement('canvas');c.width=512;c.height=512;const ctx=c.getContext('2d');
-  ctx.fillStyle='#6b4328';ctx.fillRect(0,0,512,512);
-  let seed=7723;const random=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
-  for(let plank=0;plank<8;plank++){
-    const y=plank*64;
-    ctx.fillStyle=`rgb(${96+Math.floor(random()*24)},${58+Math.floor(random()*16)},${34+Math.floor(random()*12)})`;
-    ctx.fillRect(0,y,512,60);
-    ctx.strokeStyle='rgba(35,20,10,.6)';ctx.lineWidth=2;ctx.strokeRect(0,y,512,60);
-  }
-  for(let i=0;i<900;i++){ctx.fillStyle=`rgba(40,24,12,${.05+random()*.15})`;ctx.fillRect(random()*512,random()*512,random()*30+4,.8);}
-  woodPlankTexture=new THREE.CanvasTexture(c);woodPlankTexture.colorSpace=THREE.SRGBColorSpace;
-  woodPlankTexture.wrapS=woodPlankTexture.wrapT=THREE.RepeatWrapping;
-  return woodPlankTexture;
-}
-let dinerTileTexture;
-function tileTexture(){
-  if (dinerTileTexture) return dinerTileTexture;
-  const c=document.createElement('canvas');c.width=256;c.height=256;const ctx=c.getContext('2d');
-  for(let y=0;y<2;y++)for(let x=0;x<2;x++){ctx.fillStyle=(x+y)%2?'#1c1620':'#f2ede2';ctx.fillRect(x*128,y*128,128,128);}
-  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=3;ctx.strokeRect(0,0,256,256);
-  ctx.beginPath();ctx.moveTo(128,0);ctx.lineTo(128,256);ctx.moveTo(0,128);ctx.lineTo(256,128);ctx.stroke();
-  dinerTileTexture=new THREE.CanvasTexture(c);dinerTileTexture.colorSpace=THREE.SRGBColorSpace;
-  dinerTileTexture.wrapS=dinerTileTexture.wrapT=THREE.RepeatWrapping;
-  return dinerTileTexture;
-}
 let paintedSteelTexture;
 function paintTexture(){
   if (paintedSteelTexture) return paintedSteelTexture;
@@ -63,22 +35,22 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
   const trim=material(0x43575f,'paint',1,1,.25), leaf=material(0x42644a), soil=material(0x33392e);
   const white=material(0xe7ddd0), paint=material(isSki?0xd23b3b:port?0xd7af60:0x6d9b99);
   const lamp=material(0xd9fff2);lamp.emissive.set(0x91d7c8);lamp.emissiveIntensity=1.1;
-  // Ski-only set: snow-capped pine cover, a wood-plank chalet and its diner tile floor.
-  const bark=material(0x5b4632,'paint',1,2,.1), pineFoliage=material(0x25503a);
-  const wood=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.7,map:woodTexture()});
-  const dinerFloor=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.35,map:tileTexture()});
+  // Ski-only set: photo pine bark/foliage, the café's own wall/furniture photos and its diner tile floor.
+  const bark=material(0xffffff,'arbol_tronco.png',1,2.6), pineFoliage=material(0xffffff,'arbol_hojas.png',2,2);
+  const cafeWall=material(0xffffff,'cafe.png',2.6,1.6), tableMat=material(0xffffff,'mesa.png',1.4,1.4);
+  const cafeFloor=material(0xffffff,'mesa.png',3,4);
   for(const m of [stone,teal,rust,trim])m.userData.minimapProp=true;
-  function dinerSign(text,x,y,z,rotation=0){
-    const c=document.createElement('canvas');c.width=768;c.height=192;const ctx=c.getContext('2d');
-    ctx.fillStyle='#170a1c';ctx.fillRect(0,0,768,192);
-    ctx.strokeStyle='#ff5fa8';ctx.lineWidth=6;ctx.strokeRect(10,10,748,172);
-    ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.font='italic 800 84px "Brush Script MT","Segoe Script",cursive';
-    ctx.shadowColor='#37e6c8';ctx.shadowBlur=24;ctx.fillStyle='#37e6c8';ctx.fillText(text,384,100);
-    ctx.shadowBlur=0;ctx.fillStyle='#fdf4ff';ctx.fillText(text,384,100);
-    const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
-    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(6,1.5),new THREE.MeshStandardMaterial({map:tex,roughness:.5,emissive:0x1c2b26,emissiveIntensity:.5}));
-    mesh.position.set(x,y+groundHeightAt(x,z),z);mesh.rotation.y=rotation;mesh.userData.disposeMapMaterial=true;scene.add(mesh);return mesh;
+  function imageSign(file,x,y,z,w,h,rotation=0){
+    const tex=loadTiledTexture(`assets/textures/${file}`,1,1);
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map:tex,roughness:.6,transparent:true,alphaTest:.1}));
+    mesh.position.set(x,y+groundHeightAt(x,z),z);mesh.rotation.y=rotation;scene.add(mesh);return mesh;
+  }
+  let glassMat;
+  function glassPane(x,y,z,w,h,rotation=0){
+    // No addBox() call - purely visual, so bullets and movement both pass straight through it.
+    if(!glassMat) glassMat=new THREE.MeshPhysicalMaterial({color:0xcfeaf0,transparent:true,opacity:.25,roughness:.05,metalness:0,transmission:.55,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),glassMat);
+    mesh.position.set(x,y+groundHeightAt(x,z),z);mesh.rotation.y=rotation;scene.add(mesh);return mesh;
   }
   function box(x,y,z,w,h,d,mat,solid=false){
     const gy=y+groundHeightAt(x,z);
@@ -139,12 +111,13 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
     }
   }
   layout.cover.forEach((b,i)=>{
+    const isFurniture=b.kind==='counter'||b.kind==='diner'||b.kind==='chair';
     const m=b.kind==='cargo'?(b.x<0?teal:rust):b.kind==='tower'?trim
       :b.kind==='pine'?bark:b.kind==='snowbank'?ground
-      :b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'?wood:stone;
+      :b.kind==='chalet'?cafeWall:isFurniture?tableMat:stone;
     box(b.x,b.h/2,b.z,b.w,b.h,b.d,m,true);
     box(b.x,b.h+.04,b.z,b.w+.1,.08,b.d+.1,
-      b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'?wood
+      b.kind==='chalet'?cafeWall:isFurniture?tableMat
       :b.kind==='pine'||b.kind==='snowbank'?ground
       :port?trim:white);
     if(b.kind==='pine'){
@@ -189,12 +162,21 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,ground
     }
     box(0,10.8,0,4,2.4,3,teal);
   }else if(isSki){
-    // Café Gijón: wood-plank roof and diner-tile floor over the wall segments laid out in
-    // ffa-layouts.js, plus a decorative (non-colliding) chair-lift line along the piste.
+    // Café Gijón: photo-textured roof and diner-tile floor over the wall segments laid out in
+    // ffa-layouts.js. The east wall there stops at SKI_WINDOW_SILL over a 6m gap - the lintel
+    // above it is built here, shorter than the wall's own height so the gap is a shootable window.
     const {x:cx,z:cz,w:cw,d:cd,h:ch}=SKI_CAFE;
-    box(cx,ch+.2,cz,cw+.6,.3,cd+.6,wood,true);
-    box(cx,.02,cz,cw-1,.03,cd-1,dinerFloor,true);
-    dinerSign('Café Gijón',cx-cw/2-.3,2.2,cz,-Math.PI/2);
+    box(cx,ch+.2,cz,cw+.6,.3,cd+.6,cafeWall,true);
+    box(cx,.02,cz,cw-1,.03,cd-1,cafeFloor,true);
+    const windowH=1.5,lintelH=ch-SKI_WINDOW_SILL-windowH;
+    box(cx+cw/2,SKI_WINDOW_SILL+windowH+lintelH/2,cz,.4,lintelH,6,cafeWall,true);
+    glassPane(cx+cw/2,SKI_WINDOW_SILL+windowH/2,cz,6,windowH,Math.PI/2);
+    box(cx,SKI_WINDOW_SILL+windowH+lintelH/2,cz+cd/2,6,lintelH,.4,cafeWall,true);
+    glassPane(cx,SKI_WINDOW_SILL+windowH/2,cz+cd/2,6,windowH,0);
+    box(cx,SKI_WINDOW_SILL+windowH+lintelH/2,cz-cd/2,6,lintelH,.4,cafeWall,true);
+    glassPane(cx,SKI_WINDOW_SILL+windowH/2,cz-cd/2,6,windowH,0);
+    // Sign mounted above the doorway (which has no lintel of its own) rather than across it.
+    imageSign('cafe_gijon.png',cx-cw/2-.3,ch+1,cz,3.2,1.6,-Math.PI/2);
     for(let z=-layout.halfDepth+6;z<=layout.halfDepth-6;z+=32)box(-26,3.6,z,.5,7.2,.5,trim);
     for(let z=-layout.halfDepth+6;z<layout.halfDepth-6;z+=32)box(-26,7.2,z+16,.3,.3,32,trim);
     for(let z=-layout.halfDepth+3;z<=layout.halfDepth-3;z+=12)box(0,.012,z,.3,.015,10,paint);
@@ -229,7 +211,7 @@ export function ffaThumbnail(id){
   ctx.strokeStyle='#92ab9d';ctx.strokeRect(cx-l.halfWidth*scale,cy-l.halfDepth*scale,l.halfWidth*6.2,l.halfDepth*6.2);
   for(const b of l.cover){
     ctx.fillStyle=b.kind==='cargo'?(b.x<0?'#65a8ad':'#d89660'):b.kind==='pine'?'#2f5f42':b.kind==='snowbank'?'#f3fbff'
-      :b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'?'#8a5a34':id==='atrium'?'#c9c7af':'#88969a';
+      :b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'||b.kind==='chair'?'#8a5a34':id==='atrium'?'#c9c7af':'#88969a';
     ctx.fillRect(cx+(b.x-b.w/2)*scale,cy+(b.z-b.d/2)*scale,b.w*scale,b.d*scale);}
   ctx.fillStyle='#a4f0cb';for(const p of l.spawns){ctx.beginPath();ctx.arc(cx+p.x*scale,cy+p.z*scale,2.5,0,Math.PI*2);ctx.fill();}
   ctx.fillStyle='#e8f0e9';ctx.font='bold 12px sans-serif';ctx.fillText('FFA / 6–12',18,24);

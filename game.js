@@ -5,7 +5,7 @@
    ========================================================== */
 import * as THREE from 'three';
 import { FFA, botCount, canStart, rankPlayers, chooseSpawn } from './ffa-rules.js';
-import { FFA_MAPS, buildNavigation, blockedAt, SKI_DROP } from './ffa-layouts.js';
+import { FFA_MAPS, buildNavigation, blockedAt, SKI_DROP, SKI_CAFE } from './ffa-layouts.js';
 import { buildFfaMap, ffaThumbnail } from './ffa-maps.js';
 import { addMapFinish } from './map-finish.js';
 import { findClearSpawn } from './map-spawns.js';
@@ -63,6 +63,7 @@ class SoundEngine {
     this.loadSample('subwayAmbience', 'assets/subway.mp3');
     this.loadSample('graffiti', 'assets/graffiti.mp3');
     this.loadSample('hitmarkerHit', 'assets/hitmarker_2.mp3');
+    this.loadSample('snowStep', 'assets/crunchysnow.mp3');
   }
   resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
@@ -208,7 +209,7 @@ class SoundEngine {
     const ctx = this.ctx, t = ctx.currentTime;
     const noise = ctx.createBufferSource(); noise.buffer = this.noiseBuffer(0.1);
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 280 + Math.random() * 160;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.19, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
     noise.connect(lp); lp.connect(g); g.connect(this.master);
     noise.start(t); noise.stop(t + 0.1);
   }
@@ -1679,8 +1680,23 @@ function buildFreeForAllMap(id){
   if (id === 'ski') {
     const L = FFA_MAPS.ski;
     WORLD_SIZE = Math.max(L.halfWidth, L.halfDepth) * 2 + 10;
-    // A gentle, continuous downhill grade along z: north (high) to south (low).
-    groundHeightAt = (x, z) => Math.min(1, Math.max(0, (z + L.halfDepth) / (L.halfDepth * 2))) * SKI_DROP;
+    // A gentle, continuous downhill grade along z (north high, south low), plus a little rolling
+    // relief so the piste doesn't read as a perfectly flat ramp.
+    const skiSlope = (x, z) => Math.min(1, Math.max(0, (z + L.halfDepth) / (L.halfDepth * 2))) * SKI_DROP;
+    const skiBumps = (x, z) => Math.sin(x * 0.28) * Math.cos(z * 0.31) * 0.28 + Math.sin(x * 0.12 + z * 0.17) * 0.18;
+    // The relief makes the doorway unwalkable if the café itself isn't standing on a flat pad, so
+    // the ground flattens to the building's own reference height under and just around it (a wider
+    // smooth blend margin beyond that), the same "plateau with a margin" idiom used by Arena/Skyline.
+    const cafeFlatHeight = skiSlope(SKI_CAFE.x, SKI_CAFE.z);
+    const cafePadHalfW = SKI_CAFE.w / 2 + 3, cafePadHalfD = SKI_CAFE.d / 2 + 3, cafePadMargin = 6;
+    groundHeightAt = (x, z) => {
+      const natural = skiSlope(x, z) + skiBumps(x, z);
+      const dx = Math.max(0, Math.abs(x - SKI_CAFE.x) - cafePadHalfW);
+      const dz = Math.max(0, Math.abs(z - SKI_CAFE.z) - cafePadHalfD);
+      const t = Math.max(0, 1 - Math.sqrt(dx * dx + dz * dz) / cafePadMargin);
+      const flatten = t * t * (3 - 2 * t);
+      return natural * (1 - flatten) + cafeFlatHeight * flatten;
+    };
     hemi.color.set(0xeaf6ff); hemi.groundColor.set(0xc7d6d2); hemi.intensity = 1.3;
     sun.color.set(0xfff7e8); sun.intensity = 1.7;
     fillLight.intensity = 0.6; scene.fog.color.set(0xdfeef4); scene.fog.density = 0.0011;
@@ -5765,7 +5781,7 @@ function updatePlayer(dt){
   if (moving) {
     player.footstepTimer -= dt;
     if (player.footstepTimer <= 0) {
-      audio.footstep();
+      if (selectedMap === 'ski') { if (!audio.playSample('snowStep', 0.28)) audio.footstep(); } else audio.footstep();
       player.footstepTimer = sprinting ? 0.28 : (player.crouching ? 0.55 : 0.4);
     }
   } else {
