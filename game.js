@@ -32,6 +32,7 @@ import { COUNTRY_LIST, flagEmoji } from './ladder.js';
 import { seededRandom, createReflectionEnvironment, addWorldDetail, refineWorldMaterials } from './world-art.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { SPRAYS, CHAT_COOLDOWN, SPRAY_COOLDOWN, SPRAY_RANGE, cleanText, validSpray, withinSprayRange, SocialRateLimiter } from './social-protocol.js';
+import { findOrQueue, leaveQueue } from './matchmaking.js';
 
 // ============================================================
 // AUDIO ENGINE (fully synthesized with Web Audio API - no files)
@@ -4998,6 +4999,7 @@ async function hostRoom(teamSize){
       if (isFfa()) syncFfaBots();
       document.getElementById('pvpStatus').textContent = `${netRoster.length} player(s) connected`;
       broadcastRoster();
+      if (matchmakingActive) stopMatchmaking(); // someone actually joined - the search succeeded
       if (!isFfa() && roundState.phase === 'warmup' && !warmupDroppedToShort && netRoster.filter(p => !p.isBot).length >= 2) {
         warmupDroppedToShort = true;
         warmupTimer = Math.min(warmupTimer, WARMUP_SHORT);
@@ -5063,6 +5065,73 @@ async function joinRoom(code){
       ? 'Room not found - check the code and try again.'
       : 'Network error: ' + err.type;
   });
+}
+
+// ---------- Global "Find Match" ----------
+// Every searching player becomes a host (see hostRoom) so it has a real, connectable peer id to
+// either advertise (if it ends up waiting) or hand over (if it immediately finds someone else
+// already waiting). findOrQueue() (matchmaking.js) does the actual pairing server-side.
+let matchmakingActive = false, matchmakingRetryTimer = null, matchmakingPeerId = null;
+function waitForOwnPeerId(){
+  return new Promise(resolve => {
+    (function poll(){ netMyId ? resolve(netMyId) : setTimeout(poll, 50); })();
+  });
+}
+async function attemptMatch(){
+  let opponentId;
+  try {
+    opponentId = await findOrQueue(matchmakingPeerId, selectedRuleset, netTeamSize);
+  } catch (err) {
+    document.getElementById('pvpStatus').textContent = 'Matchmaking unavailable: ' + (err.message || err);
+    stopMatchmaking();
+    return;
+  }
+  if (!matchmakingActive) return; // cancelled while the request was in flight
+  if (opponentId) {
+    // someone was already waiting - abandon our own (never-advertised) host peer and join theirs
+    // instead, through the exact same path a manual room-code join uses.
+    const hostPeer = netPeer;
+    matchmakingActive = false;
+    netRole = null; netPeer = null; netMyId = null; netHostConn = null; netClientConns = {};
+    hostPeer.destroy();
+    document.getElementById('pvpStatus').textContent = 'Match found - connecting...';
+    joinRoom(opponentId.replace(/^lr-/, ''));
+    return;
+  }
+  document.getElementById('pvpStatus').textContent = 'Searching for an opponent... you\'ll connect automatically once matched.';
+  matchmakingRetryTimer = setTimeout(attemptMatch, 20000); // re-check periodically in case of a rare double-miss, and to keep our queue row from expiring
+}
+async function startMatchmaking(){
+  if (matchmakingActive) return;
+  matchmakingActive = true;
+  document.getElementById('pvpFindMatchBtn').disabled = true;
+  document.getElementById('pvpFindMatchBtn').style.display = 'none';
+  document.getElementById('pvpCancelMatchBtn').style.display = 'block';
+  document.getElementById('pvpStatus').textContent = 'Setting up...';
+  await hostRoom(netTeamSize);
+  matchmakingPeerId = await waitForOwnPeerId();
+  if (!matchmakingActive) return; // cancelled while waiting for the peer id
+  document.getElementById('pvpRoomLink').style.display = 'none'; // matchmaking never shows a shareable link
+  attemptMatch();
+}
+// called both on an explicit cancel and once a real opponent actually connects (see hostRoom) -
+// the difference is only whether we tear down the host peer we've been advertising.
+function stopMatchmaking(){
+  matchmakingActive = false;
+  clearTimeout(matchmakingRetryTimer);
+  if (matchmakingPeerId) leaveQueue(matchmakingPeerId);
+  matchmakingPeerId = null;
+  document.getElementById('pvpFindMatchBtn').disabled = false;
+  document.getElementById('pvpFindMatchBtn').style.display = 'block';
+  document.getElementById('pvpCancelMatchBtn').style.display = 'none';
+}
+function cancelMatchmaking(){
+  if (!matchmakingActive) return;
+  const hostPeer = netPeer;
+  stopMatchmaking();
+  netRole = null; netPeer = null; netMyId = null; netHostConn = null; netClientConns = {};
+  hostPeer?.destroy();
+  document.getElementById('pvpStatus').textContent = '';
 }
 
 function broadcastRoster(){
@@ -6894,11 +6963,16 @@ document.getElementById('ffaTimeLimitSelect').addEventListener('change', e => {
 
 document.querySelectorAll('.pvpChoiceBtn').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (matchmakingActive) cancelMatchmaking();
     document.querySelectorAll('.pvpChoiceBtn').forEach(b => b.classList.remove('selected'));
     btn.classList.add('selected');
-    const joining = btn.dataset.choice === 'join';
-    document.getElementById('pvpHostSection').style.display = joining ? 'none' : 'flex';
+    const choice = btn.dataset.choice; // 'matchmaking' | 'host' | 'join'
+    const joining = choice === 'join';
+    document.getElementById('pvpMatchmakingSection').style.display = choice === 'matchmaking' ? 'flex' : 'none';
+    document.getElementById('pvpHostSection').style.display = choice === 'host' ? 'flex' : 'none';
     document.getElementById('pvpJoinSection').style.display = joining ? 'flex' : 'none';
+    document.getElementById('pvpTeamSize').style.display = joining ? 'none' : 'flex';
+    document.getElementById('ffaOptions').hidden = joining || !isFfa();
     // a joiner never picks a map/mode themselves - they inherit whatever the host is running,
     // so hide the pickers entirely rather than leave controls on screen that don't do anything for them
     document.getElementById('mapSelect').style.display = joining ? 'none' : 'flex';
@@ -6959,6 +7033,8 @@ document.getElementById('pvpJoinBtn').addEventListener('click', () => {
   const code = document.getElementById('pvpJoinCode').value;
   if (code.trim()) { document.getElementById('pvpStatus').textContent = 'Setting up...'; joinRoom(code); }
 });
+document.getElementById('pvpFindMatchBtn').addEventListener('click', startMatchmaking);
+document.getElementById('pvpCancelMatchBtn').addEventListener('click', cancelMatchmaking);
 document.getElementById('pvpIdentityAccountBtn').addEventListener('click', () => {
   document.getElementById('accountButton').click();
 });
@@ -6981,8 +7057,11 @@ document.getElementById('pvpCopyLinkBtn').addEventListener('click', async () => 
   if (!room) return;
   history.replaceState(null, '', location.pathname); // don't re-trigger this on a later refresh
   document.querySelectorAll('.pvpChoiceBtn').forEach(b => b.classList.toggle('selected', b.dataset.choice === 'join'));
+  document.getElementById('pvpMatchmakingSection').style.display = 'none';
   document.getElementById('pvpHostSection').style.display = 'none';
   document.getElementById('pvpJoinSection').style.display = 'flex';
+  document.getElementById('pvpTeamSize').style.display = 'none';
+  document.getElementById('ffaOptions').hidden = true;
   document.getElementById('mapSelect').style.display = 'none';
   document.getElementById('modeSelect').style.display = 'none';
   selectedMap = 'arena'; selectedMode = 'pvp'; mapChosen = true;

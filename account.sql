@@ -62,3 +62,71 @@ alter table public.ladder_entries add constraint ladder_entries_clan_check check
 -- now keeps its own equipped finish - see WEAPON_SKIN_IDS/applyEquippedSkin in game.js). Purely
 -- additive: the old "equippedSkin" column is left in place, unused, rather than dropped.
 alter table public.player_profiles add column if not exists "equippedSkins" jsonb not null default '{}'::jsonb;
+
+-- Migration 5: global "Find Match" queue (see matchmaking.js). Deliberately keyed by PeerJS peer
+-- id, not by auth.uid() - matchmaking has to work for guests too, the same way room-code PvP
+-- already does without requiring an account. All access goes through the two SECURITY DEFINER
+-- functions below, so the table itself grants nothing directly to anon/authenticated - there's no
+-- RLS policy to write because there's no direct table access to allow in the first place.
+create table public.matchmaking_queue (
+  peer_id text primary key check (char_length(peer_id) between 1 and 64),
+  ruleset text not null check (ruleset in ('standard','knife','ffa')),
+  team_size integer not null default 1 check (team_size in (1,2)),
+  matched_peer_id text,
+  created_at timestamptz not null default now()
+);
+alter table public.matchmaking_queue enable row level security;
+revoke all on public.matchmaking_queue from anon, authenticated;
+
+-- Looks for someone already waiting with the same ruleset/team size and claims them atomically
+-- (for update skip locked keeps two simultaneous callers from claiming the same opponent). Found:
+-- marks that row matched (so its own owner's next find_or_queue call notices and switches to
+-- joining someone else, in the rare case they'd also just started a fresh search), drops the
+-- caller's own row (a joiner never needs to be found by anyone else) and returns the opponent's
+-- peer id. Nobody waiting: queues the caller and returns null - the caller keeps hosting and
+-- discovers it's been joined the normal way, through its own PeerJS 'connection' event, not by
+-- polling this table.
+create or replace function public.find_or_queue(p_peer_id text, p_ruleset text, p_team_size integer)
+returns text
+language plpgsql security definer set search_path = public as $$
+declare
+  opponent_id text;
+begin
+  if p_peer_id is null or length(p_peer_id) = 0 or length(p_peer_id) > 64 then
+    raise exception 'invalid peer id';
+  end if;
+  if p_ruleset not in ('standard','knife','ffa') then raise exception 'invalid ruleset'; end if;
+  if p_team_size not in (1,2) then raise exception 'invalid team size'; end if;
+
+  -- opportunistic cleanup of anyone who's been sitting for a while (gave up, closed the tab,
+  -- crashed) - self-healing, needs no cron job for a queue this small.
+  delete from public.matchmaking_queue where created_at < now() - interval '90 seconds';
+
+  select peer_id into opponent_id from public.matchmaking_queue
+    where ruleset = p_ruleset and team_size = p_team_size and matched_peer_id is null and peer_id <> p_peer_id
+    order by created_at asc
+    for update skip locked
+    limit 1;
+
+  if opponent_id is not null then
+    update public.matchmaking_queue set matched_peer_id = p_peer_id where peer_id = opponent_id;
+    delete from public.matchmaking_queue where peer_id = p_peer_id;
+    return opponent_id;
+  end if;
+
+  insert into public.matchmaking_queue (peer_id, ruleset, team_size)
+    values (p_peer_id, p_ruleset, p_team_size)
+    on conflict (peer_id) do update set ruleset = excluded.ruleset, team_size = excluded.team_size,
+      matched_peer_id = null, created_at = now();
+  return null;
+end;
+$$;
+
+create or replace function public.leave_queue(p_peer_id text)
+returns void
+language sql security definer set search_path = public as $$
+  delete from public.matchmaking_queue where peer_id = p_peer_id;
+$$;
+
+grant execute on function public.find_or_queue(text, text, integer) to anon, authenticated;
+grant execute on function public.leave_queue(text) to anon, authenticated;

@@ -236,7 +236,7 @@
      glow and radius language everywhere now instead of the plain 2px-flat-border 2024 look. */
   #startScreen{padding-bottom:70px;}
   .mapCard .swatch{height:118px;border-radius:6px;box-shadow:inset 0 -28px 26px -14px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.06);}
-  #pvpIdentityHint button,.pvpChoiceBtn,.teamSizeBtn,#pvpHostBtn,#pvpJoinBtn,#pvpCopyLinkBtn{
+  #pvpIdentityHint button,.pvpChoiceBtn,.teamSizeBtn,#pvpHostBtn,#pvpJoinBtn,#pvpCopyLinkBtn,#pvpFindMatchBtn,#pvpCancelMatchBtn{
     border-radius:7px;font-family:Inter,'Segoe UI',sans-serif;font-weight:700;letter-spacing:1.6px;
     text-transform:uppercase;cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s,background .15s,filter .15s;
   }
@@ -246,17 +246,21 @@
     border-color:#ff5145;color:#fff;background:linear-gradient(135deg,rgba(91,25,22,.92),rgba(28,14,15,.94));
     box-shadow:0 0 22px rgba(229,71,60,.2),inset 0 1px rgba(255,150,140,.14);
   }
-  #pvpHostBtn,#pvpJoinBtn{
+  #pvpHostBtn,#pvpJoinBtn,#pvpFindMatchBtn{
     padding:14px 30px;font-size:12px;border:none;color:#fff;font-family:'Baserona','Arial Narrow',sans-serif;font-weight:800;letter-spacing:2.5px;
     background:linear-gradient(135deg,#e9473c,#8c1816);box-shadow:0 12px 28px rgba(197,38,31,.26),inset 0 1px rgba(255,255,255,.28);
   }
-  #pvpHostBtn:hover,#pvpJoinBtn:hover{transform:translateY(-2px);filter:brightness(1.12);box-shadow:0 16px 36px rgba(197,38,31,.38),inset 0 1px rgba(255,255,255,.32);}
+  #pvpHostBtn:hover,#pvpJoinBtn:hover,#pvpFindMatchBtn:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.12);box-shadow:0 16px 36px rgba(197,38,31,.38),inset 0 1px rgba(255,255,255,.32);}
+  #pvpFindMatchBtn:disabled{opacity:.6;cursor:default;transform:none;filter:none;}
+  #pvpCancelMatchBtn{padding:10px 20px;font-size:10px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.04);color:#d7dbdd;}
+  #pvpCancelMatchBtn:hover{border-color:rgba(255,105,91,.55);color:#fff;}
   #pvpCopyLinkBtn{padding:11px 18px;font-size:10px;border:1px solid rgba(215,182,108,.5);background:rgba(215,182,108,.08);color:#e9d9a8;}
   #pvpCopyLinkBtn:hover{background:rgba(215,182,108,.16);border-color:#d7b66c;}
   #pvpIdentityAccountBtn{border:none;background:none;color:#ff8f85;letter-spacing:1px;text-transform:none;font-size:11px;padding:0;text-decoration:underline;text-underline-offset:2px;}
   #pvpJoinCode,#pvpRoomLinkInput{border-radius:7px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.4);color:#e7e9eb;padding:12px 14px;font-size:12px;letter-spacing:2px;}
   #pvpJoinCode:focus,#pvpRoomLinkInput:focus{outline:none;border-color:rgba(255,105,91,.6);}
   #pvpEntryChoice,#pvpTeamSize{gap:12px;}
+  #pvpMatchmakingSection{display:flex;flex-direction:column;align-items:center;gap:10px;}
 
   /* ===== Landing v3: edge-docked HUD layout (profile/promo rail, mode rail, centre stage for
      the map carousel) instead of one narrow centered column, closer to a console shooter's menu
@@ -399,33 +403,38 @@
     <div id="pvpIdentityDisplay"></div>
     <p id="pvpIdentityHint">Playing as - change your gametag, clan or flag in <button id="pvpIdentityAccountBtn" type="button">ACCOUNT</button></p>
     <div id="pvpEntryChoice">
+      <button class="pvpChoiceBtn" data-choice="matchmaking">FIND MATCH</button>
       <button class="pvpChoiceBtn selected" data-choice="host">HOST A GAME</button>
       <button class="pvpChoiceBtn" data-choice="join">JOIN WITH CODE</button>
     </div>
+    <div id="pvpTeamSize">
+      <button class="teamSizeBtn selected" data-size="1">1v1</button>
+      <button class="teamSizeBtn" data-size="2">2v2</button>
+    </div>
+    <div id="ffaOptions" hidden>
+      <label>KILL LIMIT
+        <select id="ffaKillGoalSelect">
+          <option value="5">5 KILLS</option>
+          <option value="15">15 KILLS</option>
+          <option value="30" selected>30 KILLS</option>
+          <option value="50">50 KILLS</option>
+          <option value="0">UNLIMITED</option>
+        </select>
+      </label>
+      <label>TIME LIMIT
+        <select id="ffaTimeLimitSelect">
+          <option value="300">5 MIN</option>
+          <option value="600" selected>10 MIN</option>
+          <option value="900">15 MIN</option>
+          <option value="0">UNLIMITED</option>
+        </select>
+      </label>
+    </div>
+    <div id="pvpMatchmakingSection" style="display:none;">
+      <button id="pvpFindMatchBtn">SEARCH FOR MATCH</button>
+      <button id="pvpCancelMatchBtn" style="display:none;">CANCEL SEARCH</button>
+    </div>
     <div id="pvpHostSection">
-      <div id="pvpTeamSize">
-        <button class="teamSizeBtn selected" data-size="1">1v1</button>
-        <button class="teamSizeBtn" data-size="2">2v2</button>
-      </div>
-      <div id="ffaOptions" hidden>
-        <label>KILL LIMIT
-          <select id="ffaKillGoalSelect">
-            <option value="5">5 KILLS</option>
-            <option value="15">15 KILLS</option>
-            <option value="30" selected>30 KILLS</option>
-            <option value="50">50 KILLS</option>
-            <option value="0">UNLIMITED</option>
-          </select>
-        </label>
-        <label>TIME LIMIT
-          <select id="ffaTimeLimitSelect">
-            <option value="300">5 MIN</option>
-            <option value="600" selected>10 MIN</option>
-            <option value="900">15 MIN</option>
-            <option value="0">UNLIMITED</option>
-          </select>
-        </label>
-      </div>
       <button id="pvpHostBtn">CREATE ROOM</button>
       <div id="pvpRoomLink">
         <input id="pvpRoomLinkInput" readonly>
