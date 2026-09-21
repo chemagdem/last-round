@@ -4796,8 +4796,8 @@ function sampleKillcamPath(path, elapsedMs){
     yaw: a.yaw + yawDiff * lt, pitch: THREE.MathUtils.lerp(a.pitch || 0, b.pitch || 0, lt)
   };
 }
-const KILLCAM_WINDOW_MS = 5000, RANKING_DURATION = 5;
-let killcamActive = false, killcamT = 0, killcamDone = null, killcamWeaponVisual = null;
+const KILLCAM_WINDOW_MS = 5000, RANKING_DURATION = 5, KILLCAM_TAIL_MS = 550;
+let killcamActive = false, killcamT = 0, killcamDone = null, killcamWeaponVisual = null, killcamShotFired = false;
 let killcamPath = null, killcamSpanMs = 0, killcamWorldPaths = null;
 function playKillcam(onDone){
   const kill = lastFfaKill;
@@ -4807,9 +4807,16 @@ function playKillcam(onDone){
   if (killcamPath.length < 2) killcamPath = fullPath.slice(-2);
   if (!kill || killcamPath.length < 2) { onDone(); return; } // not enough recorded history (edge case) - straight to results
   killcamSpanMs = Math.max(1, killcamPath.at(-1).t - killcamPath[0].t);
+  killcamShotFired = false;
   // replay every other tracked actor over the same window so the world matches what the camera is
   // seeing (the victim actually being there and going down, not a frozen corpse for 5 seconds) -
   // their true frozen pose is cached first so it can be restored exactly once the replay ends.
+  // recordKillcamFrame() stops recording an actor the instant they die, so an actor's own history
+  // can run out before the killer's does - past that point they're shown snapped to their real,
+  // already-fallen pose (see updateKillcam) rather than the earlier upright/moving one, which is
+  // what actually caused the "corpse sliding across the ground" bug: only rotation.y was replayed,
+  // so a moving (pre-death) position kept getting combined with the death animation's already-set
+  // fall tilt on rotation.x/z from a previous frame.
   killcamWorldPaths = new Map();
   for (const [id, hist] of killcamHistory) {
     if (id === kill.killerId) continue;
@@ -4819,6 +4826,8 @@ function playKillcam(onDone){
     if (arr.length < 2) continue;
     avatar._killcamRealPos = avatar.mesh.position.clone();
     avatar._killcamRealYaw = avatar.mesh.rotation.y;
+    avatar._killcamRealRotX = avatar.mesh.rotation.x;
+    avatar._killcamRealRotZ = avatar.mesh.rotation.z;
     killcamWorldPaths.set(id, arr);
   }
   killcamT = 0; killcamActive = true; killcamDone = onDone;
@@ -4834,10 +4843,30 @@ function playKillcam(onDone){
   document.getElementById('killcamLabel').innerHTML = `<span class="killcamEyebrow">KILLCAM</span>${killcamName(kill.killerId)} ELIMINATED ${killcamName(kill.victimId)} · ${kill.weaponName.toUpperCase()}${kill.headshot ? ' · HEADSHOT' : ''}`;
   document.getElementById('killcamOverlay').classList.add('show');
 }
+// muzzle flash + kick + shot sound, played once at the exact instant the replay reaches the kill -
+// flashLight/flashSprite are already re-parented onto killcamWeaponVisual.group by the
+// buildWeaponVisual() call in playKillcam, same as equipping any weapon normally does.
+function fireKillcamShot(){
+  if (!killcamWeaponVisual) return;
+  flashLight.intensity = 5;
+  flashSpriteMat.opacity = 1;
+  const size = 0.5 + Math.random() * 0.2;
+  flashSprite.scale.set(size, size, 1);
+  setTimeout(() => { flashLight.intensity = 0; flashSpriteMat.opacity = 0; }, 45);
+  spawnMuzzleSmoke(false);
+  spawnShellCasing();
+  killcamWeaponVisual.group.position.z += 0.08;
+  killcamWeaponVisual.group.rotation.x += 0.09;
+  const weaponId = weaponIdFromName(lastFfaKill.weaponName);
+  const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
+  if (!weaponId || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId] || {});
+}
 function updateKillcam(dt){
   killcamT += dt;
-  const elapsedMs = Math.min(killcamT * 1000, killcamSpanMs);
-  const pose = sampleKillcamPath(killcamPath, elapsedMs);
+  const totalMs = killcamSpanMs + KILLCAM_TAIL_MS;
+  const elapsedMs = Math.min(killcamT * 1000, totalMs);
+  const pathElapsed = Math.min(elapsedMs, killcamSpanMs);
+  const pose = sampleKillcamPath(killcamPath, pathElapsed);
   camera.position.set(pose.x, pose.y, pose.z);
   camera.rotation.order = 'YXZ';
   camera.rotation.y = pose.yaw;
@@ -4845,15 +4874,29 @@ function updateKillcam(dt){
   for (const [id, arr] of killcamWorldPaths) {
     const avatar = enemies.find(e => e.netId === id);
     if (!avatar) continue;
-    const s = sampleKillcamPath(arr, Math.min(elapsedMs, arr.at(-1).t - arr[0].t));
+    const arrSpan = arr.at(-1).t - arr[0].t;
+    const s = sampleKillcamPath(arr, Math.min(pathElapsed, arrSpan));
     avatar.mesh.position.set(s.x, s.y - player.height, s.z); // recorded y was eye height - back to feet
     avatar.mesh.rotation.y = s.yaw;
+    if (pathElapsed >= arrSpan) {
+      // this actor's own recorded history ran out before the killer's did - they're already dead
+      // at this point in the replay, so show their real (fallen) tilt instead of standing upright
+      avatar.mesh.rotation.x = avatar._killcamRealRotX;
+      avatar.mesh.rotation.z = avatar._killcamRealRotZ;
+    } else {
+      avatar.mesh.rotation.x = 0;
+      avatar.mesh.rotation.z = 0;
+    }
   }
-  if (elapsedMs >= killcamSpanMs) {
+  if (!killcamShotFired && elapsedMs >= killcamSpanMs) { killcamShotFired = true; fireKillcamShot(); }
+  if (elapsedMs >= totalMs) {
     killcamActive = false;
     for (const [id] of killcamWorldPaths) {
       const avatar = enemies.find(e => e.netId === id);
-      if (avatar) { avatar.mesh.position.copy(avatar._killcamRealPos); avatar.mesh.rotation.y = avatar._killcamRealYaw; }
+      if (avatar) {
+        avatar.mesh.position.copy(avatar._killcamRealPos);
+        avatar.mesh.rotation.set(avatar._killcamRealRotX, avatar._killcamRealYaw, avatar._killcamRealRotZ);
+      }
     }
     if (killcamWeaponVisual) { weaponGroup.remove(killcamWeaponVisual.group); killcamWeaponVisual = null; }
     if (currentVisual) currentVisual.group.visible = true;
