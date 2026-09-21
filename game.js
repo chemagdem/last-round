@@ -1907,7 +1907,8 @@ const luxuryTexture = loadTiledTexture('assets/luxury_skin.png', 1.4, 1.4);
 const pinkSiberianTexture = loadTiledTexture('assets/pink_siberian.png', 3, 3);
 const greekGodsTexture = loadTiledTexture('assets/greek.png', 1.4, 1.4);
 const founderTexture = loadTiledTexture('assets/founder.png', 1.4, 1.4);
-let founderEntitled = false;
+const samuraiTexture = loadTiledTexture('assets/samurai.png', 1.4, 1.4);
+let founderEntitled = false; 
 let founderStatus = 'FOUNDER ACCESS: SIGN IN REQUIRED';
 const SKIN_CATALOG = {
   founder: { name: 'First Light · 001', meta: 'FOUNDER EXCLUSIVE · Obsidian / gold inlay', preview: 'founder', color: 0xffffff, roughness: 0.3, metalness: 0.82 },
@@ -1916,7 +1917,8 @@ const SKIN_CATALOG = {
   crimson: { name: 'Crimson Core', meta: 'Red alloy · prototype finish', preview: 'crimson', owned: true, color: 0xd23a32, roughness: 0.34, metalness: 0.84 },
   luxury: { name: 'Luxury', meta: 'Black & gold marble finish', preview: 'luxury', owned: true, color: 0xffffff, roughness: 0.2, metalness: 0.5 },
   pinkSiberian: { name: 'Pink Siberian', meta: 'Pink digital camo · matte finish', preview: 'pinkSiberian', owned: true, color: 0xffffff, roughness: 0.55, metalness: 0.12 },
-  greekGods: { name: 'Greek Gods', meta: 'Mythical bronze · divine finish', preview: 'greekGods', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.8 }
+  greekGods: { name: 'Greek Gods', meta: 'Mythical bronze · divine finish', preview: 'greekGods', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.8 },
+  samurai: { name: 'Samurai', meta: 'ULTRA RARE · Koi / Sakura / Gold', preview: 'samurai', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.8 }
 };
 const PROFILE_STORAGE_KEY = 'lastRoundProfile';
 let cloudAccount = null;
@@ -1948,7 +1950,7 @@ function applyEquippedSkin(){
   const skin = SKIN_CATALOG[playerProfile.equippedSkin] || SKIN_CATALOG.gold;
   goldWeaponMat.map = skin.preview === 'founder' ? founderTexture : skin.preview === 'gold' ? goldTexture
     : skin.preview === 'luxury' ? luxuryTexture : skin.preview === 'pinkSiberian' ? pinkSiberianTexture
-    : skin.preview === 'greekGods' ? greekGodsTexture : null;
+    : skin.preview === 'greekGods' ? greekGodsTexture : skin.preview === 'samurai' ? samuraiTexture : null;
   goldWeaponMat.clearcoat = skin.preview === 'founder' ? 0.4 : 0;
   goldWeaponMat.clearcoatRoughness = 0.26;
   goldWeaponMat.color.setHex(skin.color);
