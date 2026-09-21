@@ -18,8 +18,8 @@ Open `http://localhost:8080` in a Chromium-based browser. Use two browser profil
 | --- | --- |
 | Move | W / A / S / D |
 | Jump | Space |
-| Crouch | Shift |
-| Sprint | Ctrl |
+| Crouch (toggle) | Ctrl |
+| Sprint | Shift |
 | Fire / aim | Left / right mouse |
 | Reload | R |
 | Shop | B |

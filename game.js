@@ -1749,6 +1749,7 @@ const player = {
 };
 const movementVelocity = new THREE.Vector3();
 let jumpWasDown = false;
+let crouchWasDown = false;
 camera.position.copy(player.pos);
 camera.fov = baseFov;
 
@@ -5297,7 +5298,10 @@ function updatePlayer(dt){
   let speed = player.speed;
   const sprinting = !!keys[settings.binds.sprint] && !player.ads;
   if (sprinting) speed *= player.sprintMul;
-  player.crouching = !!keys[settings.binds.crouch];
+  // toggle, not hold - press once to crouch, press again to stand back up
+  const crouchDown = !!keys[settings.binds.crouch];
+  if (crouchDown && !crouchWasDown) player.crouching = !player.crouching;
+  crouchWasDown = crouchDown;
   if (player.crouching) speed *= player.crouchMul;
   if (player.ads) speed *= 0.6;
 
