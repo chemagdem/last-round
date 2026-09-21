@@ -3910,7 +3910,7 @@ function animateSoldierRig(mesh, dt, speed, crouching = false){
   rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0) + crouch * 0.12;
 }
 
-const BOT_NAMES = ['Tom', 'Mike', 'Matt', 'Jason', 'Jon', 'Chris', 'Steve', 'Alex', 'Dave', 'Nick'];
+const BOT_NAMES = ['Hani', 'Augusto', 'Tiago', 'Mathew', 'Sam', 'Marco', 'Shemeem', 'Aleef', 'Pablo', 'Chema'];
 
 function spawnEnemy(spawnPos){
   const mesh = makeEnemySoldier();
@@ -4515,7 +4515,7 @@ function syncFfaBots(){
   }
   while(ffaState.bots.size<desired){
     const id=`ffa-bot-${++ffaState.serial}`;
-    netRoster.push({id,team:id,isBot:true,ready:true,name:`BOT ${['Mako','Vega','Rook','Nyx','Cinder','Echo'][ffaState.serial%6]}`});
+    netRoster.push({id,team:id,isBot:true,ready:true,name:`BOT ${['Augusto','Hani','Mathew','Tiago','Shemeem','Luna'][ffaState.serial%6]}`});
     const bot=getOrCreateRemoteAvatar(id,id);bot.isBot=true;bot.speed=4.3;bot.weaponId='m4a1';
     ffaState.bots.set(id,bot);resetFfaBot(bot);changed=true;
   }
