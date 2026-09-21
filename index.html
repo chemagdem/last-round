@@ -207,6 +207,10 @@
   #inventoryHeader p{margin:6px 0 0;color:#929ba1;font:11px/1.4 Inter,'Segoe UI',sans-serif;letter-spacing:.5px;}
   #closeInventory{padding:7px 11px;color:#aeb5ba;background:transparent;border:1px solid rgba(255,255,255,.2);cursor:pointer;font:700 10px/1 Inter,'Segoe UI',sans-serif;letter-spacing:1px;}
   #closeInventory:hover{color:#fff;border-color:#e5473c;}
+  #weaponTabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;}
+  .weaponTab{padding:9px 16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14);border-radius:6px;color:#aeb5ba;cursor:pointer;font:700 11px/1 Inter,'Segoe UI',sans-serif;letter-spacing:1.2px;text-transform:uppercase;transition:border-color .15s,background .15s,color .15s;}
+  .weaponTab:hover{border-color:rgba(215,182,108,.5);color:#e7e9eb;}
+  .weaponTab.active{border-color:#d7b66c;background:rgba(215,182,108,.14);color:#f0f2f3;box-shadow:0 0 16px rgba(215,182,108,.14);}
   #inventoryGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;text-align:left;}
   .skinCard{position:relative;min-height:145px;padding:14px;overflow:hidden;background:linear-gradient(145deg,rgba(255,255,255,.06),rgba(255,255,255,.015));border:1px solid rgba(255,255,255,.13);cursor:pointer;transition:transform .15s,border-color .15s,box-shadow .15s;}
   .skinCard:hover{transform:translateY(-3px);border-color:rgba(215,182,108,.65);}
@@ -424,9 +428,10 @@
 <div id="inventoryModal" role="dialog" aria-modal="true" aria-labelledby="inventoryTitle">
   <section id="inventoryPanel">
     <div id="inventoryHeader">
-      <div><h3 id="inventoryTitle">INVENTORY</h3><p>Equip a weapon finish. Your selection is saved on this device.</p></div>
+      <div><h3 id="inventoryTitle">INVENTORY</h3><p>Equip a finish per weapon. Your selections are saved on this device.</p></div>
       <button id="closeInventory" type="button">CLOSE ×</button>
     </div>
+    <div id="weaponTabs"></div>
     <div id="inventoryGrid"></div>
   </section>
 </div>
@@ -611,6 +616,6 @@
 }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script type="module" src="game.js"></script>
+<script type="module" src="game.js?cachebust2"></script>
 </body>
 </html>

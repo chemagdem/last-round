@@ -1969,15 +1969,28 @@ const SKIN_CATALOG = {
 const PROFILE_STORAGE_KEY = 'lastRoundProfile';
 let cloudAccount = null;
 let cloudProfileActive = false;
-const DEFAULT_PROFILE = { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0, equippedSkin: 'gold' };
+// Every gun that builds its skinnable parts from a material (see buildWeaponVisual) gets its own
+// equipped skin instead of one finish shared across the whole armory.
+// Only the guns whose model actually builds skinnable parts from a shared material in
+// buildWeaponVisual's switch - knife/grenade/smoke/flash are utility items with no finish to equip.
+const WEAPON_SKIN_IDS = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp'];
+const DEFAULT_PROFILE = { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0,
+  equippedSkins: Object.fromEntries(WEAPON_SKIN_IDS.map(id => [id, 'gold'])) };
 // Founder entitlement comes from the authenticated database RPC, never guest storage.
 let playerProfile = { ...DEFAULT_PROFILE };
 try {
   const savedProfile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
   if (savedProfile && typeof savedProfile === 'object') playerProfile = { ...DEFAULT_PROFILE, ...savedProfile };
 } catch (err) { /* local storage can be disabled in private browsing */ }
+// Migrate the old single shared-skin field (and backfill any weapon a save is missing) into the
+// new per-weapon map - everything used to equip whatever that one field named.
+if (!playerProfile.equippedSkins || typeof playerProfile.equippedSkins !== 'object') playerProfile.equippedSkins = {};
+{
+  const legacy = SKIN_CATALOG[playerProfile.equippedSkin] ? playerProfile.equippedSkin : 'gold';
+  for (const id of WEAPON_SKIN_IDS) if (!SKIN_CATALOG[playerProfile.equippedSkins[id]]) playerProfile.equippedSkins[id] = legacy;
+}
+delete playerProfile.equippedSkin;
 playerProfile.isFounder = false;
-if (!SKIN_CATALOG[playerProfile.equippedSkin] || playerProfile.equippedSkin === 'founder') playerProfile.equippedSkin = 'gold';
 function savePlayerProfile(){
   if (!cloudProfileActive) {
     try { localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(playerProfile)); } catch (err) { /* keep this session usable */ }
@@ -1991,26 +2004,43 @@ function profileRank(rating){
   if (rating >= 1000) return 'ROOKIE';
   return 'RECRUIT';
 }
-function applyEquippedSkin(){
-  if (playerProfile.equippedSkin === 'founder' && !founderEntitled) playerProfile.equippedSkin = 'gold';
-  const skin = SKIN_CATALOG[playerProfile.equippedSkin] || SKIN_CATALOG.gold;
-  goldWeaponMat.map = skin.preview === 'founder' ? founderTexture : skin.preview === 'gold' ? goldTexture
-    : skin.preview === 'luxury' ? luxuryTexture : skin.preview === 'pinkSiberian' ? pinkSiberianTexture
-    : skin.preview === 'greekGods' ? greekGodsTexture : skin.preview === 'samurai' ? samuraiTexture : null;
-  goldWeaponMat.clearcoat = skin.preview === 'founder' ? 0.4 : 0;
-  goldWeaponMat.clearcoatRoughness = 0.26;
-  goldWeaponMat.color.setHex(skin.color);
-  goldWeaponMat.roughness = skin.roughness;
-  goldWeaponMat.metalness = skin.metalness;
-  goldWeaponMat.needsUpdate = true;
-  // The AWP's chassis/handguard/cheek riser use their own material (distinct bump map for the
-  // polymer-stock look) instead of goldWeaponMat, so they need the same skin values copied over
-  // by hand or they stay stuck on the default camo regardless of equipped skin.
-  awpStockMat.map = goldWeaponMat.map;
-  awpStockMat.color.copy(goldWeaponMat.color);
-  awpStockMat.roughness = skin.roughness;
-  awpStockMat.metalness = skin.metalness;
-  awpStockMat.needsUpdate = true;
+// Each gun gets its own clone of the shared template material instead of every weapon fighting
+// over one mutable goldWeaponMat, so equipping a finish on the AK-47 no longer reskins the AWP too.
+const weaponSkinMats = {};
+function weaponSkinMat(id){
+  if (!weaponSkinMats[id]) weaponSkinMats[id] = goldWeaponMat.clone();
+  return weaponSkinMats[id];
+}
+function skinTexture(preview){
+  return preview === 'founder' ? founderTexture : preview === 'gold' ? goldTexture
+    : preview === 'luxury' ? luxuryTexture : preview === 'pinkSiberian' ? pinkSiberianTexture
+    : preview === 'greekGods' ? greekGodsTexture : preview === 'samurai' ? samuraiTexture : null;
+}
+// weaponId: re-apply just that weapon's stored skin (e.g. right after equipping it in the
+// inventory). Omitted: re-apply every weapon's - used once at startup.
+function applyEquippedSkin(weaponId){
+  for (const id of weaponId ? [weaponId] : WEAPON_SKIN_IDS) {
+    if (playerProfile.equippedSkins[id] === 'founder' && !founderEntitled) playerProfile.equippedSkins[id] = 'gold';
+    const skin = SKIN_CATALOG[playerProfile.equippedSkins[id]] || SKIN_CATALOG.gold;
+    const mat = weaponSkinMat(id);
+    mat.map = skinTexture(skin.preview);
+    mat.clearcoat = skin.preview === 'founder' ? 0.4 : 0;
+    mat.clearcoatRoughness = 0.26;
+    mat.color.setHex(skin.color);
+    mat.roughness = skin.roughness;
+    mat.metalness = skin.metalness;
+    mat.needsUpdate = true;
+    // The AWP's chassis/handguard/cheek riser use their own material (distinct bump map for the
+    // polymer-stock look) instead of its skin material, so they need the same values copied over
+    // by hand or they stay stuck on the default camo regardless of the AWP's equipped skin.
+    if (id === 'awp') {
+      awpStockMat.map = mat.map;
+      awpStockMat.color.copy(mat.color);
+      awpStockMat.roughness = skin.roughness;
+      awpStockMat.metalness = skin.metalness;
+      awpStockMat.needsUpdate = true;
+    }
+  }
 }
 const gunMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#1c1c1c'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.7, metalness: 0.4 });
 const gunMatLight = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#33352f'), bumpMap: weaponMetalBump, bumpScale: 0.0006, roughnessMap: weaponMetalBump, roughness: 0.75, metalness: 0.35 });
@@ -2058,16 +2088,19 @@ function weaponBox(width, height, depth, material, radius = 0.018){
 function buildWeaponVisual(id){
   const group = new THREE.Group();
   let magazine = null, chargingHandle = null, muzzle = new THREE.Vector3(0.24, -0.185, -1.0), knifeParts = null, boltHandle = null;
+  // Every skinnable part below is built with this one weapon's own material, not the shared
+  // template, so each gun keeps its own independently-equipped finish (see applyEquippedSkin).
+  const skinMat = weaponSkinMat(id);
 
   function rifleModel(magLen, stockLen, barrelLen, mat){
-    const receiver = weaponBox(0.09, 0.11, 0.5, goldWeaponMat, 0.018);
+    const receiver = weaponBox(0.09, 0.11, 0.5, skinMat, 0.018);
     receiver.position.set(0.24, -0.2, -0.42);
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, barrelLen, 16), gunMatLight);
     barrel.rotation.x = Math.PI / 2;
     barrel.position.set(0.24, -0.185, -0.55 - barrelLen / 2);
     const stock = weaponBox(0.08, 0.09, stockLen, mat, 0.02);
     stock.position.set(0.24, -0.23, -0.05);
-    magazine = weaponBox(0.055, magLen, 0.09, goldWeaponMat, 0.014);
+    magazine = weaponBox(0.055, magLen, 0.09, skinMat, 0.014);
     magazine.position.set(0.24, -0.2 - magLen / 2, -0.42);
     const sightPost = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.05, 0.015), gunMatLight);
     sightPost.position.set(0.24, -0.13, -0.55 - barrelLen * 0.7);
@@ -2081,12 +2114,12 @@ function buildWeaponVisual(id){
   }
 
   function pistolModel(mat, bodyLen, magLen, big){
-    const body = weaponBox(big ? 0.1 : 0.07, 0.13, bodyLen, goldWeaponMat, 0.02);
+    const body = weaponBox(big ? 0.1 : 0.07, 0.13, bodyLen, skinMat, 0.02);
     body.position.set(0.22, -0.22, -0.35);
     const gripM = weaponBox(0.06, 0.16, 0.07, handleMat, 0.018);
     gripM.position.set(0.22, -0.34, -0.22);
     gripM.rotation.x = 0.15;
-    magazine = weaponBox(0.04, magLen, 0.05, goldWeaponMat, 0.012);
+    magazine = weaponBox(0.04, magLen, 0.05, skinMat, 0.012);
     magazine.position.set(0.22, -0.38, -0.24);
     group.add(body, gripM, magazine);
     muzzle.set(0.22, -0.22, -0.35 - bodyLen / 2);
@@ -2097,7 +2130,7 @@ function buildWeaponVisual(id){
   function berettaModel(bodyLen, magLen){
     const frame = weaponBox(0.062, 0.11, bodyLen, gunMat, 0.016);
     frame.position.set(0.22, -0.225, -0.34);
-    const slide = weaponBox(0.058, 0.055, bodyLen + 0.04, goldWeaponMat, 0.014);
+    const slide = weaponBox(0.058, 0.055, bodyLen + 0.04, skinMat, 0.014);
     slide.position.set(0.22, -0.165, -0.36);
     const grip = weaponBox(0.058, 0.155, 0.075, woodMat, 0.016);
     grip.position.set(0.22, -0.335, -0.2);
@@ -2111,7 +2144,7 @@ function buildWeaponVisual(id){
     const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.006, 6, 10, Math.PI * 1.3), gunMat);
     triggerGuard.rotation.z = Math.PI * 0.35;
     triggerGuard.position.set(0.22, -0.27, -0.29);
-    magazine = weaponBox(0.04, magLen, 0.05, goldWeaponMat, 0.012);
+    magazine = weaponBox(0.04, magLen, 0.05, skinMat, 0.012);
     magazine.position.set(0.22, -0.335 - magLen / 2 + 0.08, -0.24);
     group.add(frame, slide, grip, hammer, frontSight, rearSight, triggerGuard, magazine);
     muzzle.set(0.22, -0.195, -0.34 - bodyLen / 2 - 0.02);
@@ -2176,14 +2209,14 @@ function buildWeaponVisual(id){
       // built from scratch instead of the shared pistolModel() box - the real Desert Eagle's
       // silhouette is a distinct two-tier stack (a slim lower frame + a taller, wider slide sitting
       // above it), which a single flat box can never read as no matter what's bolted onto it
-      const frame = weaponBox(0.085, 0.09, 0.4, goldWeaponMat, 0.02);
+      const frame = weaponBox(0.085, 0.09, 0.4, skinMat, 0.02);
       frame.position.set(0.22, -0.245, -0.34);
-      const slide = weaponBox(0.1, 0.065, 0.44, goldWeaponMat, 0.018);
+      const slide = weaponBox(0.1, 0.065, 0.44, skinMat, 0.018);
       slide.position.set(0.22, -0.17, -0.35);
       const gripM = weaponBox(0.06, 0.16, 0.075, handleMat, 0.018);
       gripM.position.set(0.22, -0.34, -0.2);
       gripM.rotation.x = 0.18;
-      magazine = weaponBox(0.045, 0.22, 0.055, goldWeaponMat, 0.012);
+      magazine = weaponBox(0.045, 0.22, 0.055, skinMat, 0.012);
       magazine.position.set(0.22, -0.42, -0.22);
       group.add(frame, slide, gripM, magazine);
       muzzle.set(0.22, -0.17, -0.57);
@@ -2211,7 +2244,7 @@ function buildWeaponVisual(id){
     case 'tec9': {
       pistolModel(pistolMat, 0.36, 0.22, false);
       // the Tec-9's signature chunky, ventilated barrel shroud extending past the slide
-      const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.26, 10), goldWeaponMat);
+      const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.26, 10), skinMat);
       shroud.rotation.x = Math.PI / 2;
       shroud.position.set(0.22, -0.22, -0.66);
       group.add(shroud);
@@ -2243,9 +2276,9 @@ function buildWeaponVisual(id){
       // AKM silhouette built from separate steel, laminate and polymer components. The curved
       // magazine is a tube rather than three intersecting boxes, so it reads as one manufactured
       // part in motion and during reloads.
-      const receiver = weaponBox(0.11, 0.135, 0.43, goldWeaponMat, 0.025);
+      const receiver = weaponBox(0.11, 0.135, 0.43, skinMat, 0.025);
       receiver.position.set(0.24, -0.205, -0.39);
-      const dustCover = weaponBox(0.095, 0.045, 0.34, goldWeaponMat, 0.018);
+      const dustCover = weaponBox(0.095, 0.045, 0.34, skinMat, 0.018);
       dustCover.position.set(0.24, -0.132, -0.42);
       const stock = weaponBox(0.082, 0.105, 0.34, akWoodMat, 0.025);
       stock.position.set(0.24, -0.22, -0.02); stock.rotation.y = -0.06;
@@ -2261,9 +2294,9 @@ function buildWeaponVisual(id){
         new THREE.Vector3(0, 0.01, 0), new THREE.Vector3(0, -0.07, -0.015),
         new THREE.Vector3(0, -0.16, -0.045), new THREE.Vector3(0, -0.24, -0.11)
       ]);
-      magazine = new THREE.Mesh(new THREE.TubeGeometry(magazineCurve, 12, 0.036, 10, false), goldWeaponMat);
+      magazine = new THREE.Mesh(new THREE.TubeGeometry(magazineCurve, 12, 0.036, 10, false), skinMat);
       magazine.position.set(0.24, -0.27, -0.405);
-      const magazineFloor = weaponBox(0.065, 0.035, 0.08, goldWeaponMat, 0.012);
+      const magazineFloor = weaponBox(0.065, 0.035, 0.08, skinMat, 0.012);
       magazineFloor.position.set(0.24, -0.53, -0.52);
       const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.008, 8, 16, Math.PI * 1.35), akMetalMat);
       triggerGuard.rotation.z = Math.PI * 0.35; triggerGuard.position.set(0.24, -0.285, -0.255);
@@ -2280,8 +2313,8 @@ function buildWeaponVisual(id){
       // flat black M4A4: ribbed RIS handguard, an A-frame front sight tower, a flip-up rear
       // sight on the top rail, a collapsible carbine stock and a birdcage flash hider
       rifleModel(0.24, 0.1, 0.42, gunMat);
-      magazine.material = goldWeaponMat;
-      const handguard = weaponBox(0.09, 0.09, 0.32, goldWeaponMat, 0.018);
+      magazine.material = skinMat;
+      const handguard = weaponBox(0.09, 0.09, 0.32, skinMat, 0.018);
       handguard.position.set(0.24, -0.185, -0.68);
       group.add(handguard);
       for (let i = 0; i < 6; i++) {
@@ -2309,8 +2342,8 @@ function buildWeaponVisual(id){
       // flat black M4A1-S: railed quad handguard, a top rail with a flip-up rear sight and a
       // reflex sight, a collapsible carbine stock, and a long, prominent suppressor
       rifleModel(0.2, 0.1, 0.32, gunMat);
-      magazine.material = goldWeaponMat;
-      const handguard = weaponBox(0.09, 0.09, 0.28, goldWeaponMat, 0.018);
+      magazine.material = skinMat;
+      const handguard = weaponBox(0.09, 0.09, 0.28, skinMat, 0.018);
       handguard.position.set(0.24, -0.185, -0.58);
       group.add(handguard);
       for (let i = 0; i < 5; i++) {
@@ -2346,7 +2379,7 @@ function buildWeaponVisual(id){
       butt.position.set(0.24, -0.22, 0.23); butt.rotation.y = -0.08;
       const recoilPad = weaponBox(0.13, 0.16, 0.035, handleMat, 0.016);
       recoilPad.position.set(0.24, -0.22, 0.365);
-      const receiver = weaponBox(0.115, 0.14, 0.42, goldWeaponMat, 0.024);
+      const receiver = weaponBox(0.115, 0.14, 0.42, skinMat, 0.024);
       receiver.position.set(0.24, -0.18, -0.39);
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.031, 0.82, 24), akMetalMat);
       barrel.rotation.x = Math.PI / 2; barrel.position.set(0.24, -0.17, -1.0);
@@ -2354,7 +2387,7 @@ function buildWeaponVisual(id){
       muzzleBrake.rotation.x = Math.PI / 2; muzzleBrake.position.set(0.24, -0.17, -1.46);
       const handguard = weaponBox(0.105, 0.105, 0.48, awpStockMat, 0.025);
       handguard.position.set(0.24, -0.205, -0.78);
-      const magazineBody = weaponBox(0.06, 0.16, 0.095, goldWeaponMat, 0.018);
+      const magazineBody = weaponBox(0.06, 0.16, 0.095, skinMat, 0.018);
       magazineBody.position.set(0.24, -0.335, -0.46);
       magazine = magazineBody;
       const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.008, 8, 18, Math.PI * 1.35), scopeMat);
@@ -2363,27 +2396,27 @@ function buildWeaponVisual(id){
       trigger.position.set(0.24, -0.28, -0.295); trigger.rotation.x = -0.18;
 
       // Raised picatinny rail and two optic rings.
-      const mountRail = weaponBox(0.045, 0.028, 0.47, goldWeaponMat, 0.009);
+      const mountRail = weaponBox(0.045, 0.028, 0.47, skinMat, 0.009);
       mountRail.position.set(0.24, -0.085, -0.4);
       const railSlots = [];
       for (let i = 0; i < 8; i++) {
         const slot = weaponBox(0.052, 0.008, 0.018, scopeMat, 0.003);
         slot.position.set(0.24, -0.067, -0.21 - i * 0.052); railSlots.push(slot);
       }
-      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.052, 0.46, 20), goldWeaponMat);
+      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.052, 0.46, 20), skinMat);
       scopeBody.rotation.x = Math.PI / 2; scopeBody.position.set(0.24, -0.015, -0.42);
-      const scopeObjective = new THREE.Mesh(new THREE.CylinderGeometry(0.066, 0.058, 0.075, 20), goldWeaponMat);
+      const scopeObjective = new THREE.Mesh(new THREE.CylinderGeometry(0.066, 0.058, 0.075, 20), skinMat);
       scopeObjective.rotation.x = Math.PI / 2; scopeObjective.position.set(0.24, -0.015, -0.68);
-      const scopeEyepiece = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.046, 0.09, 20), goldWeaponMat);
+      const scopeEyepiece = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.046, 0.09, 20), skinMat);
       scopeEyepiece.rotation.x = Math.PI / 2; scopeEyepiece.position.set(0.24, -0.015, -0.16);
       const scopeLensFront = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.012, 20), scopeGlassMat);
       scopeLensFront.rotation.x = Math.PI / 2; scopeLensFront.position.set(0.24, -0.015, -0.725);
       const scopeLensBack = new THREE.Mesh(new THREE.CylinderGeometry(0.043, 0.043, 0.012, 20), scopeGlassMat);
       scopeLensBack.rotation.x = Math.PI / 2; scopeLensBack.position.set(0.24, -0.015, -0.105);
-      const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.056, 0.008, 8, 20), goldWeaponMat);
+      const ringA = new THREE.Mesh(new THREE.TorusGeometry(0.056, 0.008, 8, 20), skinMat);
       ringA.rotation.x = Math.PI / 2; ringA.position.set(0.24, -0.015, -0.57);
       const ringB = ringA.clone(); ringB.position.z = -0.27;
-      const mountA = weaponBox(0.055, 0.09, 0.055, goldWeaponMat, 0.012); mountA.position.set(0.24, -0.11, -0.56);
+      const mountA = weaponBox(0.055, 0.09, 0.055, skinMat, 0.012); mountA.position.set(0.24, -0.11, -0.56);
       const mountB = mountA.clone(); mountB.position.z = -0.28;
 
       // Bolt body and handle remain separate so the existing bolt-cycle animation has a visible
@@ -6462,23 +6495,31 @@ async function openLadderDialog(){
 document.getElementById('ladderButton').addEventListener('click', openLadderDialog);
 document.getElementById('ladderClose').addEventListener('click', () => document.getElementById('ladderDialog').close());
 
+let inventoryActiveWeapon = WEAPON_SKIN_IDS[0];
 function renderInventory(){
   const grid = document.getElementById('inventoryGrid');
-  if (!grid) return;
+  const tabs = document.getElementById('weaponTabs');
+  if (!grid || !tabs) return;
   let status = document.getElementById('founderAccessStatus');
-  if (!status) { status = document.createElement('p'); status.id = 'founderAccessStatus'; grid.before(status); }
+  if (!status) { status = document.createElement('p'); status.id = 'founderAccessStatus'; tabs.before(status); }
   status.textContent = `BUILD FOUNDER-002 · ${founderStatus}`;
+  tabs.innerHTML = WEAPON_SKIN_IDS.map(id => `<button class="weaponTab ${id === inventoryActiveWeapon ? 'active' : ''}" type="button" data-weapon="${id}">${WEAPONS[id].name}</button>`).join('');
+  tabs.querySelectorAll('[data-weapon]').forEach(tab => tab.addEventListener('click', () => {
+    inventoryActiveWeapon = tab.dataset.weapon;
+    renderInventory();
+  }));
+  const equipped = playerProfile.equippedSkins[inventoryActiveWeapon];
   grid.innerHTML = Object.entries(SKIN_CATALOG).filter(([id]) => id !== 'founder' || founderEntitled).map(([id, skin]) => `
-    <button class="skinCard ${playerProfile.equippedSkin === id ? 'equipped' : ''}" type="button" data-skin="${id}">
+    <button class="skinCard ${equipped === id ? 'equipped' : ''}" type="button" data-skin="${id}">
       <span class="skinPreview ${skin.preview}"></span>
       <span class="skinName">${skin.name}</span>
       <span class="skinMeta">${skin.meta}</span>
-      <span class="skinState">${playerProfile.equippedSkin === id ? 'EQUIPPED' : 'EQUIP'}</span>
+      <span class="skinState">${equipped === id ? 'EQUIPPED' : 'EQUIP'}</span>
     </button>`).join('');
   grid.querySelectorAll('[data-skin]').forEach(card => card.addEventListener('click', () => {
     if (card.dataset.skin === 'founder' && !founderEntitled) return;
-    playerProfile.equippedSkin = card.dataset.skin;
-    applyEquippedSkin();
+    playerProfile.equippedSkins[inventoryActiveWeapon] = card.dataset.skin;
+    applyEquippedSkin(inventoryActiveWeapon);
     savePlayerProfile();
     renderInventory();
   }));
