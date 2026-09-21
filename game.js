@@ -2662,9 +2662,12 @@ function startReload(){
   setTimeout(() => {
     if (reloadToken !== reloadGeneration) return;
     const need = def.mag - state.mag;
-    const take = Math.min(need, state.reserve);
+    // FFA has no resupply loop (all weapons free, no buy phase), so reloading there tops the
+    // magazine back up to full without draining reserve - the reserve number is just a display
+    // of "rounds left to top up with", not a depletable pool, in that mode.
+    const take = isFfa() ? need : Math.min(need, state.reserve);
     state.mag += take;
-    state.reserve -= take;
+    if (!isFfa()) state.reserve -= take;
     reloadRuntime.reloading = false;
     document.getElementById('reloadLabel').style.opacity = 0;
     updateAmmoHUD();
@@ -4358,9 +4361,12 @@ function getIceConfig(){
 // ---------- Free for all: host-owned bots, lifecycle and match clock ----------
 function selectFfaMaps(){
   if (gameStarted) return;
-  if (!!MAPS[selectedMap]?.ffa !== isFfa()) selectedMap = isFfa() ? 'dockyard' : 'arena';
+  // Practice has no ruleset of its own, but its maps aren't tied to isFfa() the way
+  // pvp/knife/ffa are - it can freely offer the FFA maps alongside the regular ones.
+  const showAllMaps = selectedMode === 'practice';
+  if (!showAllMaps && !!MAPS[selectedMap]?.ffa !== isFfa()) selectedMap = isFfa() ? 'dockyard' : 'arena';
   document.querySelectorAll('.mapCard').forEach(card => {
-    card.hidden = !!MAPS[card.dataset.map]?.ffa !== isFfa();
+    card.hidden = showAllMaps ? false : (!!MAPS[card.dataset.map]?.ffa !== isFfa());
     card.classList.toggle('selected', card.dataset.map === selectedMap);
   });
   document.querySelectorAll('.teamSizeBtn').forEach(button => { button.hidden = isFfa(); });
