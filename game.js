@@ -4,6 +4,9 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { FFA, botCount, canStart, rankPlayers, chooseSpawn } from './ffa-rules.js';
+import { FFA_MAPS, buildNavigation, blockedAt } from './ffa-layouts.js';
+import { buildFfaMap, ffaThumbnail } from './ffa-maps.js';
 import { addMapFinish } from './map-finish.js';
 import { findClearSpawn } from './map-spawns.js';
 import { createFounderFinish } from './founder-skin.js';
@@ -924,6 +927,8 @@ function loadTiledTexture(url, repeatX, repeatY){
 }
 
 const MAP_TEXTURE_URLS = {
+  dockyard: ['assets/textures/subway_floor.webp'],
+  atrium: ['assets/textures/subway_floor.webp'],
   arena: ['assets/textures/sand.jpg', 'assets/textures/wall.jpg', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
   warehouse: ['assets/textures/warehouse_floor.avif', 'assets/textures/warehouse_wall.avif', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
   subway: ['assets/textures/subway_floor.webp', 'assets/textures/subway_walls.jpg', 'assets/textures/train.png', 'assets/textures/trainfront.png', 'assets/textures/metal.jpg'],
@@ -1667,7 +1672,18 @@ function buildFoundryMap(){
   return buildFoundry({ scene, floorMeshes, addBox, makeBoxProp, loadTiledTexture, hazardStripeTexture });
 }
 
+function buildFreeForAllMap(id){
+  WORLD_SIZE = 76; groundHeightAt = () => 0;
+  applyDesertAtmosphere();
+  hemi.color.set(0xd9eee7); hemi.groundColor.set(0x616b65); hemi.intensity = 1.15;
+  sun.color.set(id === 'dockyard' ? 0xffd5a5 : 0xfff1d8); sun.intensity = 1.45;
+  fillLight.intensity = 0.6; scene.fog.color.set(0xb8cbc8); scene.fog.density = 0.002;
+  return buildFfaMap(id, {scene, floorMeshes, addBox, loadTiledTexture});
+}
+
 const MAPS = {
+  dockyard: { name: 'Dockyard', ffa: true, build: () => buildFreeForAllMap('dockyard') },
+  atrium: { name: 'Atrium', ffa: true, build: () => buildFreeForAllMap('atrium') },
   arena: { name: 'Desert', build: buildArenaMap },
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
   subway: { name: 'Subway', build: buildSubwayMap },
@@ -1712,7 +1728,7 @@ function buildMap(id){
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
-  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317 })[id]);
+  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317, dockyard: 401, atrium: 503 })[id]);
   const result = MAPS[id].build();
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
@@ -1823,6 +1839,9 @@ const inventory = { primary: null, secondary: null };
 let knifeAvailable = true;
 let knifeCount = 1;
 let selectedRuleset = 'standard';
+const isFfa = () => selectedRuleset === 'ffa';
+const ffaState = { phase: 'waiting', timer: FFA.warmup, sendT: 0, active: false, bots: new Map(), navigation: null, respawnT: 0, protection: 0, serial: 0, resultShown: false };
+const weaponPrice = def => isFfa() ? 0 : def.price;
 function knifeCapacity(){ return selectedRuleset === 'knife' && gameMode === 'pvp' ? 5 : 1; }
 function resetKnifeSupply(){ knifeCount = knifeCapacity(); knifeAvailable = true; }
 const ammoState = {}; // slot -> { mag, reserve }
@@ -2852,6 +2871,7 @@ function createThrownKnife(origin, direction, damaging = false, id = crypto.rand
 }
 
 function throwKnife(){
+  if (isFfa()) ffaState.protection = 0;
   if ((gameMode === 'pvp' && roundState.phase === 'ended') || !knifeAvailable || matchFinished || fireCooldown > 0 || reloadRuntime.reloading) return;
   weaponInspectT = -1; weaponInspectId = null; weaponRecoilT = -1;
   currentVisual.group.position.set(0, 0, 0);
@@ -2944,6 +2964,7 @@ const bulletTracers = [];
 const particles = []; // {mesh/sprite, vel, life, maxLife, type}
 
 function fireWeapon(){
+  if (isFfa()) ffaState.protection = 0;
   if (!player.alive || matchFinished || (gameMode === 'pvp' && roundState.phase === 'ended') || reloadRuntime.reloading) return;
   if (weaponInspectT >= 0) {
     weaponInspectT = -1;
@@ -3290,6 +3311,7 @@ const grenades = []; // { mesh, vel, fuse, type }
 const activeSmokes = []; // { pos, radius, life, sprites: [] } - blocks AI line-of-sight and the player's own view
 
 function throwGrenade(type, far = true){
+  if (isFfa()) ffaState.protection = 0;
   const count = type === 'smoke' ? smokeCount : type === 'flash' ? flashCount : grenadeCount;
   if (count <= 0) return;
   if (type === 'smoke') { smokeCount--; updateGrenadeHUD(); }
@@ -3406,7 +3428,9 @@ function detonateFlash(point){
     if (!enemy.alive) return;
     const eyePos = enemy.mesh.position.clone().add(new THREE.Vector3(0, soldierHeight * 0.85, 0));
     applyFlashTo(eyePos, point, def, intensity => {
-      if (enemy.isRemote) {
+      if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
+        enemy.flashedT = Math.max(enemy.flashedT || 0, def.duration * intensity);
+      } else if (enemy.isRemote) {
         // only that enemy's own client can white out their own screen - tell them to
         netBroadcast({ type: 'flash', targetId: enemy.netId, intensity });
       } else {
@@ -3420,7 +3444,8 @@ function detonateFlash(point){
 // cheap enough to never touch the framerate, and it still genuinely blocks AI sightlines and the
 // player's own screen (see the LOS check in updateEnemies and the #smokeOverlay toggle in animate)
 const smokeSpriteTex = softDiscTexture('rgba(200,202,198,0.9)');
-function deploySmoke(point){
+function deploySmoke(point, replicated = false){
+  if (isFfa() && !replicated) netBroadcast({type:'ffaSmoke', point:point.toArray()});
   if (!audio.playSample('smokeHiss', 0.8)) audio.mechClick(220, 0.2, 0.4);
   const def = WEAPONS.smoke;
   const sprites = [];
@@ -3845,7 +3870,10 @@ function spawnEnemy(spawnPos){
 // on a kill vs. the default grey for a non-lethal hit). Remote players resolve asynchronously
 // over the network, so that path always reports false here.
 function damageEnemy(enemy, dmg, point, meta){
-  if (!enemy.alive || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
+  if (!enemy.alive || (isFfa() && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
+  if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
+    return hitFfaBot({targetId:enemy.netId,fromId:netMyId,dmg,weaponName:meta?.weaponName,headshot:meta?.headshot,instantKill:meta?.instantKill});
+  }
   spawnBlood(point);
   if (enemy.isRemote) {
     // don't own their health - tell their real client what happened and let their own broadcast update us.
@@ -4327,6 +4355,293 @@ function getIceConfig(){
   return iceConfigPromise;
 }
 
+// ---------- Free for all: host-owned bots, lifecycle and match clock ----------
+function selectFfaMaps(){
+  if (gameStarted) return;
+  if (!!MAPS[selectedMap]?.ffa !== isFfa()) selectedMap = isFfa() ? 'dockyard' : 'arena';
+  document.querySelectorAll('.mapCard').forEach(card => {
+    card.hidden = !!MAPS[card.dataset.map]?.ffa !== isFfa();
+    card.classList.toggle('selected', card.dataset.map === selectedMap);
+  });
+  document.querySelectorAll('.teamSizeBtn').forEach(button => { button.hidden = isFfa(); });
+  document.querySelectorAll('#rematchMap option').forEach(option => {
+    option.disabled = !!MAPS[option.value]?.ffa !== isFfa(); option.hidden = option.disabled;
+  });
+  preloadMapTextures(selectedMap).then(updateStartButtonState);
+}
+function removeFfaAvatar(id){
+  const index = enemies.findIndex(e => e.netId === id);
+  if (index >= 0) { scene.remove(enemies[index].mesh); enemies.splice(index,1); }
+  ffaState.bots.delete(id);
+}
+function pruneFfaAvatars(){
+  for (const e of [...enemies]) if (e.isRemote && !netRoster.some(p => p.id === e.netId)) removeFfaAvatar(e.netId);
+}
+function ffaActors(exclude){
+  const actors = enemies.filter(e => e.netId !== exclude && e.alive && !e.dying
+    && netRoster.some(p => p.id === e.netId && p.ready))
+    .map(e => ({id:e.netId, pos:e.mesh.position.clone().add(new THREE.Vector3(0,1.3,0)), protected:e.spawnProtected, avatar:e}));
+  if (player.alive && netMyId !== exclude && netRoster.some(p => p.id === netMyId && p.ready))
+    actors.push({id:netMyId,pos:player.pos.clone().add(new THREE.Vector3(0,-.4,0)),protected:ffaState.protection>0});
+  return actors;
+}
+function ffaVisible(a,b){
+  const direction = b.clone().sub(a), distance = direction.length();
+  if (distance < .01) return true;
+  const ray = new THREE.Raycaster(a,direction.normalize(),0,Math.max(.01,distance-.2));
+  return ray.intersectObjects(envMeshes,false).length === 0 && !segmentCrossesSmoke(a.x,a.z,b.x,b.z);
+}
+function ffaSpawn(id){
+  const layout = currentMapMeta.ffa;
+  const actors = ffaActors(id).map(a=>a.pos);
+  const spawn = chooseSpawn(layout.spawns,actors,(p,a)=>ffaVisible(new THREE.Vector3(p.x,1.4,p.z),a));
+  return new THREE.Vector3(spawn.x,0,spawn.z);
+}
+function respawnFfaPlayer(){
+  if (matchFinished) return;
+  const p=ffaSpawn(netMyId);
+  player.pos.copy(p); player.pos.y=player.height;
+  player.alive=true; player.health=player.maxHealth; player.crouching=false; player.ads=false;
+  player.scopeLevel=0; player.pitch=0; player.yaw=Math.atan2(p.x,p.z); player.velY=0;
+  movementVelocity.set(0,0,0); camera.position.copy(player.pos);
+  camera.fov=baseFov;camera.updateProjectionMatrix();
+  ffaState.respawnT=0; ffaState.protection=FFA.protection;
+  reloadGeneration++;reloadRuntime.reloading=false;fireCooldown=0; recoilKick=0; recoilYaw=0;
+  document.getElementById('reloadLabel').style.opacity=0;
+  playerFlashT=0; playerFlashMax=0; recentAttackers=[];lastDamageMeta={};
+  resetKnifeSupply();
+  if (!inventory.primary) inventory.primary='ak47';
+  if (!inventory.secondary) inventory.secondary='glock';
+  for (const slot of ['primary','secondary']) {
+    const def=WEAPONS[inventory[slot]];ammoState[slot]={mag:def.mag,reserve:def.reserve};
+  }
+  equipSlot('primary',true);updateAmmoHUD();updateHealthHUD();netStateTimer=0;
+}
+function resetFfaBot(bot){
+  const p=ffaSpawn(bot.netId);
+  bot.mesh.position.copy(p);bot.targetPos.copy(p);bot.mesh.rotation.set(0,Math.atan2(-p.x,-p.z),0);
+  bot.alive=true;bot.health=100;bot.dying=false;bot.deathT=0;bot.mesh.visible=true;
+  bot.spawnProtected=true;bot.protection=FFA.protection;bot.respawnT=0;bot.targetId=null;
+  bot.flashedT=0;bot.memory=0;bot.patrol=null;bot.lastSeen=null;bot.target=null;
+  bot.thinkT=Math.random()*.2;bot.reaction=.35;bot.fireCooldown=.5;bot.burst=0;bot.path=[];bot.pathT=0;
+}
+function syncFfaBots(){
+  if (netRole !== 'host' || !ffaState.active || ffaState.phase === 'ended') return;
+  const humans=netRoster.filter(p=>!p.isBot), ready=humans.filter(p=>p.ready).length;
+  const desired=Math.min(FFA.capacity-humans.length, ffaState.phase==='waiting'||ffaState.phase==='warmup'
+    ? botCount(ready) : Math.max(0,FFA.minPlayers-humans.length));
+  let changed=false;
+  while(ffaState.bots.size>desired){
+    const id=[...ffaState.bots.keys()].at(-1);removeFfaAvatar(id);netRoster=netRoster.filter(p=>p.id!==id);changed=true;
+  }
+  while(ffaState.bots.size<desired){
+    const id=`ffa-bot-${++ffaState.serial}`;
+    netRoster.push({id,team:id,isBot:true,ready:true,name:`BOT ${['Mako','Vega','Rook','Nyx','Cinder','Echo'][ffaState.serial%6]}`});
+    const bot=getOrCreateRemoteAvatar(id,id);bot.isBot=true;bot.speed=4.3;bot.weaponId='m4a1';
+    ffaState.bots.set(id,bot);resetFfaBot(bot);changed=true;
+  }
+  if(changed)broadcastRoster();
+}
+function startFfa(rematch=false){
+  if (!currentMapMeta.ffa) return;
+  document.body.classList.add('ffaActive');
+  matchFinished=false; ffaState.active=true; ffaState.resultShown=false;
+  ffaState.navigation=buildNavigation(currentMapMeta.ffa);
+  if (netRole==='host'){
+    ffaState.phase='waiting';ffaState.timer=FFA.warmup;ffaState.sendT=0;
+    netStats={};receivedKills.clear();
+    netRoster=netRoster.filter(p=>!p.isBot);ffaState.bots.clear();
+    for(const p of netRoster){p.team=p.id;if(p.id===netMyId)p.ready=true;}
+  }
+  roundState.roundNum=1;roundState.phase='warmup';roundState.phaseT=0;
+  money=0;updateMoneyHUD();
+  respawnFfaPlayer();renderBuyMenu();
+  document.querySelectorAll('#scoreboardBar .sbTeam, #scoreboardBar .sbScore').forEach(el=>{el.style.display='none';});
+  document.getElementById('roundStats').style.display='none';
+  document.querySelectorAll('#rematchMap option').forEach(o=>{o.disabled=!MAPS[o.value]?.ffa;o.hidden=o.disabled;});
+  if(netRole==='host'){syncFfaBots();broadcastRoster();sendFfaSnapshot();}
+  else netSend(netHostConn,{type:'ffaReady',rematch});
+}
+function sendFfaSnapshot(){
+  netBroadcast({type:'ffaSnapshot',phase:ffaState.phase,timer:ffaState.timer,stats:netStats,
+    bots:[...ffaState.bots.values()].map(b=>({id:b.netId,roundNum:1,
+      pos:[b.mesh.position.x,b.mesh.position.y+player.height,b.mesh.position.z],yaw:b.mesh.rotation.y,
+      health:b.health,alive:b.alive,protected:b.spawnProtected,crouching:false,weaponId:b.weaponId}))});
+}
+function handleFfaMessage(msg,fromId){
+  if(msg.type==='roomFull'){
+    if(netRole==='client'&&fromId==='host')document.getElementById('pvpStatus').textContent='ROOM FULL · 12 PLAYERS';
+    return true;
+  }
+  if(msg.type==='ffaSmoke'){
+    const valid=isFfa()&&Array.isArray(msg.point)&&msg.point.length===3&&msg.point.every(Number.isFinite)
+      && Math.abs(msg.point[0])<40&&Math.abs(msg.point[2])<40&&msg.point[1]>=0&&msg.point[1]<20;
+    if(valid&&((netRole==='client'&&fromId==='host')||(netRole==='host'&&netRoster.some(p=>p.id===fromId&&p.ready&&!p.isBot)))){
+      if(netRole==='host')netRelayFromHost(msg,fromId);
+      deploySmoke(new THREE.Vector3().fromArray(msg.point),true);
+    }
+    return true;
+  }
+  if(msg.type==='ffaReady'){
+    if(isFfa()&&netRole==='host'){
+      const entry=netRoster.find(p=>p.id===fromId&&!p.isBot);
+      if(entry){entry.ready=true;entry.team=entry.id;syncFfaBots();broadcastRoster();if(ffaState.active)sendFfaSnapshot();}
+    }
+    return true;
+  }
+  if(msg.type==='ffaSnapshot'){
+    if(!isFfa()||netRole!=='client'||fromId!=='host')return true;
+    if(!gameStarted)return true; // ready sends another authoritative snapshot after the map exists
+    const previous=ffaState.phase;
+    ffaState.phase=msg.phase;ffaState.timer=msg.timer;netStats=msg.stats;
+    roundState.phase=msg.phase==='live'?'live':msg.phase==='ended'?'ended':'warmup';
+    if(previous!=='live'&&msg.phase==='live'){respawnFfaPlayer();showWaveBanner('FREE FOR ALL · FIRST TO 30');}
+    for(const state of msg.bots||[])applyRemoteState(state);
+    if(msg.phase==='ended')finishFfa();
+    return true;
+  }
+  if(isFfa()&&netRole==='host'&&['hit','shot','kill','flash','knifeThrow'].includes(msg.type) && !netRoster.some(p=>p.id===fromId&&!p.isBot&&p.ready)) return true;
+  if(isFfa()&&netRole==='host'&&msg.type==='state'){
+    const p=netRoster.find(p=>p.id===fromId&&!p.isBot&&p.ready);
+    if(!p||msg.id!==fromId)return true;
+  }
+  return false;
+}
+function hitFfaBot(msg){
+  const bot=ffaState.bots.get(msg.targetId);
+  if(!bot||!bot.alive||bot.protection>0||ffaState.phase==='ended'||!Number.isFinite(msg.dmg)||msg.dmg<=0)return false;
+  if(!netRoster.some(p=>p.id===msg.fromId&&p.ready))return false;
+  bot.health-=msg.instantKill?101:Math.min(msg.dmg,250);
+  if(bot.health>0)return false;
+  bot.alive=false;bot.health=0;bot.dying=true;bot.deathT=0;bot.fallDir=bot.mesh.rotation.y+Math.PI;
+  bot.respawnT=FFA.respawn;spawnBloodDecal(bot.mesh.position.x,bot.mesh.position.z);
+  const kill={type:'kill',roundNum:1,deathId:crypto.randomUUID(),victimId:bot.netId,killerId:msg.fromId,
+    assistIds:[],scoring:ffaState.phase==='live',weaponName:msg.weaponName||'M4A1',headshot:!!(msg.headshot||msg.isHeadshot)};
+  applyKillMessage(kill);netBroadcast(kill);return true;
+}
+function fireFfaBot(bot,target){
+  bot.protection=0;bot.spawnProtected=false;
+  const origin=bot.mesh.position.clone().add(new THREE.Vector3(0,1.4,0));
+  const direction=target.pos.clone().sub(origin).normalize();
+  // Angular error makes distant fire less accurate without a random damage lottery.
+  direction.x+=(Math.random()-.5)*.04;direction.y+=(Math.random()-.5)*.035;direction.z+=(Math.random()-.5)*.04;direction.normalize();
+  const ray=new THREE.Raycaster(origin,direction,0,60);
+  const wall=ray.intersectObjects(envMeshes,false)[0];let distance=wall?.distance??60,victim=null;
+  for(const actor of ffaActors(bot.netId)){
+    if(actor.protected)continue;
+    const hit=ray.ray.intersectSphere(new THREE.Sphere(actor.pos,.42),new THREE.Vector3());
+    if(hit&&origin.distanceTo(hit)<distance){distance=origin.distanceTo(hit);victim=actor;}
+  }
+  const end=origin.clone().addScaledVector(direction,distance);
+  const shot={type:'shot',id:bot.netId,roundNum:1,weaponId:bot.weaponId,end:end.toArray()};
+  showRemoteShot(shot);netBroadcast(shot);
+  if(!victim)return;
+  const hit={type:'hit',roundNum:1,targetId:victim.id,fromId:bot.netId,dmg:22,weaponName:'M4A1'};
+  if(victim.id===netMyId){lastDamageMeta={weaponName:'M4A1',headshot:false};damagePlayer(hit.dmg,bot.netId);}
+  else if(ffaState.bots.has(victim.id))hitFfaBot(hit);
+  else netSend(netClientConns[victim.id],hit);
+}
+function updateFfaBots(dt){
+  for(const bot of ffaState.bots.values()){
+    if(!bot.alive){bot.respawnT-=dt;if(bot.respawnT<=0)resetFfaBot(bot);continue;}
+    bot.protection=Math.max(0,bot.protection-dt);bot.spawnProtected=bot.protection>0;
+    bot.flashedT=Math.max(0,(bot.flashedT||0)-dt);bot.thinkT-=dt;bot.fireCooldown-=dt;bot.pathT-=dt;
+    const pos=bot.mesh.position,eye=pos.clone().add(new THREE.Vector3(0,1.4,0));
+    if(bot.thinkT<=0){
+      bot.thinkT=.18;
+      const visible=bot.flashedT>0?[]:ffaActors(bot.netId).filter(a=>{
+        const delta=a.pos.clone().sub(eye),distance=delta.length();
+        const forward=new THREE.Vector3(Math.sin(bot.mesh.rotation.y),0,Math.cos(bot.mesh.rotation.y));
+        const inView=delta.clone().setY(0).normalize().dot(forward)>.12;
+        return !a.protected&&distance<48&&(inView||distance<7||a.id===bot.targetId)&&ffaVisible(eye,a.pos);
+      });
+      visible.sort((a,b)=>eye.distanceToSquared(a.pos)-eye.distanceToSquared(b.pos));
+      const target=visible.find(a=>a.id===bot.targetId)||visible[0];
+      if(target){
+        if(target.id!==bot.targetId)bot.reaction=.25+Math.random()*.25;
+        bot.targetId=target.id;bot.target=target;bot.lastSeen=target.pos.clone();bot.memory=2.5;
+      }else{bot.targetId=null;bot.target=null;}
+    }
+    bot.memory=(bot.memory||0)-dt;bot.reaction-=dt;
+    const target=bot.target;
+    let goal=target?.pos||(bot.memory>0?bot.lastSeen:null);
+    if(!goal){
+      if(!bot.patrol||pos.distanceTo(bot.patrol)<2){const n=ffaState.navigation.nodes[Math.floor(Math.random()*ffaState.navigation.nodes.length)];bot.patrol=new THREE.Vector3(n.x,0,n.z);}
+      goal=bot.patrol;
+    }
+    let move=new THREE.Vector3();
+    if(target&&eye.distanceTo(target.pos)<22){
+      const aim=target.pos.clone().sub(eye);aim.y=0;aim.normalize();
+      move.set(aim.z,0,-aim.x).multiplyScalar(Math.sin(performance.now()*.001+Number(bot.netId.split('-').at(-1)))>0?1:-1);
+      move.multiplyScalar(1.8*dt);
+    }else{
+      if(bot.pathT<=0){bot.path=ffaState.navigation.path(pos,goal);bot.pathT=.9;}
+      while(bot.path.length&&Math.hypot(bot.path[0].x-pos.x,bot.path[0].z-pos.z)<.5)bot.path.shift();
+      if(bot.path.length){const n=bot.path[0];move.set(n.x-pos.x,0,n.z-pos.z);move.normalize().multiplyScalar(Math.min(move.length(),bot.speed*dt));}
+    }
+    // Swept small steps plus inflated layout obstacles prevent clipping around cover.
+    const old=pos.clone();
+    if(!blockedAt(currentMapMeta.ffa,pos.x+move.x,pos.z,.65))pos.x+=move.x;
+    if(!blockedAt(currentMapMeta.ffa,pos.x,pos.z+move.z,.65))pos.z+=move.z;
+    const look=(target?.pos||goal).clone().sub(pos),desired=Math.atan2(look.x,look.z);
+    const delta=Math.atan2(Math.sin(desired-bot.mesh.rotation.y),Math.cos(desired-bot.mesh.rotation.y));
+    bot.mesh.rotation.y+=delta*(1-Math.exp(-10*dt));bot.targetYaw=bot.mesh.rotation.y;bot.targetPos.copy(pos);
+    animateSoldierRig(bot.mesh,dt,old.distanceTo(pos)/Math.max(dt,.001),false);
+    if(target&&bot.reaction<=0&&bot.fireCooldown<=0&&Math.abs(delta)<.18&&!bot.flashedT&&ffaVisible(eye,target.pos)){
+      fireFfaBot(bot,target);bot.burst++;
+      bot.fireCooldown=bot.burst%3===0?.5+Math.random()*.35:.15;
+    }
+  }
+}
+function finishFfa(){
+  if(ffaState.resultShown)return;
+  ffaState.resultShown=true;ffaState.phase='ended';roundState.phase='ended';matchFinished=true;
+  clearGameplayInput();shopOpen=false;document.getElementById('buyMenu').style.display='none';
+  document.exitPointerLock();
+  const order=rankPlayers(netRoster,netStats),winner=order[0],stats=ensureStats(netMyId);
+  const top=winner?ensureStats(winner.id):{kills:0,deaths:0};
+  const leaders=order.filter(p=>ensureStats(p.id).kills===top.kills&&ensureStats(p.id).deaths===top.deaths);
+  const rank=1+order.filter(p=>{const s=ensureStats(p.id);return s.kills>stats.kills||(s.kills===stats.kills&&s.deaths<stats.deaths);}).length;
+  const won=leaders.some(p=>p.id===netMyId);
+  document.getElementById('resultTitle').textContent=won?(leaders.length>1?'JOINT FIRST':'VICTORY'):'FREE FOR ALL';
+  document.getElementById('resultScore').textContent=winner?`${leaders.length>1?'SHARED LEAD':winner.name} · ${top.kills} KILLS`:'MATCH OVER';
+  document.getElementById('resultDetail').textContent=`PLACE ${rank} / ${order.length} · ${stats.kills} KILLS · ${stats.deaths} DEATHS`;
+  document.getElementById('resultRating').textContent='UNRANKED · FREE LOADOUTS';
+  document.getElementById('rematchMap').value=selectedMap;
+  document.getElementById('rematchControls').hidden=netRole!=='host';document.getElementById('rematchWaiting').hidden=netRole==='host';
+  document.getElementById('matchResult').showModal();
+}
+function updateFfa(dt){
+  if(!ffaState.active)return;
+  ffaState.protection=Math.max(0,ffaState.protection-dt);
+  if(!player.alive){ffaState.respawnT-=dt;if(ffaState.respawnT<=0)respawnFfaPlayer();}
+  if(netRole==='host'){
+    const humans=netRoster.filter(p=>!p.isBot&&p.ready).length;
+    if(ffaState.phase==='waiting'||ffaState.phase==='warmup'){
+      if(canStart(humans,ffaState.bots.size)){
+        ffaState.phase='warmup';ffaState.timer-=dt;
+        if(ffaState.timer<=0){
+          ffaState.phase='live';ffaState.timer=FFA.duration;netStats={};receivedKills.clear();roundState.phase='live';
+          respawnFfaPlayer();for(const b of ffaState.bots.values())resetFfaBot(b);
+          showWaveBanner('FREE FOR ALL · FIRST TO 30');
+        }
+      }else{ffaState.phase='waiting';ffaState.timer=FFA.warmup;}
+    }else if(ffaState.phase==='live'){
+      ffaState.timer=Math.max(0,ffaState.timer-dt);
+      if(ffaState.timer<=0||Object.values(netStats).some(s=>s.kills>=FFA.goal)){finishFfa();sendFfaSnapshot();return;}
+    }
+    updateFfaBots(dt);ffaState.sendT-=dt;
+    if(ffaState.sendT<=0){ffaState.sendT=.1;sendFfaSnapshot();}
+  }else if(ffaState.phase==='live'||ffaState.phase==='warmup')ffaState.timer=Math.max(0,ffaState.timer-dt);
+  const order=rankPlayers(netRoster,netStats),leader=order[0],humans=netRoster.filter(p=>!p.isBot&&p.ready).length;
+  document.getElementById('roundPhaseLabel').textContent=ffaState.phase==='live'?'FREE FOR ALL':ffaState.phase==='waiting'?'WAITING':'WARMUP';
+  document.getElementById('roundTimer').textContent=formatRoundTime(ffaState.timer);
+  const hud=document.getElementById('ffaHud');hud.hidden=false;
+  hud.textContent=`${netRoster.filter(p=>p.ready).length}/12 PLAYERS · YOU ${ensureStats(netMyId).kills}/${FFA.goal} · LEADER ${leader?.name||'—'} ${leader?ensureStats(leader.id).kills:0}`;
+  document.getElementById('centerMessage').textContent=ffaState.phase==='waiting'?`WAITING FOR PLAYERS · ${humans}/${FFA.minHumans} HUMANS · BOTS FILL TO 6`:
+    !player.alive?`RESPAWNING IN ${Math.ceil(ffaState.respawnT)}`:ffaState.protection>0?'SPAWN PROTECTION · FIRING CANCELS IT':'';
+}
+
 async function hostRoom(teamSize){
   netTeamSize = teamSize;
   netRole = 'host';
@@ -4350,14 +4665,18 @@ async function hostRoom(teamSize){
   netPeer.on('connection', conn => {
     netClientConns[conn.peer] = conn;
     conn.on('data', data => handleNetMessage(data, conn.peer));
-    conn.on('close', () => { delete netClientConns[conn.peer]; netRoster = netRoster.filter(p => p.id !== conn.peer); broadcastRoster(); });
+    conn.on('close', () => { delete netClientConns[conn.peer]; netRoster = netRoster.filter(p => p.id !== conn.peer); if (isFfa()) { removeFfaAvatar(conn.peer); syncFfaBots(); } broadcastRoster(); });
     conn.on('error', err => { document.getElementById('pvpStatus').textContent = 'A player failed to connect: ' + err.type; });
     conn.on('open', () => {
+      if (isFfa() && netRoster.filter(p => !p.isBot).length >= FFA.capacity) {
+        netSend(conn, {type:'roomFull'}); setTimeout(() => conn.close(), 100); return;
+      }
       const team = netRoster.filter(p => p.team === 'A').length <= netRoster.filter(p => p.team === 'B').length ? 'A' : 'B';
-      netRoster.push({ id: conn.peer, team, isBot: false, name: 'Player', country: '', clan: '', founder: false });
+      netRoster.push({ id: conn.peer, team: isFfa() ? conn.peer : team, isBot: false, ready: false, name: 'Player', country: '', clan: '', founder: false });
+      if (isFfa()) syncFfaBots();
       document.getElementById('pvpStatus').textContent = `${netRoster.length} player(s) connected`;
       broadcastRoster();
-      if (roundState.phase === 'warmup' && !warmupDroppedToShort && netRoster.filter(p => !p.isBot).length >= 2) {
+      if (!isFfa() && roundState.phase === 'warmup' && !warmupDroppedToShort && netRoster.filter(p => !p.isBot).length >= 2) {
         warmupDroppedToShort = true;
         warmupTimer = Math.min(warmupTimer, WARMUP_SHORT);
         broadcastWarmup();
@@ -4396,6 +4715,15 @@ async function joinRoom(code){
     });
     netHostConn.on('data', data => handleNetMessage(data, 'host'));
     netHostConn.on('close', () => {
+      if (isFfa() && gameStarted) {
+        matchFinished = true; ffaState.active = false; roundState.phase = 'ended'; clearGameplayInput(); document.exitPointerLock();
+        document.getElementById('resultTitle').textContent = 'HOST DISCONNECTED';
+        document.getElementById('resultScore').textContent = 'CONNECTION LOST';
+        document.getElementById('resultDetail').textContent = 'Return to HQ to join or create another room.';
+        document.getElementById('resultRating').textContent = 'UNRANKED · NO RATING CHANGE';
+        document.getElementById('rematchControls').hidden = true; document.getElementById('rematchWaiting').hidden = true;
+        if (!document.getElementById('matchResult').open) document.getElementById('matchResult').showModal();
+      }
       if (settled) return;
       settled = true;
       clearTimeout(connectTimeout);
@@ -4435,7 +4763,8 @@ function ensureStats(id){
   return netStats[id];
 }
 function applyKillMessage(msg){
-  if (roundState.phase === 'live') roundLives.eliminate(msg.victimId, msg.roundNum);
+  if (isFfa() && (ffaState.phase !== 'live' || msg.scoring !== true)) return;
+  if (!isFfa() && roundState.phase === 'live') roundLives.eliminate(msg.victimId, msg.roundNum);
   if (msg.deathId && receivedKills.has(msg.deathId)) return;
   if (msg.deathId) receivedKills.add(msg.deathId);
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
@@ -4447,7 +4776,7 @@ function applyKillMessage(msg){
 }
 
 function updateScoreboardNames(){
-  if (gameMode !== 'pvp') return;
+  if (gameMode !== 'pvp' || isFfa()) return;
   const teamA = netRoster.filter(p => p.team === 'A').map(p => p.name);
   const teamB = netRoster.filter(p => p.team === 'B').map(p => p.name);
   document.getElementById('sbNameA').textContent = teamA.length ? teamA.join(' & ').toUpperCase() : 'TEAM A';
@@ -4463,7 +4792,9 @@ function handleNetMessage(msg, fromId){
     }
     return;
   }
+  if (netRole === 'client' && fromId === 'host' && msg.type === 'roster' && !gameStarted && Number.isInteger(msg.matchEpoch)) matchEpoch = msg.matchEpoch;
   if ((msg.matchEpoch ?? 0) !== matchEpoch) return;
+  if (handleFfaMessage(msg, fromId)) return;
   if (['hit', 'shot', 'kill', 'roundEnd'].includes(msg.type) && msg.roundNum !== roundState.roundNum) return;
   if (netRole === 'host' && ['shot', 'state'].includes(msg.type) && msg.id !== fromId) return;
   if (netRole === 'host' && msg.type === 'kill' && msg.victimId !== fromId) return;
@@ -4479,15 +4810,17 @@ function handleNetMessage(msg, fromId){
   if (netRole === 'host' && msg.type !== 'roster') netRelayFromHost(msg, fromId);
   switch (msg.type) {
     case 'roster':
+      if (netRole !== 'client' || fromId !== 'host') return;
       netRoster = msg.roster; netTeamSize = msg.teamSize;
       if (netRole === 'client' && fromId === 'host' && !gameStarted) {
-        selectedRuleset = msg.ruleset === 'knife' ? 'knife' : 'standard';
-        document.getElementById('pvpStatus').textContent = selectedRuleset === 'knife' ? 'KNIFE THROWING · 5 KNIVES' : 'STANDARD PVP';
+        selectedRuleset = ['knife','ffa'].includes(msg.ruleset) ? msg.ruleset : 'standard';
+        document.getElementById('pvpStatus').textContent = isFfa() ? 'FREE FOR ALL · 6–12 PLAYERS' : selectedRuleset === 'knife' ? 'KNIFE THROWING · 5 KNIVES' : 'STANDARD PVP';
       }
       if (netRole === 'client' && msg.map && MAPS[msg.map]) {
         selectedMap = msg.map;
         preloadMapTextures(selectedMap).then(updateStartButtonState);
       }
+      if (isFfa()) pruneFfaAvatars();
       updateScoreboardNames();
       break;
     case 'name':
@@ -4521,12 +4854,18 @@ function handleNetMessage(msg, fromId){
       showRemoteShot(msg);
       break;
     case 'hit':
+      if (isFfa() && netRole === 'host' && ffaState.bots.has(msg.targetId)) { hitFfaBot(msg); break; }
       if (msg.targetId === netMyId && Number.isFinite(msg.dmg) && msg.dmg > 0 && roundState.phase !== 'ended') {
         lastDamageMeta = { weaponName: msg.weaponName, headshot: !!msg.isHeadshot };
         damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
       }
       break;
     case 'flash':
+      if (isFfa() && netRole === 'host' && ffaState.bots.has(msg.targetId)) {
+        const bot = ffaState.bots.get(msg.targetId);
+        if (Number.isFinite(msg.intensity)) bot.flashedT = Math.max(bot.flashedT || 0, WEAPONS.flash.duration * Math.max(0, Math.min(1, msg.intensity)));
+        break;
+      }
       // the thrower already did our distance/line-of-sight check on their own client (same static
       // map geometry on both ends) - just apply the intensity they computed to our own screen
       if (msg.targetId === netMyId && Number.isFinite(msg.intensity) && msg.intensity > 0) {
@@ -4631,7 +4970,7 @@ function updateNetworking(dt){
     pos: [player.pos.x, player.pos.y, player.pos.z],
     yaw: player.yaw, pitch: player.pitch, fov: player.alive ? camera.fov : baseFov,
     crouching: player.crouching,
-    health: player.health, alive: player.alive,
+    health: player.health, alive: player.alive, protected: isFfa() && ffaState.protection > 0,
     weaponId: currentSlot === 'melee' ? 'knife' : (inventory[currentSlot] || 'knife')
   };
   if (netRole === 'host') netBroadcast(msg);
@@ -4704,6 +5043,7 @@ function getOrCreateRemoteAvatar(id, team){
 
 function applyRemoteState(msg){
   if (msg.id === netMyId) return;
+  if (isFfa() && !netRoster.some(p => p.id === msg.id && p.ready)) return;
   // a state packet is broadcast every ~50ms regardless of round phase, so the losing player's
   // last "I'm dead" packet from the round that just ended can still be in flight when the new
   // round has already started locally - applying it would re-kill their freshly respawned avatar
@@ -4726,8 +5066,9 @@ function applyRemoteState(msg){
   avatar.targetFov = Number.isFinite(msg.fov) ? Math.max(10, Math.min(100, msg.fov)) : baseFov;
   avatar.targetCrouching = !!msg.crouching;
   if (!avatar.interpStarted) { avatar.mesh.position.copy(avatar.targetPos); avatar.mesh.rotation.y = avatar.targetYaw; avatar.interpStarted = true; }
-  if (roundState.phase === 'live' && msg.alive === false) roundLives.eliminate(msg.id, msg.roundNum);
-  const alive = roundState.phase === 'live' ? roundLives.alive(msg.id) : msg.alive;
+  avatar.spawnProtected = !!msg.protected;
+  if (!isFfa() && roundState.phase === 'live' && msg.alive === false) roundLives.eliminate(msg.id, msg.roundNum);
+  const alive = !isFfa() && roundState.phase === 'live' ? roundLives.alive(msg.id) : msg.alive;
   avatar.health = alive ? msg.health : 0;
   avatar.alive = alive;
   if (!alive && !avatar.dying) {
@@ -4770,6 +5111,7 @@ function beginRematch(map, epoch){
   playerFlashT = 0; playerFlashMax = 0;
   document.getElementById('waveBanner').style.opacity = 0;
   buildMap(map);
+  if (isFfa()) { startFfa(true); restoreGameplayPointer(); return; }
   // Reuse round spawn/equipment setup, then enter warmup rather than live play.
   applyPvpRoundStart(1, selectedRuleset === 'knife' ? 'knife' : 'glock', 0, 0);
   startPvpMatch(15);
@@ -4780,6 +5122,7 @@ function beginRematch(map, epoch){
 }
 
 function startPvpMatch(warmupSeconds = WARMUP_FULL){
+  if (isFfa()) { startFfa(); return; }
   if (selectedRuleset === 'knife') {
     warmupSeconds = 15;
     inventory.primary = null; inventory.secondary = null;
@@ -5009,6 +5352,7 @@ function countAliveOnTeam(team){
 
 function updatePvpRound(dt){
   updateNetworking(dt);
+  if (isFfa()) { updateFfa(dt); return; }
   if (roundState.phase === 'warmup') {
     updateWarmup(dt);
   } else if (roundState.phase === 'live') {
@@ -5039,6 +5383,7 @@ function updateEnemies(dt){
   const playerPos = camera.getWorldPosition(new THREE.Vector3());
   enemies.forEach(enemy => {
     if (!enemy.alive || enemy.dying) return;
+    if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) return;
     if (enemy.isRemote) {
       // smoothly close the gap to the latest network snapshot instead of snapping straight to it -
       // snapshots only arrive ~20 times/sec, so without this the avatar visibly teleports each time
@@ -5151,6 +5496,7 @@ let damagePulse = 0;
 let recentAttackers = []; // [{id, t}], most recent last
 function damagePlayer(dmg, fromId){
   if (!player.alive || (gameMode === 'pvp' && (roundState.phase === 'ended' || matchFinished))) return;
+  if (isFfa() && ffaState.protection > 0) return;
   player.health -= dmg;
   regenDelayT = REGEN_DELAY;
   audio.playerHurt();
@@ -5185,7 +5531,7 @@ function updatePlayerRegen(dt){
 
 function playerDie(){
   player.alive = false;
-  if (gameMode === 'pvp' && roundState.phase === 'live') roundLives.eliminate(netMyId, roundState.roundNum);
+  if (gameMode === 'pvp' && !isFfa() && roundState.phase === 'live') roundLives.eliminate(netMyId, roundState.roundNum);
   if (socialUI.wheelOpen) socialUI.closeWheel(false);
   clearGameplayInput();
   if (gameMode === 'bomb') return; // round loss is handled by the round system, not the horde game-over screen
@@ -5195,14 +5541,16 @@ function playerDie(){
     const killerId = recentAttackers.length ? recentAttackers[recentAttackers.length - 1].id : null;
     const assistIds = recentAttackers.slice(0, -1).map(a => a.id);
     const killMsg = { type: 'kill', roundNum: roundState.roundNum, deathId: crypto.randomUUID(),
-      victimId: netMyId, killerId, assistIds, ...lastDamageMeta };
+      victimId: netMyId, killerId, assistIds, scoring: isFfa() && ffaState.phase === 'live', ...lastDamageMeta };
     // Publish death immediately, before the host can finish/freeze this match.
     netStateTimer = 0;
     updateNetworking(0);
     netBroadcast(killMsg);
     applyKillMessage(killMsg);
     recentAttackers = [];
-    if (roundState.phase === 'warmup') {
+    if (isFfa()) {
+      ffaState.respawnT = FFA.respawn;
+    } else if (roundState.phase === 'warmup') {
       showWaveBanner('You died - respawning...');
       setTimeout(respawnInWarmup, 2000);
     } else {
@@ -5552,7 +5900,7 @@ function toggleBuyMenu(){
   if (!player.alive) return;
   // once a PvP round is actually live the weapon is forced and buying is off the table entirely -
   // the shop is only for spending the unlimited warmup money before the match starts
-  if (gameMode === 'pvp' && roundState.phase !== 'warmup') return;
+  if (gameMode === 'pvp' && !isFfa() && roundState.phase !== 'warmup') return;
   shopOpen = !shopOpen;
   document.getElementById('buyMenu').style.display = shopOpen ? 'flex' : 'none';
   if (shopOpen) { document.exitPointerLock(); mouseDown = false; }
@@ -5638,7 +5986,7 @@ document.getElementById('resultReturn').addEventListener('click', () => location
 document.getElementById('rematchStart').addEventListener('click', () => {
   if (netRole !== 'host' || !matchFinished) return;
   const map = document.getElementById('rematchMap').value;
-  if (!Object.hasOwn(MAPS, map)) return;
+  if (!Object.hasOwn(MAPS, map) || !!MAPS[map].ffa !== isFfa()) return;
   const epoch = matchEpoch + 1;
   // Reliable ordered PeerJS channels deliver this before the new warmup packets.
   netBroadcast({ type: 'rematch', map, matchEpoch: epoch });
@@ -5688,10 +6036,10 @@ function renderTabScoreboard(){
     body.appendChild(tr);
   };
   if (gameMode === 'pvp') {
-    netRoster.filter(p => !p.isBot).forEach(p => {
+    (isFfa() ? rankPlayers(netRoster, netStats) : netRoster.filter(p => !p.isBot)).forEach(p => {
       const s = ensureStats(p.id);
       const tag = (p.founder ? '★ ' : '') + (p.country ? flagEmoji(p.country) + ' ' : '') + (p.clan ? `[${p.clan}] ` : '');
-      addRow(tag + p.name + (p.id === netMyId ? ' (you)' : ''), p.team, s.kills, s.assists, s.deaths);
+      addRow(tag + p.name + (p.id === netMyId ? ' (you)' : ''), isFfa() ? (p.isBot ? 'BOT' : 'FFA') : p.team, s.kills, s.assists, s.deaths);
     });
   } else {
     addRow('You', '-', kills, 0, localDeaths);
@@ -5712,8 +6060,8 @@ document.addEventListener('keyup', e => {
 function buyWeapon(id){
   if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS[id];
-  if (money < def.price) return;
-  money -= def.price;
+  if (money < weaponPrice(def)) return;
+  money -= weaponPrice(def);
   inventory[def.slot] = id;
   ammoState[def.slot] = { mag: def.mag, reserve: def.reserve };
   updateMoneyHUD();
@@ -5724,8 +6072,8 @@ function buyWeapon(id){
 function buyGrenade(){
   if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS.grenade;
-  if (money < def.price || grenadeCount >= MAX_GRENADES) return;
-  money -= def.price;
+  if (money < weaponPrice(def) || grenadeCount >= MAX_GRENADES) return;
+  money -= weaponPrice(def);
   grenadeCount++;
   updateMoneyHUD();
   updateGrenadeHUD();
@@ -5735,8 +6083,8 @@ function buyGrenade(){
 function buySmoke(){
   if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS.smoke;
-  if (money < def.price || smokeCount >= MAX_SMOKES) return;
-  money -= def.price;
+  if (money < weaponPrice(def) || smokeCount >= MAX_SMOKES) return;
+  money -= weaponPrice(def);
   smokeCount++;
   updateMoneyHUD();
   updateGrenadeHUD();
@@ -5746,8 +6094,8 @@ function buySmoke(){
 function buyFlash(){
   if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS.flash;
-  if (money < def.price || flashCount >= MAX_FLASHES) return;
-  money -= def.price;
+  if (money < weaponPrice(def) || flashCount >= MAX_FLASHES) return;
+  money -= weaponPrice(def);
   flashCount++;
   updateMoneyHUD();
   updateGrenadeHUD();
@@ -5763,7 +6111,7 @@ function renderBuyMenu(){
     const owned = inventory[def.slot] === id;
     const card = document.createElement('div');
     card.className = 'weaponCard' + (owned ? ' owned' : '');
-    card.innerHTML = `<div class="wName">${def.name}</div><div class="wPrice">${owned ? 'EQUIPPED' : '$' + def.price}</div>`;
+    card.innerHTML = `<div class="wName">${def.name}</div><div class="wPrice">${owned ? 'EQUIPPED' : '$' + weaponPrice(def)}</div>`;
     if (!owned) card.addEventListener('click', () => buyWeapon(id));
     (def.slot === 'primary' ? primaryList : secondaryList).appendChild(card);
   });
@@ -5774,7 +6122,7 @@ function renderBuyMenu(){
   const gmaxed = grenadeCount >= MAX_GRENADES;
   const gcard = document.createElement('div');
   gcard.className = 'weaponCard' + (gmaxed ? ' owned' : '');
-  gcard.innerHTML = `<div class="wName">${gdef.name} (${grenadeCount}/${MAX_GRENADES})</div><div class="wPrice">${gmaxed ? 'MAX' : '$' + gdef.price}</div>`;
+  gcard.innerHTML = `<div class="wName">${gdef.name} (${grenadeCount}/${MAX_GRENADES})</div><div class="wPrice">${gmaxed ? 'MAX' : '$' + weaponPrice(gdef)}</div>`;
   if (!gmaxed) gcard.addEventListener('click', buyGrenade);
   grenadeList.appendChild(gcard);
 
@@ -5782,7 +6130,7 @@ function renderBuyMenu(){
   const smaxed = smokeCount >= MAX_SMOKES;
   const scard = document.createElement('div');
   scard.className = 'weaponCard' + (smaxed ? ' owned' : '');
-  scard.innerHTML = `<div class="wName">${sdef.name} (${smokeCount}/${MAX_SMOKES})</div><div class="wPrice">${smaxed ? 'MAX' : '$' + sdef.price}</div>`;
+  scard.innerHTML = `<div class="wName">${sdef.name} (${smokeCount}/${MAX_SMOKES})</div><div class="wPrice">${smaxed ? 'MAX' : '$' + weaponPrice(sdef)}</div>`;
   if (!smaxed) scard.addEventListener('click', buySmoke);
   grenadeList.appendChild(scard);
 
@@ -5790,7 +6138,7 @@ function renderBuyMenu(){
   const fmaxed = flashCount >= MAX_FLASHES;
   const fcard = document.createElement('div');
   fcard.className = 'weaponCard' + (fmaxed ? ' owned' : '');
-  fcard.innerHTML = `<div class="wName">${fdef.name} (${flashCount}/${MAX_FLASHES})</div><div class="wPrice">${fmaxed ? 'MAX' : '$' + fdef.price}</div>`;
+  fcard.innerHTML = `<div class="wName">${fdef.name} (${flashCount}/${MAX_FLASHES})</div><div class="wPrice">${fmaxed ? 'MAX' : '$' + weaponPrice(fdef)}</div>`;
   if (!fmaxed) fcard.addEventListener('click', buyFlash);
   grenadeList.appendChild(fcard);
 }
@@ -5830,7 +6178,7 @@ function animate(){
   }
 
   spectator.update({ dead: gameStarted && gameMode === 'pvp' && !player.alive,
-    enemies, team: myTeam(), roster: netRoster, phase: roundState.phase, baseFov, dt,
+    enemies, team: myTeam(), roster: netRoster, phase: isFfa() ? 'warmup' : roundState.phase, baseFov, dt,
     standingHeight: player.height, crouchingHeight: player.crouchHeight });
 
   // Finish cosmetic death/shot effects even when the final round freezes gameplay.
@@ -5985,6 +6333,7 @@ document.addEventListener('keydown', e => {
 document.querySelectorAll('.mapCard').forEach(card => {
   card.addEventListener('mouseenter', () => preloadMapTextures(card.dataset.map), { once: true });
   card.addEventListener('click', () => {
+    if (netPeer) { socialUI.notice('Choose maps before creating a room, or between matches.'); return; }
     document.querySelectorAll('.mapCard').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
     selectedMap = card.dataset.map;
@@ -6080,12 +6429,16 @@ function renderFoundryThumbnail(){
 }
 document.querySelector('.mapCard[data-map="foundry"] .swatch').style.backgroundImage = `url(${renderFoundryThumbnail()})`;
 
+for (const id of Object.keys(FFA_MAPS)) document.querySelector(`.mapCard[data-map="${id}"] .swatch`).style.backgroundImage = `url(${ffaThumbnail(id)})`;
+
 document.querySelectorAll('.modeCard').forEach(card => {
   card.addEventListener('click', () => {
+    if (netPeer) { socialUI.notice('Return to HQ to create a room with a different mode.'); return; }
     document.querySelectorAll('.modeCard').forEach(c => c.classList.remove('selected'));
     card.classList.add('selected');
-    selectedMode = card.dataset.mode === 'knife' ? 'pvp' : card.dataset.mode;
-    selectedRuleset = card.dataset.mode === 'knife' ? 'knife' : 'standard';
+    selectedMode = ['knife','ffa'].includes(card.dataset.mode) ? 'pvp' : card.dataset.mode;
+    selectedRuleset = ['knife','ffa'].includes(card.dataset.mode) ? card.dataset.mode : 'standard';
+    selectFfaMaps();
     if (netRole === 'host' && !gameStarted) broadcastRoster();
     document.getElementById('pvpPanel').style.display = selectedMode === 'pvp' ? 'flex' : 'none';
     document.getElementById('startBtn').textContent = selectedMode === 'practice' ? 'START PRACTICE' : "I'M READY";
@@ -6211,13 +6564,13 @@ document.getElementById('startBtn').addEventListener('click', () => {
   updateHealthHUD();
   updateEnemyHUD();
   updateMoneyHUD();
-  renderBuyMenu();
   gameMode = selectedMode;
+  renderBuyMenu();
   document.getElementById('hordeStats').style.display = gameMode === 'horde' ? 'block' : 'none';
   document.getElementById('roundStats').style.display = (gameMode === 'bomb' || gameMode === 'pvp') ? 'block' : 'none';
   document.getElementById('scoreboardBar').style.display = (gameMode === 'bomb' || gameMode === 'pvp' || gameMode === 'practice') ? 'flex' : 'none';
   // practice has no teams - just the centered timer, same look as the 1v1 scoreboard's clock
-  document.querySelectorAll('#scoreboardBar .sbTeam, #scoreboardBar .sbScore').forEach(el => { el.style.display = gameMode === 'practice' ? 'none' : 'flex'; });
+  document.querySelectorAll('#scoreboardBar .sbTeam, #scoreboardBar .sbScore').forEach(el => { el.style.display = (gameMode === 'practice' || isFfa()) ? 'none' : 'flex'; });
   document.getElementById('sbNameA').textContent = gameMode === 'bomb' ? 'T' : 'TEAM A';
   document.getElementById('sbNameB').textContent = gameMode === 'bomb' ? 'CT' : 'TEAM B';
   if (gameMode === 'bomb') startMatch();

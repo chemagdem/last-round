@@ -261,6 +261,8 @@
   <h2>No second chances</h2>
   <p>Choose your battlefield</p>
   <div id="mapSelect">
+    <div class="mapCard" data-map="dockyard" hidden><div class="swatch"></div><h3>DOCKYARD</h3><p>FFA · 6–12 players. Cargo stacks, a port control tower and looping freight lanes. Twelve distributed spawn bays.</p></div>
+    <div class="mapCard" data-map="atrium" hidden><div class="swatch"></div><h3>ATRIUM</h3><p>FFA · 6–12 players. Four shaded pavilions, planted courtyards and an outer flanking route. Fight, break contact, reposition.</p></div>
     <div class="mapCard selected" data-map="arena">
       <div class="swatch arena"></div>
       <h3>DESERT</h3>
@@ -288,6 +290,7 @@
     </div>
   </div>
   <div id="modeSelect">
+    <div class="modeCard" data-mode="ffa"><h3>FREE FOR ALL</h3><p>Up to 12. Three ready humans + three bots unlock a 15s warmup. Join mid-match and replace a bot. All weapons $0. First to 30 kills or 10 minutes.</p></div>
     <div class="modeCard selected" data-mode="pvp">
       <h3>MULTIPLAYER (PVP)</h3>
       <p>1v1 or 2v2 against a friend via room code. Each round forces a different weapon - the team that wipes the other wins.</p>
@@ -348,7 +351,7 @@
   <p id="resultDetail"></p><p id="resultRating"></p>
   <div id="rematchControls" hidden>
     <label for="rematchMap">NEXT BATTLEFIELD</label>
-    <select id="rematchMap">
+    <select id="rematchMap"><option value="dockyard" hidden disabled>DOCKYARD · FFA</option><option value="atrium" hidden disabled>ATRIUM · FFA</option>
       <option value="arena">DESERT</option><option value="warehouse">WAREHOUSE</option>
       <option value="subway">SUBWAY</option><option value="skyline">SKYLINE</option><option value="foundry">FOUNDRY</option>
     </select>
@@ -389,6 +392,7 @@
 </div>
 
 <div id="hud" style="display:none;">
+  <div id="ffaHud" hidden></div>
   <div id="scoreboardBar" style="display:none;">
     <div class="sbTeam sbTeamA"><span id="sbNameA">TEAM A</span></div>
     <div class="sbScore sbScoreA"><span id="tWins">0</span></div>

@@ -15,7 +15,7 @@ function fixture() {
     copy(v) { this.set(v.x, v.y, v.z); } });
   const avatar = { alive: true, dying: false, deathT: 0, isRemote: true,
     targetPos: vector(), mesh: { position: vector(), rotation: vector() } };
-  const context = vm.createContext({ netMyId: 'local', baseFov: 75, roundState: { roundNum: 2 },
+  const context = vm.createContext({ isFfa: () => false, netMyId: 'local', baseFov: 75, roundState: { roundNum: 2 },
     netRoster: [{ id: 'remote', team: 'B', name: 'Opponent' }],
     player: { height: 1.8, crouchHeight: 1 },
     getOrCreateRemoteAvatar: () => avatar,
@@ -57,7 +57,7 @@ test('previous-round deaths cannot kill the new-round avatar', () => {
 });
 
 test('round-end blocks incoming damage and local firing', () => {
-  const context = vm.createContext({ player: { alive: true, health: 100 },
+  const context = vm.createContext({ isFfa: () => false, player: { alive: true, health: 100 },
     gameMode: 'pvp', roundState: { phase: 'ended' }, matchFinished: false });
   vm.runInContext(productionFunction('damagePlayer') + '\n' + productionFunction('fireWeapon'), context);
   context.damagePlayer(200, 'remote');
