@@ -1339,6 +1339,39 @@ function exitSignTexture(){
   return new THREE.CanvasTexture(c);
 }
 
+// Hand-authored 2D bot-nav/blockedAt layout mirroring Subway's real geometry (walls, columns,
+// train car, benches, crates) so FFA can run on it without a second, FFA-only build of the map -
+// buildSubwayMap()'s own colliders are what the player actually walks into; this is only read by
+// blockedAt()/buildNavigation() for FFA bot pathing and human spawn-clearing.
+const SUBWAY_FFA_LAYOUT = (() => {
+  const westX = -10, eastX = 17, halfLen = 41, wallThk = 2, wallCx = (westX + eastX) / 2;
+  const halfWidth = 18, halfDepth = 42;
+  const cover = [
+    { x: wallCx, z: -halfLen - wallThk / 2, w: eastX - westX, d: wallThk },
+    { x: wallCx, z: halfLen + wallThk / 2, w: eastX - westX, d: wallThk },
+    { x: westX, z: 0, w: wallThk, d: halfLen * 2 + wallThk * 2 },
+    { x: eastX, z: 0, w: wallThk, d: halfLen * 2 + wallThk * 2 },
+    { x: 13, z: 0, w: 5.2, d: 34 }, // parked train car
+    // The corridor isn't centered on x=0 (the pit side runs further east than the platform runs
+    // west), so a halfWidth wide enough for the pit leaves slack past the platform's real wall -
+    // seal it, or that leftover strip becomes its own walkable-but-unreachable pocket for bots.
+    { x: -14.5, z: 0, w: 8, d: halfDepth * 2 + 10 }
+  ];
+  for (const z of [-30, -20, -10, 0, 10, 20, 30]) {
+    const bucket = Math.round(Math.abs(z) / 10);
+    cover.push({ x: bucket % 2 === 0 ? -1.8 : 1.8, z, w: 1.2, d: 1.2 });
+  }
+  for (const z of [-30, -12, 12, 30]) cover.push({ x: westX + 1.1, z, w: 1, d: 2.6 });
+  for (const z of [-33, 33]) {
+    cover.push({ x: -3, z, w: 1.6, d: 1.6 }, { x: 3, z, w: 1.6, d: 1.6 }, { x: -6, z: z * 0.9, w: 1.5, d: 1.5 });
+  }
+  const spawns = [
+    { x: 0, z: -38 }, { x: 0, z: 38 }, { x: -5, z: -25 }, { x: 5, z: -25 }, { x: -5, z: 25 }, { x: 5, z: 25 },
+    { x: 0, z: -10 }, { x: 0, z: 10 }, { x: -5, z: 0 }, { x: 5, z: 0 }, { x: 13, z: -33 }, { x: 13, z: 33 }
+  ];
+  return { halfWidth, halfDepth, cover, spawns };
+})();
+
 // ---------- Map: Subway (abandoned station platform) ----------
 // A genuinely different shape from Desert/Warehouse rather than the same footprint reskinned:
 // a long, narrow platform with a sunken track pit and parked train car along one side, support
@@ -1563,7 +1596,8 @@ function buildSubwayMap(){
     ctSpawn: new THREE.Vector3(0, 2, 36),
     tSpawnZone: spawnZoneA,
     ctSpawnZone: spawnZoneB,
-    sites: []
+    sites: [],
+    ffa: SUBWAY_FFA_LAYOUT
   };
 }
 
@@ -1725,7 +1759,7 @@ const MAPS = {
   ski: { name: 'Ski Station', ffa: true, build: () => buildFreeForAllMap('ski') },
   arena: { name: 'Desert', build: buildArenaMap },
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
-  subway: { name: 'Subway', build: buildSubwayMap },
+  subway: { name: 'Subway', build: buildSubwayMap, dualFfa: true },
   skyline: { name: 'Skyline', build: buildSkylineMap },
   foundry: { name: 'Foundry', build: buildFoundryMap }
 };
@@ -4431,19 +4465,24 @@ function getIceConfig(){
 }
 
 // ---------- Free for all: host-owned bots, lifecycle and match clock ----------
+// A map is usually either FFA-only (MAPS[id].ffa) or standard-only (everything else), but a
+// "dual" map like Subway keeps its normal standard-mode slot and additionally opts into FFA.
+const mapSupportsFfa = id => !!(MAPS[id]?.ffa || MAPS[id]?.dualFfa);
+const mapSupportsStandard = id => !MAPS[id]?.ffa;
 function selectFfaMaps(){
   if (gameStarted) return;
   // Practice has no ruleset of its own, but its maps aren't tied to isFfa() the way
   // pvp/knife/ffa are - it can freely offer the FFA maps alongside the regular ones.
   const showAllMaps = selectedMode === 'practice';
-  if (!showAllMaps && !!MAPS[selectedMap]?.ffa !== isFfa()) selectedMap = isFfa() ? 'dockyard' : 'arena';
+  const mapStillValid = id => isFfa() ? mapSupportsFfa(id) : mapSupportsStandard(id);
+  if (!showAllMaps && !mapStillValid(selectedMap)) selectedMap = isFfa() ? 'dockyard' : 'arena';
   document.querySelectorAll('.mapCard').forEach(card => {
-    card.hidden = showAllMaps ? false : (!!MAPS[card.dataset.map]?.ffa !== isFfa());
+    card.hidden = showAllMaps ? false : !mapStillValid(card.dataset.map);
     card.classList.toggle('selected', card.dataset.map === selectedMap);
   });
   document.querySelectorAll('.teamSizeBtn').forEach(button => { button.hidden = isFfa(); });
   document.querySelectorAll('#rematchMap option').forEach(option => {
-    option.disabled = !!MAPS[option.value]?.ffa !== isFfa(); option.hidden = option.disabled;
+    option.disabled = !mapStillValid(option.value); option.hidden = option.disabled;
   });
   preloadMapTextures(selectedMap).then(updateStartButtonState);
 }
