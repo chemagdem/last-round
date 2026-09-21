@@ -1974,21 +1974,32 @@ let cloudProfileActive = false;
 // Only the guns whose model actually builds skinnable parts from a shared material in
 // buildWeaponVisual's switch - knife/grenade/smoke/flash are utility items with no finish to equip.
 const WEAPON_SKIN_IDS = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp'];
-const DEFAULT_PROFILE = { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0,
-  equippedSkins: Object.fromEntries(WEAPON_SKIN_IDS.map(id => [id, 'gold'])) };
+// A factory, not a shared object literal: `{...DEFAULT_PROFILE}` only shallow-copies, so every
+// caller used to get the SAME nested equippedSkins object - equipping a skin silently mutated
+// "the default" itself, and any later `{...defaultProfile(), ...somethingWithNoSkins}` merge
+// picked up that leftover mutation instead of a clean gold baseline.
+function defaultProfile(){
+  return { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0,
+    equippedSkins: Object.fromEntries(WEAPON_SKIN_IDS.map(id => [id, 'gold'])) };
+}
+// Fills in any weapon missing a valid skin id (unset, or not in SKIN_CATALOG) with `fallback` -
+// used both for a fresh/partial local save and for whatever a cloud profile sends back.
+function sanitizeEquippedSkins(source, fallback = 'gold'){
+  const skins = source && typeof source === 'object' ? source : {};
+  const legacy = SKIN_CATALOG[fallback] ? fallback : 'gold';
+  const out = {};
+  for (const id of WEAPON_SKIN_IDS) out[id] = SKIN_CATALOG[skins[id]] ? skins[id] : legacy;
+  return out;
+}
 // Founder entitlement comes from the authenticated database RPC, never guest storage.
-let playerProfile = { ...DEFAULT_PROFILE };
+let playerProfile = defaultProfile();
 try {
   const savedProfile = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
-  if (savedProfile && typeof savedProfile === 'object') playerProfile = { ...DEFAULT_PROFILE, ...savedProfile };
+  if (savedProfile && typeof savedProfile === 'object') playerProfile = { ...defaultProfile(), ...savedProfile };
 } catch (err) { /* local storage can be disabled in private browsing */ }
-// Migrate the old single shared-skin field (and backfill any weapon a save is missing) into the
-// new per-weapon map - everything used to equip whatever that one field named.
-if (!playerProfile.equippedSkins || typeof playerProfile.equippedSkins !== 'object') playerProfile.equippedSkins = {};
-{
-  const legacy = SKIN_CATALOG[playerProfile.equippedSkin] ? playerProfile.equippedSkin : 'gold';
-  for (const id of WEAPON_SKIN_IDS) if (!SKIN_CATALOG[playerProfile.equippedSkins[id]]) playerProfile.equippedSkins[id] = legacy;
-}
+// Migrate the old single shared-skin field into the new per-weapon map - everything used to
+// equip whatever that one field named - and backfill any weapon a save is missing.
+playerProfile.equippedSkins = sanitizeEquippedSkins(playerProfile.equippedSkins, playerProfile.equippedSkin);
 delete playerProfile.equippedSkin;
 playerProfile.isFounder = false;
 function savePlayerProfile(){
@@ -6700,7 +6711,12 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
     const { email, founderAccess, founderStatus: accessStatus, ...cloudFields } = profile;
     founderStatus = accessStatus || 'FOUNDER ACCESS: CHECK UNAVAILABLE';
     founderEntitled = founderAccess === true;
-    playerProfile = { ...DEFAULT_PROFILE, ...cloudFields };
+    playerProfile = { ...defaultProfile(), ...cloudFields };
+    // account.js's fields() whitelist may still be sending the old singular `equippedSkin`
+    // column (pre-migration schema) instead of/alongside the new per-weapon `equippedSkins` -
+    // sanitize rather than trust the cloud payload's shape blindly.
+    playerProfile.equippedSkins = sanitizeEquippedSkins(cloudFields.equippedSkins, cloudFields.equippedSkin);
+    delete playerProfile.equippedSkin;
     // The server checks the confirmed Auth identity before granting this entitlement.
     playerProfile.isFounder = founderEntitled;
     localPlayerName = playerProfile.name;
