@@ -4,6 +4,7 @@
    reload animation, ADS, recoil, screen shake, damage vignette.
    ========================================================== */
 import * as THREE from 'three';
+import { sampleReplay, replayEvents, advanceReplay } from './killcam-timeline.js';
 import { buildMall } from './mall-map.js';
 import { mallWalk } from './mall-layout.js';
 import { FFA, botCount, canStart, rankPlayers, chooseSpawn } from './ffa-rules.js';
@@ -3232,6 +3233,7 @@ function fireWeapon(){
   const enemyHits = raycaster.intersectObjects(hittableEnemies.map(e => e.mesh), true);
   const envHits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
 
+  recordKillcamShot({id:netMyId,weaponId,origin:origin.toArray(),end:origin.clone().addScaledVector(dir,Math.min(enemyHits[0]?.distance??def.range,envHits[0]?.distance??def.range)).toArray()});
   let tracerLen = def.range;
   let hitPoint = null;
 
@@ -4615,7 +4617,7 @@ function syncFfaBots(){
 function startFfa(rematch=false){
   if (!currentMapMeta.ffa) return;
   document.body.classList.add('ffaActive');
-  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null; killcamHistory.clear(); killcamRecordT=0;
+  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null; killcamHistory.clear(); killcamShots.length=0; killcamDeaths.length=0; killcamRecordT=0;
   ffaState.navigation=currentMapMeta.navigation ? currentMapMeta.navigation() : buildNavigation(currentMapMeta.ffa);
   if (netRole==='host'){
     ffaState.phase='waiting';ffaState.timer=FFA.warmup;ffaState.sendT=0;
@@ -4704,6 +4706,7 @@ function fireFfaBot(bot,target){
   }
   const end=origin.clone().addScaledVector(direction,distance);
   const shot={type:'shot',id:bot.netId,roundNum:1,weaponId:bot.weaponId,end:end.toArray()};
+  bot.targetPitch=Math.asin(Math.max(-1,Math.min(1,direction.y)));
   showRemoteShot(shot);netBroadcast(shot);
   if(!victim)return;
   const hit={type:'hit',roundNum:1,targetId:victim.id,fromId:bot.netId,dmg:22,weaponName:'M4A1'};
@@ -4771,140 +4774,128 @@ function updateFfaBots(dt){
     }
   }
 }
-// FFA match end sequence: a 5s grayscale freeze-frame showing the final standings, then a real
-// replay of the killer's last ~5 seconds leading up to the last kill, played from their own
-// FIRST-PERSON POV - every peer plays this independently from their own client, all driven by the
-// same synced lastFfaKill/killcamHistory, so it looks the same for everyone without sending any
-// extra network traffic for it (see recordKillcamFrame, sampled at ~10Hz throughout the match).
+// Final-kill replay uses locally observed actor tracks and discrete shot/death events.
+// Remote actors remain limited by the network snapshots received by this client.
 function weaponIdFromName(name){
   return Object.entries(WEAPONS).find(([, def]) => def.name === name)?.[0] || null;
 }
 function killcamName(id){ return id === netMyId ? 'YOU' : (netRoster.find(p => p.id === id)?.name || 'Player').toUpperCase(); }
-// Interpolates a recorded history array at `elapsedMs` since path[0].t - shortest-path angle
-// interpolation for yaw so it doesn't spin the long way around when crossing the +-pi wrap.
-function sampleKillcamPath(path, elapsedMs){
-  if (path.length === 1) return path[0];
-  const targetT = path[0].t + elapsedMs;
-  let i = 0;
-  while (i < path.length - 2 && path[i + 1].t < targetT) i++;
-  const a = path[i], b = path[i + 1];
-  const span = Math.max(1, b.t - a.t);
-  const lt = Math.max(0, Math.min(1, (targetT - a.t) / span));
-  let yawDiff = ((b.yaw - a.yaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
-  return {
-    x: THREE.MathUtils.lerp(a.x, b.x, lt), y: THREE.MathUtils.lerp(a.y, b.y, lt), z: THREE.MathUtils.lerp(a.z, b.z, lt),
-    yaw: a.yaw + yawDiff * lt, pitch: THREE.MathUtils.lerp(a.pitch || 0, b.pitch || 0, lt)
-  };
+// Replay owns camera and actor transforms until cleanup; live death animation is suspended.
+const KILLCAM_WINDOW_MS = 5000, RANKING_DURATION = 5, KILLCAM_TAIL_MS = 900;
+let killcamActive=false, killcamDone=null, killcamWeaponVisual=null, replay=null;
+function meshPose(mesh){
+  const nodes=[];mesh.traverse(node=>nodes.push(node));
+  const pose=new Float32Array(nodes.length*10);
+  nodes.forEach((node,i)=>{node.position.toArray(pose,i*10);node.quaternion.toArray(pose,i*10+3);node.scale.toArray(pose,i*10+7);});
+  return pose;
 }
-const KILLCAM_WINDOW_MS = 5000, RANKING_DURATION = 5, KILLCAM_TAIL_MS = 550;
-let killcamActive = false, killcamT = 0, killcamDone = null, killcamWeaponVisual = null, killcamShotFired = false;
-let killcamPath = null, killcamSpanMs = 0, killcamWorldPaths = null;
+function applyReplayPose(mesh,s){
+  if(!s.a.pose)return;
+  const nodes=[];mesh.traverse(node=>nodes.push(node));
+  const a=s.a.pose,b=s.b.pose?.length===a.length?s.b.pose:a;
+  const qa=new THREE.Quaternion(),qb=new THREE.Quaternion();
+  nodes.forEach((node,i)=>{
+    const k=i*10;if(k+9>=a.length)return;
+    node.position.fromArray(a,k).lerp(new THREE.Vector3().fromArray(b,k),s.alpha);
+    qa.fromArray(a,k+3);qb.fromArray(b,k+3);node.quaternion.copy(qa.slerp(qb,s.alpha));
+    node.scale.fromArray(a,k+7).lerp(new THREE.Vector3().fromArray(b,k+7),s.alpha);
+  });
+}
 function playKillcam(onDone){
-  const kill = lastFfaKill;
-  const fullPath = kill ? (killcamHistory.get(kill.killerId) || []).filter(s => s.t <= kill.t) : [];
-  const windowStart = kill ? kill.t - KILLCAM_WINDOW_MS : 0;
-  killcamPath = fullPath.filter(s => s.t >= windowStart);
-  if (killcamPath.length < 2) killcamPath = fullPath.slice(-2);
-  if (!kill || killcamPath.length < 2) { onDone(); return; } // not enough recorded history (edge case) - straight to results
-  killcamSpanMs = Math.max(1, killcamPath.at(-1).t - killcamPath[0].t);
-  killcamShotFired = false;
-  // replay every other tracked actor over the same window so the world matches what the camera is
-  // seeing (the victim actually being there and going down, not a frozen corpse for 5 seconds) -
-  // their true frozen pose is cached first so it can be restored exactly once the replay ends.
-  // recordKillcamFrame() stops recording an actor the instant they die, so an actor's own history
-  // can run out before the killer's does - past that point they're shown snapped to their real,
-  // already-fallen pose (see updateKillcam) rather than the earlier upright/moving one, which is
-  // what actually caused the "corpse sliding across the ground" bug: only rotation.y was replayed,
-  // so a moving (pre-death) position kept getting combined with the death animation's already-set
-  // fall tilt on rotation.x/z from a previous frame.
-  killcamWorldPaths = new Map();
-  for (const [id, hist] of killcamHistory) {
-    if (id === kill.killerId) continue;
-    const avatar = enemies.find(e => e.netId === id);
-    if (!avatar) continue;
-    const arr = hist.filter(s => s.t >= killcamPath[0].t && s.t <= kill.t);
-    if (arr.length < 2) continue;
-    avatar._killcamRealPos = avatar.mesh.position.clone();
-    avatar._killcamRealYaw = avatar.mesh.rotation.y;
-    avatar._killcamRealRotX = avatar.mesh.rotation.x;
-    avatar._killcamRealRotZ = avatar.mesh.rotation.z;
-    killcamWorldPaths.set(id, arr);
+  const kill=lastFfaKill,track=kill&&killcamHistory.get(kill.killerId);
+  if(!track||track.length<2||kill.t<track[0].t){onDone();return;}
+  const start=Math.max(track[0].t,kill.t-KILLCAM_WINDOW_MS);
+  const shots=killcamShots.filter(e=>e.t>=start&&e.t<=kill.t+120);
+  const fatalShot=shots.filter(e=>e.id===kill.killerId&&e.t<=kill.t+30).at(-1);
+  const fatalTime=fatalShot&&kill.t-fatalShot.t<750?fatalShot.t:kill.t;
+  replay={kill,start,time:start-.001,end:kill.t+KILLCAM_TAIL_MS,fatalTime,shots,
+    cameraPosition:camera.position.clone(),cameraRotation:camera.rotation.clone(),fov:camera.fov,
+    weaponPosition:weaponGroup.position.clone(),weaponRotation:weaponGroup.rotation.clone(),weaponVisible:weaponGroup.visible,
+    muzzlePosition:flashLight.position.clone(),spritePosition:flashSprite.position.clone(),actors:[],kick:0,flash:0,weaponId:null};
+  for(const avatar of enemies){
+    replay.actors.push({mesh:avatar.mesh,id:avatar.netId,pose:meshPose(avatar.mesh),visible:avatar.mesh.visible});
+    avatar.mesh.visible=false;
   }
-  killcamT = 0; killcamActive = true; killcamDone = onDone;
-  // show the actual weapon the kill was made with, not whatever the local viewer currently has
-  // equipped - built fresh here since the killer might be someone else entirely.
-  if (currentVisual) currentVisual.group.visible = false;
-  const wid = weaponIdFromName(kill.weaponName);
-  if (wid) { killcamWeaponVisual = buildWeaponVisual(wid); weaponGroup.add(killcamWeaponVisual.group); }
-  weaponGroup.visible = true;
-  weaponGroup.position.set(0.015, -0.015, 0.04);
-  weaponGroup.rotation.set(0, 0, 0);
-  document.getElementById('hud').style.display = 'none';
-  document.getElementById('killcamLabel').innerHTML = `<span class="killcamEyebrow">KILLCAM</span>${killcamName(kill.killerId)} ELIMINATED ${killcamName(kill.victimId)} · ${kill.weaponName.toUpperCase()}${kill.headshot ? ' · HEADSHOT' : ''}`;
+  // The local player normally has no world avatar, but must be visible as a replay victim.
+  if(kill.killerId!==netMyId&&killcamHistory.has(netMyId)){
+    const mesh=makeEnemySoldier();scene.add(mesh);
+    replay.actors.push({mesh,id:netMyId,temporary:true});
+  }
+  killcamActive=true;killcamDone=onDone;
+  if(currentVisual)currentVisual.group.visible=false;
+  weaponGroup.visible=true;weaponGroup.position.set(.015,-.015,.04);weaponGroup.rotation.set(0,0,0);
+  document.getElementById('hud').style.display='none';
+  document.getElementById('scopeOverlay').style.display='none';
+  const label=document.getElementById('killcamLabel');
+  label.textContent=`FINAL KILL · ${killcamName(kill.killerId)} → ${killcamName(kill.victimId)} · ${kill.weaponName.toUpperCase()}`;
   document.getElementById('killcamOverlay').classList.add('show');
 }
-// muzzle flash + kick + shot sound, played once at the exact instant the replay reaches the kill -
-// flashLight/flashSprite are already re-parented onto killcamWeaponVisual.group by the
-// buildWeaponVisual() call in playKillcam, same as equipping any weapon normally does.
-function fireKillcamShot(){
-  if (!killcamWeaponVisual) return;
-  flashLight.intensity = 5;
-  flashSpriteMat.opacity = 1;
-  const size = 0.5 + Math.random() * 0.2;
-  flashSprite.scale.set(size, size, 1);
-  setTimeout(() => { flashLight.intensity = 0; flashSpriteMat.opacity = 0; }, 45);
-  spawnMuzzleSmoke(false);
-  spawnShellCasing();
-  killcamWeaponVisual.group.position.z += 0.08;
-  killcamWeaponVisual.group.rotation.x += 0.09;
-  const weaponId = weaponIdFromName(lastFfaKill.weaponName);
-  const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
-  if (!weaponId || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId] || {});
+function equipReplayWeapon(id){
+  if(replay.weaponId===id)return;
+  if(killcamWeaponVisual)weaponGroup.remove(killcamWeaponVisual.group);
+  replay.weaponId=id;
+  killcamWeaponVisual=WEAPONS[id]?buildWeaponVisual(id):null;
+  if(killcamWeaponVisual)weaponGroup.add(killcamWeaponVisual.group);
+}
+function fireKillcamShot(shot){
+  const firstPerson=shot.id===replay.kill.killerId;
+  if(firstPerson){
+    equipReplayWeapon(shot.weaponId);replay.kick=1;replay.flash=.065;
+    flashLight.intensity=5;flashSpriteMat.opacity=1;
+  }
+  if(shot.origin&&shot.end){
+    const origin=new THREE.Vector3().fromArray(shot.origin),direction=new THREE.Vector3().fromArray(shot.end).sub(origin);
+    const length=direction.length();if(length>.001)drawTracer(origin,direction.normalize(),length);
+    if(!firstPerson)spawnEnemyMuzzleFlash(origin);
+  }
+  const samples={tec9:'smg',duals:'smg'};
+  if(!audio.playSample(samples[shot.weaponId]||shot.weaponId,firstPerson?.85:.25))audio.gunshot(GUNSHOT_PROFILES[shot.weaponId]||{});
+}
+function finishKillcam(){
+  for(const actor of replay.actors){
+    if(actor.temporary){scene.remove(actor.mesh);continue;}
+    applyReplayPose(actor.mesh,{a:{pose:actor.pose},b:{pose:actor.pose},alpha:0});actor.mesh.visible=actor.visible;
+  }
+  if(killcamWeaponVisual)weaponGroup.remove(killcamWeaponVisual.group);
+  killcamWeaponVisual=null;flashLight.intensity=0;flashSpriteMat.opacity=0;
+  if(currentVisual){currentVisual.group.visible=true;currentVisual.group.add(flashLight,flashSprite);}
+  flashLight.position.copy(replay.muzzlePosition);flashSprite.position.copy(replay.spritePosition);
+  weaponGroup.position.copy(replay.weaponPosition);weaponGroup.rotation.copy(replay.weaponRotation);weaponGroup.visible=replay.weaponVisible;
+  camera.position.copy(replay.cameraPosition);camera.rotation.copy(replay.cameraRotation);camera.fov=replay.fov;camera.updateProjectionMatrix();
+  killcamActive=false;replay=null;
+  document.getElementById('killcamOverlay').classList.remove('show');document.getElementById('hud').style.display='block';
+  const done=killcamDone;killcamDone=null;done?.();
 }
 function updateKillcam(dt){
-  killcamT += dt;
-  const totalMs = killcamSpanMs + KILLCAM_TAIL_MS;
-  const elapsedMs = Math.min(killcamT * 1000, totalMs);
-  const pathElapsed = Math.min(elapsedMs, killcamSpanMs);
-  const pose = sampleKillcamPath(killcamPath, pathElapsed);
-  camera.position.set(pose.x, pose.y, pose.z);
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = pose.yaw;
-  camera.rotation.x = pose.pitch;
-  for (const [id, arr] of killcamWorldPaths) {
-    const avatar = enemies.find(e => e.netId === id);
-    if (!avatar) continue;
-    const arrSpan = arr.at(-1).t - arr[0].t;
-    const s = sampleKillcamPath(arr, Math.min(pathElapsed, arrSpan));
-    avatar.mesh.position.set(s.x, s.y - player.height, s.z); // recorded y was eye height - back to feet
-    avatar.mesh.rotation.y = s.yaw;
-    if (pathElapsed >= arrSpan) {
-      // this actor's own recorded history ran out before the killer's did - they're already dead
-      // at this point in the replay, so show their real (fallen) tilt instead of standing upright
-      avatar.mesh.rotation.x = avatar._killcamRealRotX;
-      avatar.mesh.rotation.z = avatar._killcamRealRotZ;
-    } else {
-      avatar.mesh.rotation.x = 0;
-      avatar.mesh.rotation.z = 0;
+  const previous=replay.time;
+  replay.time=Math.min(replay.end,advanceReplay(previous,dt*1000,replay.fatalTime));
+  const simulationDt=(replay.time-previous)/1000;
+  const pose=sampleReplay(killcamHistory.get(replay.kill.killerId),replay.time);
+  camera.position.set(pose.x,pose.y,pose.z);camera.rotation.set(pose.pitch,pose.yaw,0,'YXZ');
+  camera.fov=pose.fov||baseFov;camera.updateProjectionMatrix();
+  equipReplayWeapon(pose.weaponId||weaponIdFromName(replay.kill.weaponName));
+  for(const actor of replay.actors){
+    const track=killcamHistory.get(actor.id),s=sampleReplay(track,replay.time);
+    actor.mesh.visible=!!s&&actor.id!==replay.kill.killerId&&replay.time>=track[0].t;
+    if(!actor.mesh.visible)continue;
+    applyReplayPose(actor.mesh,s);
+    if(actor.temporary){
+      actor.mesh.position.set(s.x,s.feet,s.z);actor.mesh.rotation.set(0,s.yaw,0);
+      animateSoldierRig(actor.mesh,simulationDt,0,s.crouching);
+    }
+    // Explicit death times, never the end of a position track, trigger the collapse.
+    const death=killcamDeaths.filter(e=>e.id===actor.id&&e.t<=replay.time&&e.t>=s.t).at(-1);
+    if(death){
+      const p=Math.min(1,(replay.time-death.t)/700),ease=1-(1-p)**3;
+      actor.mesh.rotation.x=ease*Math.PI/2.1*Math.sin(s.yaw+Math.PI);
+      actor.mesh.rotation.z=ease*Math.PI/2.1*Math.cos(s.yaw+Math.PI);
     }
   }
-  if (!killcamShotFired && elapsedMs >= killcamSpanMs) { killcamShotFired = true; fireKillcamShot(); }
-  if (elapsedMs >= totalMs) {
-    killcamActive = false;
-    for (const [id] of killcamWorldPaths) {
-      const avatar = enemies.find(e => e.netId === id);
-      if (avatar) {
-        avatar.mesh.position.copy(avatar._killcamRealPos);
-        avatar.mesh.rotation.set(avatar._killcamRealRotX, avatar._killcamRealYaw, avatar._killcamRealRotZ);
-      }
-    }
-    if (killcamWeaponVisual) { weaponGroup.remove(killcamWeaponVisual.group); killcamWeaponVisual = null; }
-    if (currentVisual) currentVisual.group.visible = true;
-    document.getElementById('killcamOverlay').classList.remove('show');
-    document.getElementById('hud').style.display = 'block';
-    const done = killcamDone; killcamDone = null;
-    done?.();
-  }
+  replay.kick*=Math.exp(-simulationDt*15);replay.flash=Math.max(0,replay.flash-simulationDt);
+  if(killcamWeaponVisual){killcamWeaponVisual.group.position.z=replay.kick*.09;killcamWeaponVisual.group.rotation.x=replay.kick*.10;}
+  if(!replay.flash){flashLight.intensity=0;flashSpriteMat.opacity=0;}
+  for(const shot of replayEvents(replay.shots,previous,replay.time))fireKillcamShot(shot);
+  if(replay.time>=replay.end)finishKillcam();
 }
 function renderFfaRanking(order){
   document.getElementById('ffaRankingList').innerHTML = order.map((p, i) => {
@@ -4943,7 +4934,7 @@ function finishFfa(){
 }
 function updateFfa(dt){
   if(!ffaState.active)return;
-  killcamRecordT-=dt; if(killcamRecordT<=0){killcamRecordT=0.1;recordKillcamFrame();}
+  killcamRecordT-=dt; if(killcamRecordT<=0){killcamRecordT=1/30;recordKillcamFrame();}
   ffaState.protection=Math.max(0,ffaState.protection-dt);
   if(!player.alive){ffaState.respawnT-=dt;if(ffaState.respawnT<=0)respawnFfaPlayer();}
   if(netRole==='host'){
@@ -5094,28 +5085,37 @@ const roundLives = new RoundLives();
 // FFA killcam: always holds the most recent scoring kill (see applyKillMessage), so whatever it
 // points to when the match ends is, by definition, the kill that ended it.
 let lastFfaKill = null;
-// Rolling ~6s position/aim history per actor (local player + every enemies[] entry, netId ->
-// [{t,x,y,z,yaw,pitch}]), sampled at ~10Hz while an FFA match is live (see recordKillcamFrame,
-// called from updateFfa). This is what lets the killcam actually replay the killer's last few
-// seconds instead of just freezing their pose at the instant the match ended.
+// Rolling six-second pose history, sampled at 30 Hz and at every recorded shot.
 const killcamHistory = new Map();
 let killcamRecordT = 0;
 const KILLCAM_HISTORY_MS = 6000;
+const killcamShots=[],killcamDeaths=[];
+function recordKillcamShot(msg){
+  if(!isFfa()||killcamActive||ffaState.phase!=='live')return;
+  recordKillcamFrame();
+  const avatar=enemies.find(e=>e.netId===msg.id);
+  const origin=msg.origin||avatar?.mesh.position.clone().add(new THREE.Vector3(0,1.4,0)).toArray();
+  killcamShots.push({...msg,t:performance.now(),origin:origin?.slice(),end:msg.end?.slice()});
+  while(killcamShots.length&&performance.now()-killcamShots[0].t>KILLCAM_HISTORY_MS)killcamShots.shift();
+}
 function recordKillcamFrame(){
-  const t = performance.now();
-  const push = (id, x, y, z, yaw, pitch) => {
-    let arr = killcamHistory.get(id);
-    if (!arr) { arr = []; killcamHistory.set(id, arr); }
-    arr.push({ t, x, y, z, yaw, pitch });
-    while (arr.length > 1 && t - arr[0].t > KILLCAM_HISTORY_MS) arr.shift();
+  if(killcamActive||matchFinished)return;
+  const t=performance.now();
+  const push=(id,s)=>{
+    let arr=killcamHistory.get(id);if(!arr){arr=[];killcamHistory.set(id,arr);}
+    arr.push({t,...s});while(arr.length>1&&t-arr[0].t>KILLCAM_HISTORY_MS)arr.shift();
   };
-  if (player.alive) push(netMyId, player.pos.x, player.pos.y, player.pos.z, player.yaw, player.pitch);
-  for (const e of enemies) {
-    if (!e.netId || !e.alive) continue;
-    const isBot = !!e.isBot;
-    push(e.netId, e.mesh.position.x, e.mesh.position.y + player.height, e.mesh.position.z,
-      isBot ? e.mesh.rotation.y : (e.targetYaw ?? e.mesh.rotation.y), isBot ? 0 : (e.targetPitch ?? 0));
+  push(netMyId,{x:player.pos.x,y:player.pos.y,z:player.pos.z,feet:player.pos.y-(player.crouching?player.crouchHeight:player.height),
+    yaw:camera.rotation.y,pitch:camera.rotation.x,fov:camera.fov,alive:player.alive,crouching:player.crouching,
+    weaponId:inventory[currentSlot]||'knife'});
+  for(const e of enemies){
+    if(!e.netId)continue;
+    const h=e.targetCrouching?player.crouchHeight:player.height;
+    push(e.netId,{x:e.mesh.position.x,y:e.mesh.position.y+h,z:e.mesh.position.z,feet:e.mesh.position.y,
+      yaw:e.isBot?e.mesh.rotation.y:(e.targetYaw??e.mesh.rotation.y),pitch:e.targetPitch||0,fov:e.targetFov||baseFov,
+      alive:e.alive,crouching:!!e.targetCrouching,weaponId:e.weaponId||e.mesh.userData.weaponId,pose:meshPose(e.mesh)});
   }
+  while(killcamDeaths.length&&t-killcamDeaths[0].t>KILLCAM_HISTORY_MS)killcamDeaths.shift();
 }
 let lastDamageMeta = {};
 // Per-life damage exchange with each opponent, from the local player's own perspective only -
@@ -5146,6 +5146,7 @@ function applyKillMessage(msg){
   // Reaching this point in FFA already guarantees msg.scoring === true (see the early return
   // above), so every kill seen here while in FFA is a candidate - the last one standing when the
   // match ends is the one the killcam replays.
+  if (isFfa()) { killcamDeaths.push({id:msg.victimId,t:performance.now()}); }
   if (isFfa()) lastFfaKill = { killerId: msg.killerId, victimId: msg.victimId, weaponName: msg.weaponName || 'Unknown', headshot: !!msg.headshot, t: performance.now() };
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
   showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD');
@@ -5372,6 +5373,7 @@ function myTeam(){
 }
 
 function showRemoteShot(msg){
+  if(killcamActive)return;
   if (msg.id === netMyId || !netRoster.some(p => p.id === msg.id)) return;
   const def = WEAPONS[msg.weaponId];
   if (!def || !['primary', 'secondary'].includes(def.slot)) return;
@@ -5385,6 +5387,7 @@ function showRemoteShot(msg){
   const direction = new THREE.Vector3().fromArray(msg.end).sub(origin);
   const distance = direction.length();
   if (distance > def.range + 10 || distance < 0.001) return;
+  recordKillcamShot({...msg,origin:origin.toArray()});
   avatar.lastShotAt = now;
   // Cosmetics only: the shot event never applies damage a second time.
   drawTracer(origin, direction.normalize(), distance);
@@ -5431,6 +5434,7 @@ function getOrCreateRemoteAvatar(id, team){
 }
 
 function applyRemoteState(msg){
+  if(typeof killcamActive!=='undefined'&&killcamActive)return;
   if (msg.id === netMyId) return;
   if (isFfa() && !netRoster.some(p => p.id === msg.id && p.ready)) return;
   // a state packet is broadcast every ~50ms regardless of round phase, so the losing player's
@@ -5453,6 +5457,7 @@ function applyRemoteState(msg){
   avatar.targetYaw = msg.yaw;
   avatar.targetPitch = Number.isFinite(msg.pitch) ? Math.max(-Math.PI / 2, Math.min(Math.PI / 2, msg.pitch)) : 0;
   avatar.targetFov = Number.isFinite(msg.fov) ? Math.max(10, Math.min(100, msg.fov)) : baseFov;
+  avatar.weaponId = typeof WEAPONS!=='undefined'&&WEAPONS[msg.weaponId]?msg.weaponId:avatar.weaponId;
   avatar.targetCrouching = !!msg.crouching;
   if (!avatar.interpStarted) { avatar.mesh.position.copy(avatar.targetPos); avatar.mesh.rotation.y = avatar.targetYaw; avatar.interpStarted = true; }
   avatar.spawnProtected = !!msg.protected;
@@ -6593,17 +6598,18 @@ function animate(){
     drawMinimap();
   }
 
-  spectator.update({ dead: gameStarted && gameMode === 'pvp' && !player.alive,
+  if(!killcamActive) spectator.update({ dead: gameStarted && gameMode === 'pvp' && !player.alive,
     enemies, team: myTeam(), roster: netRoster, phase: isFfa() ? 'warmup' : roundState.phase, baseFov, dt,
     standingHeight: player.height, crouchingHeight: player.crouchHeight });
 
   // Finish cosmetic death/shot effects even when the final round freezes gameplay.
   if (gameStarted) {
-    updateDyingEnemies(dt);
+    if(!killcamActive)updateDyingEnemies(dt);
     playerLabels.update(enemies, camera, envMeshes, myTeam(), dt);
-    updateParticles(dt);
+    const effectsDt=killcamActive&&replay.time>=replay.fatalTime-180&&replay.time<=replay.fatalTime+450?dt*.25:dt;
+    updateParticles(effectsDt);
     for (let i = bulletTracers.length - 1; i >= 0; i--) {
-      bulletTracers[i].life -= dt;
+      bulletTracers[i].life -= effectsDt;
       if (bulletTracers[i].life <= 0) { const line = bulletTracers[i].line; scene.remove(line); line.geometry.dispose(); line.material.dispose(); bulletTracers.splice(i, 1); }
     }
   }
