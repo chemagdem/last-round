@@ -5,7 +5,7 @@
    ========================================================== */
 import * as THREE from 'three';
 import { FFA, botCount, canStart, rankPlayers, chooseSpawn } from './ffa-rules.js';
-import { FFA_MAPS, buildNavigation, blockedAt } from './ffa-layouts.js';
+import { FFA_MAPS, buildNavigation, blockedAt, SKI_DROP } from './ffa-layouts.js';
 import { buildFfaMap, ffaThumbnail } from './ffa-maps.js';
 import { addMapFinish } from './map-finish.js';
 import { findClearSpawn } from './map-spawns.js';
@@ -62,6 +62,7 @@ class SoundEngine {
     this.loadSample('knifeStab', 'assets/knife-stab.mp3');
     this.loadSample('subwayAmbience', 'assets/subway.mp3');
     this.loadSample('graffiti', 'assets/graffiti.mp3');
+    this.loadSample('hitmarkerHit', 'assets/hitmarker_2.mp3');
   }
   resume(){ if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
 
@@ -933,7 +934,8 @@ const MAP_TEXTURE_URLS = {
   warehouse: ['assets/textures/warehouse_floor.avif', 'assets/textures/warehouse_wall.avif', 'assets/textures/box.png', 'assets/textures/metal.jpg'],
   subway: ['assets/textures/subway_floor.webp', 'assets/textures/subway_walls.jpg', 'assets/textures/train.png', 'assets/textures/trainfront.png', 'assets/textures/metal.jpg'],
   foundry: ['assets/textures/wall.jpg', 'assets/textures/subway_floor.webp', 'assets/textures/metal.jpg'],
-  skyline: []
+  skyline: [],
+  ski: ['assets/textures/snow.png']
 };
 const texturePreloadState = new Map();
 function preloadMapTextures(mapId){
@@ -1673,17 +1675,28 @@ function buildFoundryMap(){
 }
 
 function buildFreeForAllMap(id){
-  WORLD_SIZE = 76; groundHeightAt = () => 0;
   applyDesertAtmosphere();
-  hemi.color.set(0xd9eee7); hemi.groundColor.set(0x616b65); hemi.intensity = 1.15;
-  sun.color.set(id === 'dockyard' ? 0xffd5a5 : 0xfff1d8); sun.intensity = 1.45;
-  fillLight.intensity = 0.6; scene.fog.color.set(0xb8cbc8); scene.fog.density = 0.002;
-  return buildFfaMap(id, {scene, floorMeshes, addBox, loadTiledTexture});
+  if (id === 'ski') {
+    const L = FFA_MAPS.ski;
+    WORLD_SIZE = Math.max(L.halfWidth, L.halfDepth) * 2 + 10;
+    // A gentle, continuous downhill grade along z: north (high) to south (low).
+    groundHeightAt = (x, z) => Math.min(1, Math.max(0, (z + L.halfDepth) / (L.halfDepth * 2))) * SKI_DROP;
+    hemi.color.set(0xeaf6ff); hemi.groundColor.set(0xc7d6d2); hemi.intensity = 1.3;
+    sun.color.set(0xfff7e8); sun.intensity = 1.7;
+    fillLight.intensity = 0.6; scene.fog.color.set(0xdfeef4); scene.fog.density = 0.0011;
+  } else {
+    WORLD_SIZE = 76; groundHeightAt = () => 0;
+    hemi.color.set(0xd9eee7); hemi.groundColor.set(0x616b65); hemi.intensity = 1.15;
+    sun.color.set(id === 'dockyard' ? 0xffd5a5 : 0xfff1d8); sun.intensity = 1.45;
+    fillLight.intensity = 0.6; scene.fog.color.set(0xb8cbc8); scene.fog.density = 0.002;
+  }
+  return buildFfaMap(id, {scene, floorMeshes, addBox, loadTiledTexture, groundHeightAt});
 }
 
 const MAPS = {
   dockyard: { name: 'Dockyard', ffa: true, build: () => buildFreeForAllMap('dockyard') },
   atrium: { name: 'Atrium', ffa: true, build: () => buildFreeForAllMap('atrium') },
+  ski: { name: 'Ski Station', ffa: true, build: () => buildFreeForAllMap('ski') },
   arena: { name: 'Desert', build: buildArenaMap },
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
   subway: { name: 'Subway', build: buildSubwayMap },
@@ -1728,7 +1741,7 @@ function buildMap(id){
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
-  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317, dockyard: 401, atrium: 503 })[id]);
+  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317, dockyard: 401, atrium: 503, ski: 601 })[id]);
   const result = MAPS[id].build();
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
@@ -3508,7 +3521,7 @@ function segmentCrossesSmoke(ax, az, bx, bz){
 let hitMarkerTimer;
 function showHitMarker(isHeadshot, isKill = false){
   clearTimeout(hitMarkerTimer);
-  if (isHeadshot) audio.headshot(); else audio.hitmarker();
+  if (isHeadshot) audio.headshot(); else if (!audio.playSample('hitmarkerHit', 0.9)) audio.hitmarker();
   const el = document.getElementById('hitmarker');
   el.classList.toggle('kill', isKill);
   el.style.opacity = 1;

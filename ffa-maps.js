@@ -1,7 +1,35 @@
 import * as THREE from 'three';
-import { FFA_MAPS } from './ffa-layouts.js';
+import { FFA_MAPS, SKI_CAFE } from './ffa-layouts.js';
 
 const materialCache = new Map();
+let woodPlankTexture;
+function woodTexture(){
+  if (woodPlankTexture) return woodPlankTexture;
+  const c=document.createElement('canvas');c.width=512;c.height=512;const ctx=c.getContext('2d');
+  ctx.fillStyle='#6b4328';ctx.fillRect(0,0,512,512);
+  let seed=7723;const random=()=>((seed=(seed*1664525+1013904223)>>>0)/4294967296);
+  for(let plank=0;plank<8;plank++){
+    const y=plank*64;
+    ctx.fillStyle=`rgb(${96+Math.floor(random()*24)},${58+Math.floor(random()*16)},${34+Math.floor(random()*12)})`;
+    ctx.fillRect(0,y,512,60);
+    ctx.strokeStyle='rgba(35,20,10,.6)';ctx.lineWidth=2;ctx.strokeRect(0,y,512,60);
+  }
+  for(let i=0;i<900;i++){ctx.fillStyle=`rgba(40,24,12,${.05+random()*.15})`;ctx.fillRect(random()*512,random()*512,random()*30+4,.8);}
+  woodPlankTexture=new THREE.CanvasTexture(c);woodPlankTexture.colorSpace=THREE.SRGBColorSpace;
+  woodPlankTexture.wrapS=woodPlankTexture.wrapT=THREE.RepeatWrapping;
+  return woodPlankTexture;
+}
+let dinerTileTexture;
+function tileTexture(){
+  if (dinerTileTexture) return dinerTileTexture;
+  const c=document.createElement('canvas');c.width=256;c.height=256;const ctx=c.getContext('2d');
+  for(let y=0;y<2;y++)for(let x=0;x<2;x++){ctx.fillStyle=(x+y)%2?'#1c1620':'#f2ede2';ctx.fillRect(x*128,y*128,128,128);}
+  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=3;ctx.strokeRect(0,0,256,256);
+  ctx.beginPath();ctx.moveTo(128,0);ctx.lineTo(128,256);ctx.moveTo(0,128);ctx.lineTo(256,128);ctx.stroke();
+  dinerTileTexture=new THREE.CanvasTexture(c);dinerTileTexture.colorSpace=THREE.SRGBColorSpace;
+  dinerTileTexture.wrapS=dinerTileTexture.wrapT=THREE.RepeatWrapping;
+  return dinerTileTexture;
+}
 let paintedSteelTexture;
 function paintTexture(){
   if (paintedSteelTexture) return paintedSteelTexture;
@@ -20,25 +48,43 @@ function paintTexture(){
   return paintedSteelTexture;
 }
 
-export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture}) {
-  const layout=FFA_MAPS[id], port=id==='dockyard', batches=new Map();
+export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture,groundHeightAt=()=>0}) {
+  const layout=FFA_MAPS[id], port=id==='dockyard', isSki=id==='ski', batches=new Map();
   const material=(color,file,rx=2,rz=2,metalness=0)=>{
     const key=[color,file,rx,rz,metalness].join('|');
     if(!materialCache.has(key)) materialCache.set(key,new THREE.MeshStandardMaterial({color,roughness:metalness?.68:.88,metalness,
       ...(file?{map:file==='paint'?paintTexture():loadTiledTexture(`assets/textures/${file}`,rx,rz)}:{})}));
     return materialCache.get(key);
   };
-  const stone=material(port?0xadb7b6:0xe1ded0,'paint');
-  const ground=material(port?0x747f81:0xc1bba5,'subway_floor.webp',24,24);
+  const stone=material(isSki?0xeef5f7:port?0xadb7b6:0xe1ded0,'paint');
+  const ground=isSki?material(0xffffff,'snow.png',18,36)
+    :material(port?0x747f81:0xc1bba5,'subway_floor.webp',24,24);
   const teal=material(0x4b98a3,'paint',2,3,.18), rust=material(0xd8834d,'paint',2,3,.18);
   const trim=material(0x43575f,'paint',1,1,.25), leaf=material(0x42644a), soil=material(0x33392e);
-  const white=material(0xe7ddd0), paint=material(port?0xd7af60:0x6d9b99);
+  const white=material(0xe7ddd0), paint=material(isSki?0xd23b3b:port?0xd7af60:0x6d9b99);
   const lamp=material(0xd9fff2);lamp.emissive.set(0x91d7c8);lamp.emissiveIntensity=1.1;
+  // Ski-only set: snow-capped pine cover, a wood-plank chalet and its diner tile floor.
+  const bark=material(0x5b4632,'paint',1,2,.1), pineFoliage=material(0x25503a);
+  const wood=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.7,map:woodTexture()});
+  const dinerFloor=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.35,map:tileTexture()});
   for(const m of [stone,teal,rust,trim])m.userData.minimapProp=true;
+  function dinerSign(text,x,y,z,rotation=0){
+    const c=document.createElement('canvas');c.width=768;c.height=192;const ctx=c.getContext('2d');
+    ctx.fillStyle='#170a1c';ctx.fillRect(0,0,768,192);
+    ctx.strokeStyle='#ff5fa8';ctx.lineWidth=6;ctx.strokeRect(10,10,748,172);
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.font='italic 800 84px "Brush Script MT","Segoe Script",cursive';
+    ctx.shadowColor='#37e6c8';ctx.shadowBlur=24;ctx.fillStyle='#37e6c8';ctx.fillText(text,384,100);
+    ctx.shadowBlur=0;ctx.fillStyle='#fdf4ff';ctx.fillText(text,384,100);
+    const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(6,1.5),new THREE.MeshStandardMaterial({map:tex,roughness:.5,emissive:0x1c2b26,emissiveIntensity:.5}));
+    mesh.position.set(x,y+groundHeightAt(x,z),z);mesh.rotation.y=rotation;mesh.userData.disposeMapMaterial=true;scene.add(mesh);return mesh;
+  }
   function box(x,y,z,w,h,d,mat,solid=false){
-    if(solid){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);mesh.position.set(x,y,z);
+    const gy=y+groundHeightAt(x,z);
+    if(solid){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);mesh.position.set(x,gy,z);
       mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);addBox(mesh);return mesh;}
-    const t=new THREE.Object3D();t.position.set(x,y,z);t.scale.set(w,h,d);t.updateMatrix();
+    const t=new THREE.Object3D();t.position.set(x,gy,z);t.scale.set(w,h,d);t.updateMatrix();
     if(!batches.has(mat))batches.set(mat,[]);batches.get(mat).push(t.matrix.clone());
   }
   function sign(text,x,y,z,rotation=0,color='#d5ebe2',w=4){
@@ -47,28 +93,66 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture}) {
     ctx.font='bold 44px sans-serif';ctx.textAlign='center';ctx.fillText(text,266,82,455);
     const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
     const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,w/4),new THREE.MeshStandardMaterial({map:tex,roughness:.8}));
-    mesh.position.set(x,y,z);mesh.rotation.y=rotation;mesh.userData.disposeMapMaterial=true;scene.add(mesh);return mesh;
+    mesh.position.set(x,y+groundHeightAt(x,z),z);mesh.rotation.y=rotation;mesh.userData.disposeMapMaterial=true;scene.add(mesh);return mesh;
   }
-  const floor=new THREE.Mesh(new THREE.PlaneGeometry(layout.halfWidth*2,layout.halfDepth*2),ground);
-  floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);floorMeshes.push(floor);
-  for(const s of [-1,1]){
-    box(0,3,s*layout.halfDepth,layout.halfWidth*2+1,6,1,stone,true);
-    box(s*layout.halfWidth,3,0,1,6,layout.halfDepth*2,stone,true);
-    for(let x=-layout.halfWidth+4;x<layout.halfWidth;x+=8)box(x,3,s*(layout.halfDepth-.515),.04,5.8,.02,trim);
-    for(let z=-layout.halfDepth+4;z<layout.halfDepth;z+=8)box(s*(layout.halfWidth-.515),3,z,.02,5.8,.04,trim);
-    box(0,5.9,s*(layout.halfDepth-.52),layout.halfWidth*2,.18,.12,trim);
-    box(s*(layout.halfWidth-.52),5.9,0,.12,.18,layout.halfDepth*2,trim);
-    for(let x=-24;x<=24;x+=12){
-      box(x,4.3,s*(layout.halfDepth-.54),6,.7,.06,port?teal:trim);
-      box(x,5.1,s*(layout.halfDepth-.6),2,.12,.3,lamp);
+  if(isSki){
+    // The piste runs downhill along z, so the floor is a subdivided, vertex-displaced mesh
+    // (same idiom as the Arena/Skyline elevation) rather than the other FFA maps' flat plane.
+    const segX=Math.round(layout.halfWidth/2), segZ=Math.round(layout.halfDepth/2);
+    const floorGeo=new THREE.PlaneGeometry(layout.halfWidth*2,layout.halfDepth*2,segX,segZ);
+    floorGeo.rotateX(-Math.PI/2);
+    const gPos=floorGeo.attributes.position;
+    for(let i=0;i<gPos.count;i++)gPos.setY(i,groundHeightAt(gPos.getX(i),gPos.getZ(i)));
+    floorGeo.computeVertexNormals();
+    const floor=new THREE.Mesh(floorGeo,ground);
+    floor.receiveShadow=true;scene.add(floor);floorMeshes.push(floor);
+  }else{
+    const floor=new THREE.Mesh(new THREE.PlaneGeometry(layout.halfWidth*2,layout.halfDepth*2),ground);
+    floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);floorMeshes.push(floor);
+  }
+  if(isSki){
+    // A single flat box can't follow the slope: the north/south end walls stay one piece (each
+    // spans a constant z, so a constant height), but the long sides are chunked into 10-unit
+    // segments that each pick up their own local ground height via box()'s slope-following offset.
+    for(const s of [-1,1]){
+      box(0,3,s*layout.halfDepth,layout.halfWidth*2+1,6,1,stone,true);
+      for(let x=-layout.halfWidth+4;x<layout.halfWidth;x+=8)box(x,3,s*(layout.halfDepth-.515),.04,5.8,.02,trim);
+      box(0,5.9,s*(layout.halfDepth-.52),layout.halfWidth*2,.18,.12,trim);
+      sign('SKI STATION / PISTE',0,4.5,s*(layout.halfDepth-.56),s<0?0:Math.PI);
     }
-    sign(port?'DOCKYARD / FREIGHT':'ATRIUM / RESEARCH',0,4.5,s*(layout.halfDepth-.56),s<0?0:Math.PI);
+    for(const s of [-1,1])
+      for(let z=-layout.halfDepth+5;z<=layout.halfDepth-5;z+=10)
+        box(s*layout.halfWidth,3,z,1,6,10,stone,true);
+  }else{
+    for(const s of [-1,1]){
+      box(0,3,s*layout.halfDepth,layout.halfWidth*2+1,6,1,stone,true);
+      box(s*layout.halfWidth,3,0,1,6,layout.halfDepth*2,stone,true);
+      for(let x=-layout.halfWidth+4;x<layout.halfWidth;x+=8)box(x,3,s*(layout.halfDepth-.515),.04,5.8,.02,trim);
+      for(let z=-layout.halfDepth+4;z<layout.halfDepth;z+=8)box(s*(layout.halfWidth-.515),3,z,.02,5.8,.04,trim);
+      box(0,5.9,s*(layout.halfDepth-.52),layout.halfWidth*2,.18,.12,trim);
+      box(s*(layout.halfWidth-.52),5.9,0,.12,.18,layout.halfDepth*2,trim);
+      for(let x=-24;x<=24;x+=12){
+        box(x,4.3,s*(layout.halfDepth-.54),6,.7,.06,port?teal:trim);
+        box(x,5.1,s*(layout.halfDepth-.6),2,.12,.3,lamp);
+      }
+      sign(port?'DOCKYARD / FREIGHT':'ATRIUM / RESEARCH',0,4.5,s*(layout.halfDepth-.56),s<0?0:Math.PI);
+    }
   }
   layout.cover.forEach((b,i)=>{
-    const m=b.kind==='cargo'?(b.x<0?teal:rust):b.kind==='tower'?trim:stone;
+    const m=b.kind==='cargo'?(b.x<0?teal:rust):b.kind==='tower'?trim
+      :b.kind==='pine'?bark:b.kind==='snowbank'?ground
+      :b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'?wood:stone;
     box(b.x,b.h/2,b.z,b.w,b.h,b.d,m,true);
-    box(b.x,b.h+.04,b.z,b.w+.1,.08,b.d+.1,port?trim:white);
-    if(b.kind==='cargo'){
+    box(b.x,b.h+.04,b.z,b.w+.1,.08,b.d+.1,
+      b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'?wood
+      :b.kind==='pine'||b.kind==='snowbank'?ground
+      :port?trim:white);
+    if(b.kind==='pine'){
+      // Snow-capped canopy sits above the trunk's own trim cap.
+      box(b.x,b.h+.55,b.z,b.w*2.8,1.2,b.d*2.8,pineFoliage,true);
+      box(b.x,b.h+1.2,b.z,b.w*1.7,.9,b.d*1.7,pineFoliage,true);
+      box(b.x,b.h+1.75,b.z,b.w,.5,b.d,ground,true);
+    }else if(b.kind==='cargo'){
       // Physical ribs, corner castings and locking rods remain within the solid envelope.
       for(let z=-b.d/2+.2;z<b.d/2;z+=.48)for(const s of [-1,1])
         box(b.x+s*(b.w/2+.015),b.h/2,b.z+z,.055,b.h-.25,.08,m);
@@ -104,6 +188,16 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture}) {
       }
     }
     box(0,10.8,0,4,2.4,3,teal);
+  }else if(isSki){
+    // Café Gijón: wood-plank roof and diner-tile floor over the wall segments laid out in
+    // ffa-layouts.js, plus a decorative (non-colliding) chair-lift line along the piste.
+    const {x:cx,z:cz,w:cw,d:cd,h:ch}=SKI_CAFE;
+    box(cx,ch+.2,cz,cw+.6,.3,cd+.6,wood,true);
+    box(cx,.02,cz,cw-1,.03,cd-1,dinerFloor,true);
+    dinerSign('Café Gijón',cx-cw/2-.3,2.2,cz,-Math.PI/2);
+    for(let z=-layout.halfDepth+6;z<=layout.halfDepth-6;z+=32)box(-26,3.6,z,.5,7.2,.5,trim);
+    for(let z=-layout.halfDepth+6;z<layout.halfDepth-6;z+=32)box(-26,7.2,z+16,.3,.3,32,trim);
+    for(let z=-layout.halfDepth+3;z<=layout.halfDepth-3;z+=12)box(0,.012,z,.3,.015,10,paint);
   }else{
     for(const sx of [-1,1])for(const sz of [-1,1]){
       // Shaded pavilion roof sits over existing walls without blocking the two exits.
@@ -130,10 +224,12 @@ export function buildFfaMap(id,{scene,floorMeshes,addBox,loadTiledTexture}) {
 
 export function ffaThumbnail(id){
   const l=FFA_MAPS[id],c=document.createElement('canvas');c.width=480;c.height=260;
-  const ctx=c.getContext('2d');ctx.fillStyle=id==='dockyard'?'#243c45':'#444e46';ctx.fillRect(0,0,480,260);
-  const scale=3.1,cx=240,cy=130;
+  const ctx=c.getContext('2d');ctx.fillStyle={dockyard:'#243c45',atrium:'#444e46',ski:'#d9eaf0'}[id]??'#444e46';ctx.fillRect(0,0,480,260);
+  const scale=Math.min(220/l.halfWidth,110/l.halfDepth),cx=240,cy=130;
   ctx.strokeStyle='#92ab9d';ctx.strokeRect(cx-l.halfWidth*scale,cy-l.halfDepth*scale,l.halfWidth*6.2,l.halfDepth*6.2);
-  for(const b of l.cover){ctx.fillStyle=b.kind==='cargo'?(b.x<0?'#65a8ad':'#d89660'):id==='atrium'?'#c9c7af':'#88969a';
+  for(const b of l.cover){
+    ctx.fillStyle=b.kind==='cargo'?(b.x<0?'#65a8ad':'#d89660'):b.kind==='pine'?'#2f5f42':b.kind==='snowbank'?'#f3fbff'
+      :b.kind==='chalet'||b.kind==='counter'||b.kind==='diner'?'#8a5a34':id==='atrium'?'#c9c7af':'#88969a';
     ctx.fillRect(cx+(b.x-b.w/2)*scale,cy+(b.z-b.d/2)*scale,b.w*scale,b.d*scale);}
   ctx.fillStyle='#a4f0cb';for(const p of l.spawns){ctx.beginPath();ctx.arc(cx+p.x*scale,cy+p.z*scale,2.5,0,Math.PI*2);ctx.fill();}
   ctx.fillStyle='#e8f0e9';ctx.font='bold 12px sans-serif';ctx.fillText('FFA / 6–12',18,24);
