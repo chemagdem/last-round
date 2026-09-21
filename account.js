@@ -28,7 +28,8 @@ export async function mountAccount({ readProfile, applyProfile, isPlaying, apply
   const buttons = () => [...form.querySelectorAll('button')];
   const setBusy = value => { busy = value; buttons().forEach(b => { b.disabled = value; }); };
   const fields = profile => ({ name: String(profile.name || 'Player').slice(0,16), rating: profile.rating,
-    wins: profile.wins, losses: profile.losses, matches: profile.matches, equippedSkin: profile.equippedSkin,
+    wins: profile.wins, losses: profile.losses, matches: profile.matches,
+    equippedSkins: profile.equippedSkins && typeof profile.equippedSkins === 'object' ? profile.equippedSkins : {},
     country: String(profile.country || '').slice(0,2), clan: String(profile.clan || '').slice(0,4).toUpperCase() });
 
   // the weekly ladder is a separate table (see account.sql) keyed by (user, season_id) - writing

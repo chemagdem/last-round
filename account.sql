@@ -57,3 +57,8 @@ alter table public.player_profiles drop constraint if exists player_profiles_cla
 alter table public.player_profiles add constraint player_profiles_clan_check check (char_length(clan) <= 4);
 alter table public.ladder_entries drop constraint if exists ladder_entries_clan_check;
 alter table public.ladder_entries add constraint ladder_entries_clan_check check (char_length(clan) <= 4);
+
+-- Migration 4: replaces the single shared "equippedSkin" column with a per-weapon map (each gun
+-- now keeps its own equipped finish - see WEAPON_SKIN_IDS/applyEquippedSkin in game.js). Purely
+-- additive: the old "equippedSkin" column is left in place, unused, rather than dropped.
+alter table public.player_profiles add column if not exists "equippedSkins" jsonb not null default '{}'::jsonb;
