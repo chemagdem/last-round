@@ -1776,6 +1776,7 @@ function buildMap(id){
   player.pos.copy(result.spawn);
   player.pos.y = groundHeightAt(result.spawn.x, result.spawn.z) + player.height;
   player.velY = 0;
+  player.onGround = false; // force a fresh multi-level support resolve next frame instead of trusting a stale groundLevel
   camera.position.copy(player.pos);
 }
 
@@ -1786,6 +1787,7 @@ const player = {
   pos: new THREE.Vector3(0, 2, 20),
   velY: 0,
   onGround: true,
+  groundLevel: 0, // last resolved multi-level support height (Mall) - a stable hysteresis anchor, see updatePlayer
   height: 1.8,
   crouchHeight: 1.0,
   crouching: false,
@@ -2636,6 +2638,10 @@ document.addEventListener('mouseup', e => {
   if (e.button === 2 && !currentWeaponDef().scope) player.ads = false;
 });
 document.addEventListener('keydown', e => {
+  // Checked before the shopOpen guard below (which exists to block other gameplay input while
+  // the shop is up) so the same key that opens the shop also closes it, instead of being
+  // swallowed by that guard the moment the shop is open.
+  if (gameStarted && !pauseMenuOpen && !socialUI.blocked && e.code === settings.binds.shop) { toggleBuyMenu(); return; }
   if (!gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
   if (e.code === settings.binds.reload) startReload();
   if (e.code === 'Digit1') equipSlot('primary');
@@ -2646,7 +2652,6 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Digit6') equipSlot('flash');
   if (e.code === 'KeyQ') equipSlot(lastSlot);
   if (e.code === settings.binds.inspect) playWeaponInspect();
-  if (e.code === settings.binds.shop) toggleBuyMenu();
 });
 document.addEventListener('wheel', e => {
   if (!gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
@@ -4140,6 +4145,7 @@ function startRound(){
   player.pos.copy(ct);
   player.pos.y = groundHeightAt(ct.x, ct.z) + player.height;
   player.velY = 0;
+  player.onGround = false;
   camera.position.copy(player.pos);
 
   document.getElementById('roundNum').textContent = roundState.roundNum;
@@ -4475,6 +4481,7 @@ function respawnFfaPlayer(){
   player.pos.copy(p); player.pos.y+=player.height;
   player.alive=true; player.health=player.maxHealth; player.crouching=false; player.ads=false;
   player.scopeLevel=0; player.pitch=0; player.yaw=Math.atan2(p.x,p.z); player.velY=0;
+  player.onGround=false; // force a fresh multi-level support resolve instead of trusting a stale groundLevel from the previous life
   movementVelocity.set(0,0,0); camera.position.copy(player.pos);
   camera.fov=baseFov;camera.updateProjectionMatrix();
   ffaState.respawnT=0; ffaState.protection=FFA.protection;
@@ -5274,6 +5281,7 @@ function applyWarmup(timer){
     player.pos.copy(spawnPos);
     player.pos.y = groundHeightAt(spawnPos.x, spawnPos.z) + player.height;
     player.velY = 0;
+    player.onGround = false;
     player.yaw = getSpawnYaw(team);
     player.pitch = 0;
     camera.position.copy(player.pos);
@@ -5362,6 +5370,7 @@ function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
   player.pos.copy(spawnPos);
   player.pos.y = groundHeightAt(spawnPos.x, spawnPos.z) + player.height;
   player.velY = 0;
+  player.onGround = false;
   player.yaw = getSpawnYaw(team);
   player.pitch = 0;
   camera.position.copy(player.pos);
@@ -5679,6 +5688,7 @@ function respawnInWarmup(){
   player.pos.copy(spawnPos);
   player.pos.y = groundHeightAt(spawnPos.x, spawnPos.z) + player.height;
   player.velY = 0;
+  player.onGround = false;
   player.yaw = getSpawnYaw(team);
   player.pitch = 0;
   camera.position.copy(player.pos);
@@ -5799,7 +5809,15 @@ function updatePlayer(dt){
   player.pos.x = Math.max(-half, Math.min(half, player.pos.x));
   player.pos.z = Math.max(-half, Math.min(half, player.pos.z));
 
-  const groundY = currentMapMeta?.supportHeight ? currentMapMeta.supportHeight(player.pos.x,player.pos.z,player.pos.y-(player.crouching?player.crouchHeight:player.height)) : groundHeightAt(player.pos.x, player.pos.z);
+  // While already grounded, anchor the multi-level support check (Mall) to the last confirmed
+  // floor instead of re-deriving "feet" from eye height every frame: crouching changes the
+  // eye-to-feet offset instantly but pos.y only catches up over a few frames of gravity, so a
+  // second crouch toggle mid-transition could read a transient feet estimate that falls outside
+  // the level's hysteresis band and drop the player a whole level (the escalators/open upper
+  // shops "fall through the floor on double-crouch" bug).
+  const feetRef = player.onGround ? player.groundLevel : player.pos.y - (player.crouching ? player.crouchHeight : player.height);
+  const groundY = currentMapMeta?.supportHeight ? currentMapMeta.supportHeight(player.pos.x, player.pos.z, feetRef) : groundHeightAt(player.pos.x, player.pos.z);
+  player.groundLevel = groundY;
   const targetHeight = player.crouching ? player.crouchHeight : player.height;
 
   const jumpDown = !!keys[settings.binds.jump];
