@@ -3888,10 +3888,12 @@ function spawnEnemy(spawnPos){
 function damageEnemy(enemy, dmg, point, meta){
   if (!enemy.alive || (isFfa() && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
   if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
+    trackDamageDealt(enemy.netId, dmg);
     return hitFfaBot({targetId:enemy.netId,fromId:netMyId,dmg,weaponName:meta?.weaponName,headshot:meta?.headshot,instantKill:meta?.instantKill});
   }
   spawnBlood(point);
   if (enemy.isRemote) {
+    trackDamageDealt(enemy.netId, dmg);
     // don't own their health - tell their real client what happened and let their own broadcast update us.
     // netBroadcast reaches them directly if we're the host, or reaches the host if we're a client, which
     // then relays it onward (see the generic relay in handleNetMessage) - either way it arrives once.
@@ -4777,6 +4779,22 @@ let netStats = {};
 const receivedKills = new Set();
 const roundLives = new RoundLives();
 let lastDamageMeta = {};
+// Per-life damage exchange with each opponent, from the local player's own perspective only -
+// keyed by the OTHER party's id, cleared for that id once they die (a fresh life starts clean).
+const damageDealt = {}, damageTaken = {};
+function trackDamageDealt(id, dmg){ if (!id) return; const s = damageDealt[id] || (damageDealt[id] = {dmg: 0, hits: 0}); s.dmg += dmg; s.hits++; }
+function trackDamageTaken(id, dmg){ if (!id) return; const s = damageTaken[id] || (damageTaken[id] = {dmg: 0, hits: 0}); s.dmg += dmg; s.hits++; }
+let dmgExchangeTimer;
+function showDamageExchange(opponentId){
+  const name = (netRoster.find(p => p.id === opponentId)?.name || 'Player').toUpperCase();
+  const dealt = damageDealt[opponentId] || {dmg: 0, hits: 0};
+  const taken = damageTaken[opponentId] || {dmg: 0, hits: 0};
+  const el = document.getElementById('dmgExchange');
+  el.innerHTML = `vs ${name} &nbsp; DEALT <b>${dealt.dmg} in ${dealt.hits}</b> &nbsp; TAKEN <b>${taken.dmg} in ${taken.hits}</b>`;
+  el.classList.add('show');
+  clearTimeout(dmgExchangeTimer);
+  dmgExchangeTimer = setTimeout(() => el.classList.remove('show'), 3500);
+}
 function ensureStats(id){
   if (!netStats[id]) netStats[id] = { kills: 0, assists: 0, deaths: 0 };
   return netStats[id];
@@ -4788,7 +4806,12 @@ function applyKillMessage(msg){
   if (msg.deathId) receivedKills.add(msg.deathId);
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
   showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD');
-  if (msg.killerId === netMyId) showHitMarker(!!msg.headshot, true);
+  if (msg.killerId === netMyId) { showHitMarker(!!msg.headshot, true); showDamageExchange(msg.victimId); }
+  if (msg.victimId === netMyId && msg.killerId) {
+    showDamageExchange(msg.killerId);
+    delete damageDealt[msg.killerId]; delete damageTaken[msg.killerId];
+  }
+  delete damageDealt[msg.victimId]; delete damageTaken[msg.victimId];
   ensureStats(msg.victimId).deaths++;
   if (msg.killerId) ensureStats(msg.killerId).kills++;
   (msg.assistIds || []).forEach(id => ensureStats(id).assists++);
@@ -5516,6 +5539,7 @@ let recentAttackers = []; // [{id, t}], most recent last
 function damagePlayer(dmg, fromId){
   if (!player.alive || (gameMode === 'pvp' && (roundState.phase === 'ended' || matchFinished))) return;
   if (isFfa() && ffaState.protection > 0) return;
+  trackDamageTaken(fromId, dmg);
   player.health -= dmg;
   regenDelayT = REGEN_DELAY;
   audio.playerHurt();
