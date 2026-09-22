@@ -144,7 +144,10 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   // That edge was a low 1.05m rail at first, but that is exactly climbable and jumpable (max
   // jump height is ~1.74m) - full height like every other wall here, a hard boundary rather than
   // furniture someone can hop over to wander off the map.
-  solidWall(-32, 0, 48, 'z'); solidWall(32, 0, 48, 'z');
+  solidWall(-32, 0, 48, 'z');
+  // The east wall stays solid except three panes near the back corner: the one the
+  // stars_easter.png doodle lives on (z -18 to -15) plus the next two mullion cells past it.
+  solidWall(32, -21, 6, 'z'); glassWall(32, -13.5, 9, 'z'); solidWall(32, 7.5, 33, 'z');
   [-24, 24].forEach(z => glassWall(0, z, 64, 'x'));
 
   // ---------- Central garden ----------
