@@ -33,7 +33,7 @@ export const OFFICE_FFA_LAYOUT = (() => {
     cover.push({ x: coreX, z: 0, w: 3.1, d: 8.4 }); // core
     wallSeg(frontX, 0, 8.4, 'z'); // front, solid - entry is through the two sides instead
     wallSeg(roomCx, -4.2, roomHalfW * 2, 'x', 0); wallSeg(roomCx, 4.2, roomHalfW * 2, 'x', 0); // sides, with doors
-    cover.push({ x: roomCx, z: 0, w: 4.5, d: 7 }); // table (rotated north-south, chairs flanking east/west)
+    cover.push({ x: innerFace + dir * 2.3, z: 0, w: 4.5, d: 7 }); // table, pushed toward the core wall
   });
 
   // the eight office bays: front/back doored walls, two tables each, concrete partitions
@@ -160,14 +160,16 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
     meshBox(innerFace + dir * .05, 1.9, 0, .08, 1.9, 3.6, screen, false);
     // Conference table runs north-south (chairs flank the east/west sides) rather than along the
     // door-to-TV axis, per a follow-up request - the TV still faces straight down the table.
-    const tableLen = 7;
-    meshBox(roomCx, .74, 0, 2.5, .06, tableLen, wood, true, true);
-    [-1, 1].forEach(lz => meshBox(roomCx, .37, lz * (tableLen / 2 - .3), 2.3, .74, .08, dark, false));
+    // Pushed close to the concrete wall (each room toward its own core) rather than centred, so
+    // the doors on the two side walls open onto clear floor instead of the table's own footprint.
+    const tableLen = 7, tableCx = innerFace + dir * 2.3;
+    meshBox(tableCx, .74, 0, 2.5, .06, tableLen, wood, true, true);
+    [-1, 1].forEach(lz => meshBox(tableCx, .37, lz * (tableLen / 2 - .3), 2.3, .74, .08, dark, false));
     for (let i = 0; i < 3; i++) {
       const sz = -tableLen * .31 + i * (tableLen * .31);
       [-1, 1].forEach(sx => {
-        meshBox(roomCx + sx * 1.75, .45, sz, .55, .12, .55, dark, true, true);
-        meshBox(roomCx + sx * 2.0, .82, sz, .55, .7, .1, dark, true, true);
+        meshBox(tableCx + sx * 1.75, .45, sz, .55, .12, .55, dark, true, true);
+        meshBox(tableCx + sx * 2.0, .82, sz, .55, .7, .1, dark, true, true);
       });
     }
   };
@@ -225,10 +227,19 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
     scene.add(egg);
   }
 
-  // ---------- Ceiling light strips (no solid ceiling, keeps visibility and perf) ----------
+  // ---------- White ceiling with recessed light fixtures ----------
+  // A real (thin) box rather than a bare plane, and solid - a plane has zero collision thickness,
+  // and without addBox() at all it had none whatsoever, so a jump could pass straight through it.
+  const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.92 });
+  meshBox(0, 3.24, 0, 64, .08, 36, ceilingMat, true, true); // just above the walls (3.15) - terraces stay open, outside this footprint
   const lightMat = new THREE.MeshStandardMaterial({ color: 0xf7fbff, emissive: 0xe8f4ff, emissiveIntensity: 1.5 });
-  for (let x = -27; x <= 27; x += 9) for (const z of [-13, -7, 7, 13]) meshBox(x, 3.55, z, 4.8, .06, .22, lightMat, false);
-  const keyLight = new THREE.PointLight(0xf2f7ff, 2.2, 45, 2); keyLight.position.set(0, 5, 0); scene.add(keyLight);
+  for (let x = -27; x <= 27; x += 9) for (const z of [-13, -7, 7, 13]) meshBox(x, 3.13, z, 4.8, .05, .22, lightMat, false); // flush panels, just under the ceiling now
+  for (const x of [-18, 0, 18]) for (const z of [-10, 10]) {
+    const fixtureLight = new THREE.PointLight(0xf2f7ff, 1.4, 22, 2);
+    fixtureLight.position.set(x, 3.0, z);
+    scene.add(fixtureLight);
+  }
+  const keyLight = new THREE.PointLight(0xf2f7ff, 2.2, 45, 2); keyLight.position.set(0, 3.0, 0); scene.add(keyLight);
 
   return {
     spawn: new THREE.Vector3(-27, 2, 0), tSpawn: new THREE.Vector3(-27, 2, 0), ctSpawn: new THREE.Vector3(27, 2, 0),

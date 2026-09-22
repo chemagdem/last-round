@@ -6204,15 +6204,19 @@ function updatePlayer(dt){
   // landing on top of a crate/barrel works the same way as landing on terrain: take whichever is
   // higher, terrain or the top of any collider under the player's feet - but only a collider
   // whose top is at or just below our own feet, so this never snaps the player up onto the side
-  // of something they're merely walking into
-  let standY = groundY;
+  // of something they're merely walking into. A rising jump gets the same treatment from above:
+  // stop at the underside of a low ceiling instead of letting it pass straight through, which
+  // this loop otherwise never catches - it only ever looks for something to land ON.
+  let standY = groundY, ceilingY = Infinity;
   const radius = 0.5;
   const feetAfterFall = player.pos.y - targetHeight;
   for (const c of colliders) {
     if (player.pos.x < c.min.x - radius || player.pos.x > c.max.x + radius) continue;
     if (player.pos.z < c.min.z - radius || player.pos.z > c.max.z + radius) continue;
     if (c.max.y > standY && c.max.y <= feetAfterFall + 0.35) standY = c.max.y;
+    if (c.min.y > feetAfterFall && c.min.y < ceilingY) ceilingY = c.min.y;
   }
+  if (player.velY > 0 && player.pos.y > ceilingY) { player.pos.y = ceilingY; player.velY = 0; }
 
   const floorY = standY + targetHeight;
   if (player.pos.y <= floorY) { player.pos.y = floorY; player.velY = 0; player.onGround = true; }
