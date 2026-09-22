@@ -121,10 +121,12 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   };
 
   // ---------- Terrace shell ----------
-  // East/west walls now run the full depth (indoor + both terraces); the terrace's own outer
-  // edge gets a low glass railing rather than a full wall - it is a walkway, not another room.
+  // East/west walls now run the full depth (indoor + both terraces). The terrace's own outer
+  // edge was a low 1.05m rail at first, but that is exactly climbable and jumpable (max jump
+  // height is ~1.74m) - full height like every other wall here, since it has to be a hard
+  // boundary, not furniture someone can hop over to wander off the map.
   glassWall(-32, 0, 48, 'z'); glassWall(32, 0, 48, 'z');
-  [-24, 24].forEach(z => glassWall(0, z, 64, 'x', null, 1.05));
+  [-24, 24].forEach(z => glassWall(0, z, 64, 'x'));
 
   // ---------- Central garden ----------
   meshBox(0, .35, 0, 11.5, .7, 11.5, concreteCream, true, true);
