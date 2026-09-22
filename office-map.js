@@ -125,12 +125,26 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
     if (right > .05) { const c = doorAt + door / 2 + right / 2; axis === 'x' ? pane(x + c, z, right) : pane(x, z + c, right); }
   };
 
-  // ---------- Terrace shell ----------
-  // East/west walls now run the full depth (indoor + both terraces). The terrace's own outer
-  // edge was a low 1.05m rail at first, but that is exactly climbable and jumpable (max jump
-  // height is ~1.74m) - full height like every other wall here, since it has to be a hard
-  // boundary, not furniture someone can hop over to wander off the map.
-  glassWall(-32, 0, 48, 'z'); glassWall(32, 0, 48, 'z');
+  // ---------- Solid (cream concrete) wall helper ----------
+  // Same door-gap math as glassWall, but opaque and thick enough to actually block bullets - for
+  // every wall that doesn't open onto the terrace, which stays glass.
+  const solidWall = (x, z, length, axis = 'x', doorAt = null, h = 3.15) => {
+    const t = .3, door = 1.65;
+    const seg = (cx, cz, len) => axis === 'x' ? meshBox(cx, h / 2, cz, len, h, t, concreteCream, true, true) : meshBox(cx, h / 2, cz, t, h, len, concreteCream, true, true);
+    if (doorAt === null) { seg(x, z, length); return; }
+    const start = -length / 2, left = doorAt - door / 2 - start, right = length - left - door;
+    if (left > .05) { const c = start + left / 2; axis === 'x' ? seg(x + c, z, left) : seg(x, z + c, left); }
+    if (right > .05) { const c = doorAt + door / 2 + right / 2; axis === 'x' ? seg(x + c, z, right) : seg(x, z + c, right); }
+  };
+
+  // ---------- Building shell ----------
+  // East/west walls run the full depth (indoor + both terraces) but don't face the terrace
+  // themselves - it's a north/south feature - so they're solid cream concrete, the map's actual
+  // outer limit. The terrace's own outer edge (north and south) does face it, and stays glass.
+  // That edge was a low 1.05m rail at first, but that is exactly climbable and jumpable (max
+  // jump height is ~1.74m) - full height like every other wall here, a hard boundary rather than
+  // furniture someone can hop over to wander off the map.
+  solidWall(-32, 0, 48, 'z'); solidWall(32, 0, 48, 'z');
   [-24, 24].forEach(z => glassWall(0, z, 64, 'x'));
 
   // ---------- Central garden ----------
