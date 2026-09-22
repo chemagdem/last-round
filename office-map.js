@@ -45,7 +45,7 @@ export const OFFICE_FFA_LAYOUT = (() => {
       wallSeg(bx, backZ, 16, 'x', DOOR_OFF);
       // Each table+chairs approximated a bit wider than the real 1.1m table, still leaving the
       // real ~3m aisles (outer and centre) clear for the door and for walking around.
-      [bx - 3, bx + 3].forEach(tx => cover.push({ x: tx, z: bayCz, w: 2.6, d: 6 }));
+      [bx - 3, bx + 3].forEach(tx => cover.push({ x: tx, z: bayCz, w: 2.6, d: 5 })); // matches the narrower table
     });
     partitionXs.forEach(px => cover.push({ x: px, z: bayCz, w: 1, d: 8 }));
   });
@@ -203,14 +203,21 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   // plan), plus a TV mounted on the bay's own west wall near the entrance.
   const officeFurniture = (bx, bz, frontZ) => {
     const toFront = Math.sign(frontZ - bz);
-    const tableLen = 6, tableW = 1.1;
+    // Narrower than the first pass on both axes - the walk space around each table was too tight
+    // to actually pass through, especially at the front/back ends.
+    const tableLen = 4.5, tableW = .9;
     [bx - 3, bx + 3].forEach(tx => { // pulled in from +-4 so the door has a clear run into the room
       meshBox(tx, .74, bz, tableW, .06, tableLen, deskTop, true, true);
       [-1, 1].forEach(lz => meshBox(tx, .37, bz + lz * (tableLen / 2 - .3), tableW * .7, .74, .08, dark, false));
       for (let i = 0; i < 3; i++) {
         const sz = bz - tableLen * .31 + i * (tableLen * .31);
+        // one shared monitor per seat row, sitting on the table's own centreline between the
+        // two facing chairs, plus a keyboard on the table in front of each individual chair
+        meshBox(tx, .97, sz, .045, .38, .58, screen, false);
+        meshBox(tx, .78, sz, .04, .2, .04, dark, false);
         [-1, 1].forEach(sx => {
           const cx = tx + sx * (tableW / 2 + .55);
+          meshBox(tx + sx * (tableW / 2 + .12), .77, sz, .16, .02, .4, dark, false); // keyboard
           meshBox(cx, .45, sz, .55, .12, .55, dark, true, true);
           meshBox(cx + sx * .25, .82, sz, .1, .7, .55, dark, true, true);
         });
