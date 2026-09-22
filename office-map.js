@@ -8,8 +8,11 @@ import * as THREE from 'three';
 export const OFFICE_FFA_LAYOUT = (() => {
   const halfWidth = 32, halfDepth = 24;
   const cover = [];
+  // Nav-only door width is well over the real 1.65m gap - the coarse step=2 grid needs to
+  // reliably land a sample point inside it wherever doorAt happens to fall, not just when a door
+  // sits on a "nice" round coordinate.
   const wallSeg = (cx, cz, len, axis, doorAt = null) => {
-    const t = 1.2, door = 1.9;
+    const t = 1.2, door = 3.4;
     if (doorAt === null) { cover.push(axis === 'x' ? { x: cx, z: cz, w: len, d: t } : { x: cx, z: cz, w: t, d: len }); return; }
     const start = -len / 2, left = doorAt - door / 2 - start, right = len - left - door;
     if (left > .1) { const c = start + left / 2; cover.push(axis === 'x' ? { x: cx + c, z: cz, w: left, d: t } : { x: cx, z: cz + c, w: t, d: left }); }
@@ -17,7 +20,7 @@ export const OFFICE_FFA_LAYOUT = (() => {
   };
 
   // building perimeter: east/west walls (indoor + both terraces) and the two outer terrace rails
-  cover.push({ x: -32, z: 0, w: 2, d: 48 }, { x: 32, z: 0, w: 2, d: 48 });
+  cover.push({ x: -32, z: 0, w: 1.2, d: 48 }, { x: 32, z: 0, w: 1.2, d: 48 });
   cover.push({ x: 0, z: -24, w: 64, d: 2 }, { x: 0, z: 24, w: 64, d: 2 });
 
   // central garden planter
@@ -28,31 +31,33 @@ export const OFFICE_FFA_LAYOUT = (() => {
     const innerFace = coreX + dir * 1.65, roomHalfW = 5.5;
     const roomCx = innerFace + dir * roomHalfW, frontX = innerFace + dir * roomHalfW * 2;
     cover.push({ x: coreX, z: 0, w: 3.1, d: 8.4 }); // core
-    wallSeg(frontX, 0, 8.4, 'z', 0); // front, with a door
-    cover.push({ x: roomCx, z: -4.2, w: roomHalfW * 2, d: 1 }, { x: roomCx, z: 4.2, w: roomHalfW * 2, d: 1 }); // sides
-    cover.push({ x: roomCx + dir * .4, z: 0, w: roomHalfW * 1.55, d: 2.5 }); // table
+    wallSeg(frontX, 0, 8.4, 'z'); // front, solid - entry is through the two sides instead
+    wallSeg(roomCx, -4.2, roomHalfW * 2, 'x', 0); wallSeg(roomCx, 4.2, roomHalfW * 2, 'x', 0); // sides, with doors
+    cover.push({ x: roomCx, z: 0, w: 4.5, d: 7 }); // table (rotated north-south, chairs flanking east/west)
   });
 
-  // the eight office bays: front/back doored walls, the desk down the middle, concrete partitions
-  const bayXs = [-24, -8, 8, 24], partitionXs = [-16, 0, 16];
+  // the eight office bays: front/back doored walls, two tables each, concrete partitions
+  const bayXs = [-24, -8, 8, 24], partitionXs = [-16, 0, 16], DOOR_OFF = -6.55;
   [-1, 1].forEach(rowSide => {
     const frontZ = rowSide * 10, backZ = rowSide * 18, bayCz = rowSide * 14;
     bayXs.forEach(bx => {
-      wallSeg(bx, frontZ, 16, 'x', 0); // doorAt is relative to the wall's own centre - 0 = dead centre
-      wallSeg(bx, backZ, 16, 'x', 0);
-      // Narrower than the real desk (11 wide) on purpose - the coarse step=2 nav grid needs a
-      // comfortable margin to find the walk-around at each end, not just the real clearance.
-      cover.push({ x: bx, z: bayCz, w: 7, d: 1.3 });
+      wallSeg(bx, frontZ, 16, 'x', DOOR_OFF); // left-of-centre, matching buildOffice()'s real doors
+      wallSeg(bx, backZ, 16, 'x', DOOR_OFF);
+      // Each table+chairs approximated a bit wider than the real 1.1m table, still leaving the
+      // real ~3m aisles (outer and centre) clear for the door and for walking around.
+      [bx - 3, bx + 3].forEach(tx => cover.push({ x: tx, z: bayCz, w: 2.6, d: 6 }));
     });
     partitionXs.forEach(px => cover.push({ x: px, z: bayCz, w: 1, d: 8 }));
   });
 
-  // 12 spawns: two open corridor ends, two terrace spots, and one just inside each bay's front
-  // door - offset from bay centre so nobody spawns inside the desk/chairs.
+  // 12 spawns: two open corridor ends, two terrace spots, and one just inside each bay's own
+  // front door - lined up with the door's left-of-centre x, except the two bays against the
+  // building's own west wall (-24), where the door sits close enough to it that the spawn is
+  // nudged further in to stay clear of both the wall and the west table.
   const spawns = [
     { x: -27, z: 0 }, { x: 27, z: 0 }, { x: 0, z: -21 }, { x: 0, z: 21 },
-    { x: -24, z: -11 }, { x: -8, z: -11 }, { x: 8, z: -11 }, { x: 24, z: -11 },
-    { x: -24, z: 11 }, { x: -8, z: 11 }, { x: 8, z: 11 }, { x: 24, z: 11 }
+    { x: -29.85, z: -11 }, { x: -8 + DOOR_OFF, z: -11 }, { x: 8 + DOOR_OFF, z: -11 }, { x: 24 + DOOR_OFF, z: -11 },
+    { x: -29.85, z: 11 }, { x: -8 + DOOR_OFF, z: 11 }, { x: 8 + DOOR_OFF, z: 11 }, { x: 24 + DOOR_OFF, z: 11 }
   ];
   return { halfWidth, halfDepth, cover, spawns };
 })();
@@ -147,19 +152,22 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
     const roomHalfW = 5.5; // gap between the core and the garden edge
     const frontX = innerFace + dir * roomHalfW * 2;
     const roomCx = innerFace + dir * roomHalfW;
-    glassWall(frontX, 0, 8.4, 'z', 0); // front, facing the garden - with a door
-    glassWall(roomCx, -4.2, roomHalfW * 2, 'x'); glassWall(roomCx, 4.2, roomHalfW * 2, 'x'); // side walls
+    // Entry is through the two side walls (matching the table's own north-south run) rather than
+    // the wall facing the garden, which is now solid glass, opposite the concrete core.
+    glassWall(frontX, 0, 8.4, 'z');
+    glassWall(roomCx, -4.2, roomHalfW * 2, 'x', 0); glassWall(roomCx, 4.2, roomHalfW * 2, 'x', 0);
     // big TV on the inside of the concrete wall
     meshBox(innerFace + dir * .05, 1.9, 0, .08, 1.9, 3.6, screen, false);
-    // long conference table with chairs down both sides
-    const tableCx = roomCx - dir * .4; // biased toward the door end, not crowding the TV wall
-    meshBox(tableCx, .74, 0, roomHalfW * 1.55, .06, 2.5, wood, true, true);
-    [-1, 1].forEach(lx => meshBox(tableCx + lx * (roomHalfW * 1.55 / 2 - .3), .37, 0, .08, .74, 2.3, dark, false));
+    // Conference table runs north-south (chairs flank the east/west sides) rather than along the
+    // door-to-TV axis, per a follow-up request - the TV still faces straight down the table.
+    const tableLen = 7;
+    meshBox(roomCx, .74, 0, 2.5, .06, tableLen, wood, true, true);
+    [-1, 1].forEach(lz => meshBox(roomCx, .37, lz * (tableLen / 2 - .3), 2.3, .74, .08, dark, false));
     for (let i = 0; i < 3; i++) {
-      const sx = tableCx - roomHalfW * .62 + i * (roomHalfW * .62);
-      [-1, 1].forEach(sz => {
-        meshBox(sx, .45, sz * 1.75, .55, .12, .55, dark, true, true);
-        meshBox(sx, .82, sz * 2.0, .55, .7, .1, dark, true, true);
+      const sz = -tableLen * .31 + i * (tableLen * .31);
+      [-1, 1].forEach(sx => {
+        meshBox(roomCx + sx * 1.75, .45, sz, .55, .12, .55, dark, true, true);
+        meshBox(roomCx + sx * 2.0, .82, sz, .55, .7, .1, dark, true, true);
       });
     }
   };
@@ -172,31 +180,49 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   // between neighbouring bays are solid cream concrete, not glass.
   const bayXs = [-24, -8, 8, 24];
   const partitionXs = [-16, 0, 16];
-  const longDesk = (bx, bz, facingSign) => {
-    const deskW = 11, deskD = 1.3;
-    meshBox(bx, .74, bz, deskW, .06, deskD, deskTop, true, true);
-    [-1, 1].forEach(sx => meshBox(bx + sx * deskW / 2 * .92, .37, bz, .08, .74, deskD * .8, dark, false));
-    const seats = 3;
-    for (let i = 0; i < seats; i++) {
-      const sx = bx - deskW / 2 + (deskW / (seats + 1)) * (i + 1);
-      meshBox(sx, .97, bz - facingSign * .35, .64, .42, .045, screen, false); // curved-monitor stand-in
-      meshBox(sx, .78, bz - facingSign * .35, .05, .2, .05, dark, false);
-      meshBox(sx, .77, bz + facingSign * .3, .42, .02, .16, dark, false); // keyboard
-      const chairZ = bz + facingSign * (deskD / 2 + .55);
-      meshBox(sx, .45, chairZ, .55, .12, .55, dark, true, true);
-      meshBox(sx, .82, chairZ + facingSign * .25, .55, .7, .1, dark, true, true);
-    }
+  // Two tables per bay, chairs flanking both long sides of each (matching the supplied floor
+  // plan), plus a TV mounted on the bay's own west wall near the entrance.
+  const officeFurniture = (bx, bz, frontZ) => {
+    const toFront = Math.sign(frontZ - bz);
+    const tableLen = 6, tableW = 1.1;
+    [bx - 3, bx + 3].forEach(tx => { // pulled in from +-4 so the door has a clear run into the room
+      meshBox(tx, .74, bz, tableW, .06, tableLen, deskTop, true, true);
+      [-1, 1].forEach(lz => meshBox(tx, .37, bz + lz * (tableLen / 2 - .3), tableW * .7, .74, .08, dark, false));
+      for (let i = 0; i < 3; i++) {
+        const sz = bz - tableLen * .31 + i * (tableLen * .31);
+        [-1, 1].forEach(sx => {
+          const cx = tx + sx * (tableW / 2 + .55);
+          meshBox(cx, .45, sz, .55, .12, .55, dark, true, true);
+          meshBox(cx + sx * .25, .82, sz, .1, .7, .55, dark, true, true);
+        });
+      }
+    });
+    meshBox(bx - 7.92, 1.75, bz + toFront * 2.2, .08, 1.5, 1.8, screen, false);
   };
   [-1, 1].forEach(side => { // -1 = north row (z<0), 1 = south row (z>0)
     const frontZ = side * 10, backZ = side * 18, bayCz = side * 14;
     bayXs.forEach(bx => {
-      glassWall(bx, frontZ, 16, 'x', 0); // doorAt is relative to the wall's own centre - 0 = dead centre
-      glassWall(bx, backZ, 16, 'x', 0);
+      // Door sits left-of-centre (toward -x), lined up with the clear aisle west of both tables
+      // rather than opening straight into the nearer one.
+      glassWall(bx, frontZ, 16, 'x', -6.55);
+      glassWall(bx, backZ, 16, 'x', -6.55);
       meshBox(bx, .012, bayCz, 15.4, .02, 7.4, carpetDark, false);
-      longDesk(bx, bayCz, side); // seated side faces the front (door) wall, not the terrace
+      officeFurniture(bx, bayCz, frontZ);
     });
     partitionXs.forEach(px => meshBox(px, 1.575, bayCz, .12, 3.15, 8, concreteCream, true, true));
   });
+
+  // Easter egg: a hand-drawn-marker-style doodle on the narrow left pane of the north-east
+  // bay's own front door wall (bx=24, the short segment west of the door) - decal only, doesn't
+  // touch the glass material or collision underneath it.
+  {
+    const eggTex = loadTiledTexture('assets/textures/stars_easter.png', 1, 1);
+    const eggMat = new THREE.MeshBasicMaterial({ map: eggTex, transparent: true, opacity: .85, alphaTest: .02, side: THREE.DoubleSide, depthWrite: false });
+    const egg = new THREE.Mesh(new THREE.PlaneGeometry(.5, .5), eggMat);
+    egg.position.set(16.3, 1.55, -10 + .04); // just off the glass, on the corridor-facing side
+    egg.renderOrder = 3;
+    scene.add(egg);
+  }
 
   // ---------- Ceiling light strips (no solid ceiling, keeps visibility and perf) ----------
   const lightMat = new THREE.MeshStandardMaterial({ color: 0xf7fbff, emissive: 0xe8f4ff, emissiveIntensity: 1.5 });

@@ -943,7 +943,7 @@ const MAP_TEXTURE_URLS = {
   skyline: [],
   ski: ['assets/textures/snow.png','assets/textures/cafe.png','assets/textures/mesa.png','assets/textures/arbol_tronco.png','assets/textures/arbol_hojas.png','assets/textures/cafe_gijon.png'],
   mall: [],
-  office: ['assets/textures/cream_concrete.png','assets/textures/moqueta_clara.jpg','assets/textures/moqueta_oscura.webp']
+  office: ['assets/textures/cream_concrete.png','assets/textures/moqueta_clara.jpg','assets/textures/moqueta_oscura.webp','assets/textures/stars_easter.png']
 };
 const texturePreloadState = new Map();
 function preloadMapTextures(mapId){
