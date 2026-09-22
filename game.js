@@ -14,6 +14,7 @@ import { addMapFinish } from './map-finish.js';
 import { findClearSpawn } from './map-spawns.js';
 import { createFounderFinish } from './founder-skin.js';
 import { buildFoundry } from './foundry-map.js';
+import { buildOffice } from './office-map.js';
 import { FOUNDRY } from './foundry-layout.js';
 import { TeammateSpectator } from './spectator.js';
 import { PlayerLabels } from './player-labels.js';
@@ -967,10 +968,11 @@ const envMeshes = [];
 // ground/floor meshes aren't collidable props (no addBox call), but graffiti still needs to be
 // sprayable onto them - each buildXMap() pushes its own ground mesh(es) here
 const floorMeshes = [];
-function addBox(mesh){
+function addBox(mesh, blocksBullets = true){
   const box = new THREE.Box3().setFromObject(mesh);
   colliders.push(box);
-  envMeshes.push(mesh);
+  // Some surfaces (Office glass) block movement but intentionally allow bullets through.
+  if (blocksBullets) envMeshes.push(mesh);
 }
 
 // contact shadow blob under an object for cheap AO
@@ -1703,6 +1705,17 @@ function buildSkylineMap(){
   };
 }
 
+function buildOfficeMap(){
+  WORLD_SIZE = 74;
+  groundHeightAt = () => 0;
+  sky.material.map = desertSkyGradientTexture(); sky.material.needsUpdate = true;
+  scene.fog.color.set(0xdde5e8); scene.fog.density = 0.001;
+  hemi.color.set(0xeaf4f7); hemi.groundColor.set(0x777b78); hemi.intensity = 1.45;
+  sun.color.set(0xfff4df); sun.intensity = 0.85;
+  fillLight.color.set(0xdcecff); fillLight.intensity = 0.75;
+  return buildOffice({ scene, floorMeshes, addBox });
+}
+
 function buildFoundryMap(){
   WORLD_SIZE = 58;
   groundHeightAt = () => 0;
@@ -1763,7 +1776,8 @@ const MAPS = {
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
   subway: { name: 'Subway', build: buildSubwayMap, dualFfa: true },
   skyline: { name: 'Skyline', build: buildSkylineMap },
-  foundry: { name: 'Foundry', build: buildFoundryMap }
+  foundry: { name: 'Foundry', build: buildFoundryMap },
+  office: { name: 'Office', build: buildOfficeMap }
 };
 let selectedMap = 'arena';
 
@@ -6914,6 +6928,20 @@ function renderSkylineThumbnail(){
   return cvs.toDataURL();
 }
 document.querySelector('.mapCard[data-map="skyline"] .swatch').style.backgroundImage = `url(${renderSkylineThumbnail()})`;
+function renderOfficeThumbnail(){
+  const c=document.createElement('canvas'); c.width=320; c.height=180; const ctx=c.getContext('2d');
+  ctx.fillStyle='#d8d8d2'; ctx.fillRect(0,0,320,180);
+  ctx.strokeStyle='#8ed8e8'; ctx.lineWidth=3; ctx.strokeRect(4,4,312,172);
+  ctx.fillStyle='#8bc59a'; ctx.fillRect(132,64,56,52);
+  ctx.fillStyle='#4f5558'; ctx.fillRect(55,72,14,40); ctx.fillRect(251,72,14,40);
+  ctx.strokeStyle='#72c8dc'; ctx.lineWidth=2;
+  [[4,4,56,42],[60,4,100,42],[160,4,105,42],[285,4,31,42],[4,134,56,42],[60,134,100,42],[160,134,100,42],[260,134,56,42]].forEach(r=>ctx.strokeRect(...r));
+  ctx.fillStyle='#76563c'; ctx.fillRect(16,80,30,18); ctx.fillRect(274,80,30,18);
+  return c.toDataURL();
+}
+const officeSwatch=document.querySelector('.mapCard[data-map="office"] .swatch');
+if(officeSwatch) officeSwatch.style.backgroundImage=`url(${renderOfficeThumbnail()})`;
+
 function renderFoundryThumbnail(){
   const canvas = document.createElement('canvas'); canvas.width = 220; canvas.height = 260;
   const ctx = canvas.getContext('2d'); ctx.fillStyle = '#17272d'; ctx.fillRect(0, 0, 220, 260);
