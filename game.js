@@ -942,7 +942,8 @@ const MAP_TEXTURE_URLS = {
   foundry: ['assets/textures/wall.jpg', 'assets/textures/subway_floor.webp', 'assets/textures/metal.jpg'],
   skyline: [],
   ski: ['assets/textures/snow.png','assets/textures/cafe.png','assets/textures/mesa.png','assets/textures/arbol_tronco.png','assets/textures/arbol_hojas.png','assets/textures/cafe_gijon.png'],
-  mall: []
+  mall: [],
+  office: ['assets/textures/cream_concrete.png','assets/textures/moqueta_clara.jpg','assets/textures/moqueta_oscura.webp']
 };
 const texturePreloadState = new Map();
 function preloadMapTextures(mapId){
@@ -1713,7 +1714,7 @@ function buildOfficeMap(){
   hemi.color.set(0xeaf4f7); hemi.groundColor.set(0x777b78); hemi.intensity = 1.45;
   sun.color.set(0xfff4df); sun.intensity = 0.85;
   fillLight.color.set(0xdcecff); fillLight.intensity = 0.75;
-  return buildOffice({ scene, floorMeshes, addBox });
+  return buildOffice({ scene, floorMeshes, addBox, loadTiledTexture });
 }
 
 function buildFoundryMap(){
@@ -1777,7 +1778,7 @@ const MAPS = {
   subway: { name: 'Subway', build: buildSubwayMap, dualFfa: true },
   skyline: { name: 'Skyline', build: buildSkylineMap },
   foundry: { name: 'Foundry', build: buildFoundryMap },
-  office: { name: 'Office', build: buildOfficeMap }
+  office: { name: 'Office', build: buildOfficeMap, dualFfa: true }
 };
 let selectedMap = 'arena';
 

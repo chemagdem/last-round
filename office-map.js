@@ -1,18 +1,79 @@
 import * as THREE from 'three';
 
-// OFFICE — rectangular corporate floor built from the supplied plan.
-// Glass uses collision-only geometry: players cannot walk through it, while hitscan bullets
-// ignore it because the panes are deliberately not registered in envMeshes.
-export function buildOffice({ scene, floorMeshes, addBox }) {
+// Hand-authored 2D bot-nav/blockedAt layout mirroring buildOffice()'s real geometry below, so FFA
+// can run on this map without a second, FFA-only build - buildOffice()'s own colliders are what
+// the player actually walks into; this is only read by blockedAt()/buildNavigation() for FFA bot
+// pathing and human spawn-clearing. Doored walls are modelled as two segments flanking the gap so
+// bots don't believe a doorway is solid, or a solid stretch is walkable.
+export const OFFICE_FFA_LAYOUT = (() => {
+  const halfWidth = 32, halfDepth = 24;
+  const cover = [];
+  const wallSeg = (cx, cz, len, axis, doorAt = null) => {
+    const t = 1.2, door = 1.9;
+    if (doorAt === null) { cover.push(axis === 'x' ? { x: cx, z: cz, w: len, d: t } : { x: cx, z: cz, w: t, d: len }); return; }
+    const start = -len / 2, left = doorAt - door / 2 - start, right = len - left - door;
+    if (left > .1) { const c = start + left / 2; cover.push(axis === 'x' ? { x: cx + c, z: cz, w: left, d: t } : { x: cx, z: cz + c, w: t, d: left }); }
+    if (right > .1) { const c = doorAt + door / 2 + right / 2; cover.push(axis === 'x' ? { x: cx + c, z: cz, w: right, d: t } : { x: cx, z: cz + c, w: t, d: right }); }
+  };
+
+  // building perimeter: east/west walls (indoor + both terraces) and the two outer terrace rails
+  cover.push({ x: -32, z: 0, w: 2, d: 48 }, { x: 32, z: 0, w: 2, d: 48 });
+  cover.push({ x: 0, z: -24, w: 64, d: 2 }, { x: 0, z: 24, w: 64, d: 2 });
+
+  // central garden planter
+  cover.push({ x: 0, z: 0, w: 11.5, d: 11.5 });
+
+  // the two boardrooms - same coreX/dir pairing buildOffice() uses below
+  [[-20, 1], [20, -1]].forEach(([coreX, dir]) => {
+    const innerFace = coreX + dir * 1.65, roomHalfW = 5.5;
+    const roomCx = innerFace + dir * roomHalfW, frontX = innerFace + dir * roomHalfW * 2;
+    cover.push({ x: coreX, z: 0, w: 3.1, d: 8.4 }); // core
+    wallSeg(frontX, 0, 8.4, 'z', 0); // front, with a door
+    cover.push({ x: roomCx, z: -4.2, w: roomHalfW * 2, d: 1 }, { x: roomCx, z: 4.2, w: roomHalfW * 2, d: 1 }); // sides
+    cover.push({ x: roomCx + dir * .4, z: 0, w: roomHalfW * 1.55, d: 2.5 }); // table
+  });
+
+  // the eight office bays: front/back doored walls, the desk down the middle, concrete partitions
+  const bayXs = [-24, -8, 8, 24], partitionXs = [-16, 0, 16];
+  [-1, 1].forEach(rowSide => {
+    const frontZ = rowSide * 10, backZ = rowSide * 18, bayCz = rowSide * 14;
+    bayXs.forEach(bx => {
+      wallSeg(bx, frontZ, 16, 'x', 0); // doorAt is relative to the wall's own centre - 0 = dead centre
+      wallSeg(bx, backZ, 16, 'x', 0);
+      // Narrower than the real desk (11 wide) on purpose - the coarse step=2 nav grid needs a
+      // comfortable margin to find the walk-around at each end, not just the real clearance.
+      cover.push({ x: bx, z: bayCz, w: 7, d: 1.3 });
+    });
+    partitionXs.forEach(px => cover.push({ x: px, z: bayCz, w: 1, d: 8 }));
+  });
+
+  // 12 spawns: two open corridor ends, two terrace spots, and one just inside each bay's front
+  // door - offset from bay centre so nobody spawns inside the desk/chairs.
+  const spawns = [
+    { x: -27, z: 0 }, { x: 27, z: 0 }, { x: 0, z: -21 }, { x: 0, z: 21 },
+    { x: -24, z: -11 }, { x: -8, z: -11 }, { x: 8, z: -11 }, { x: 24, z: -11 },
+    { x: -24, z: 11 }, { x: -8, z: 11 }, { x: 8, z: 11 }, { x: 24, z: 11 }
+  ];
+  return { halfWidth, halfDepth, cover, spawns };
+})();
+
+// OFFICE — rectangular corporate floor: a central garden flanked by two glass boardrooms (each
+// using one of the plan's marked concrete cores as its own back wall), eight office bays around
+// the outside (long shared desks, dark carpet, concrete partitions between neighbours), and a
+// walkable terrace running the length of the building behind every bay.
+export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   const glass = new THREE.MeshPhysicalMaterial({
     color: 0xbfe9f4, transparent: true, opacity: 0.27, roughness: 0.08,
     metalness: 0.05, transmission: 0.62, side: THREE.DoubleSide, depthWrite: false
   });
   const glassEdge = new THREE.MeshStandardMaterial({ color: 0x27343a, roughness: 0.38, metalness: 0.72 });
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x555a5d, roughness: 0.9 });
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0xc9c8c3, roughness: 0.82 });
-  const carpet = new THREE.MeshStandardMaterial({ color: 0x59656d, roughness: 0.96 });
+  // Real photo texture, so no extra colour tint - the "cream" comes from the image itself.
+  const concreteCream = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/cream_concrete.png', 2.4, 1.6), roughness: 0.92 });
+  const carpetLight = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/moqueta_clara.jpg', 12, 8), roughness: 0.95 });
+  const carpetDark = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/moqueta_oscura.webp', 5, 3), roughness: 0.95 });
+  const terraceMat = new THREE.MeshStandardMaterial({ color: 0xc9c8c3, roughness: 0.82 });
   const wood = new THREE.MeshStandardMaterial({ color: 0x7b5436, roughness: 0.72 });
+  const deskTop = new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.55 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x20262a, roughness: 0.5, metalness: 0.2 });
   const screen = new THREE.MeshStandardMaterial({ color: 0x07131a, emissive: 0x153b50, emissiveIntensity: 0.65, roughness: 0.2 });
   const leaf = new THREE.MeshStandardMaterial({ color: 0x315f3c, roughness: 0.95 });
@@ -26,100 +87,123 @@ export function buildOffice({ scene, floorMeshes, addBox }) {
     return mesh;
   };
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(64, 36), floorMat);
-  floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); floorMeshes.push(floor);
-
-  // Thin carpet in every office bay.
-  const rugs = [
-    [-26,-14,12,8],[-10,-14,20,8],[10.5,-14,21,8],[29,-14,6,8],
-    [-26,14,12,8],[-10,14,20,8],[10,14,20,8],[26,14,12,8]
-  ];
-  rugs.forEach(([x,z,w,d]) => meshBox(x,.012,z,w,.02,d,carpet,false));
-
-  // Glass wall helper. Frames are visual only too, so a bullet can wallbang the complete partition.
-  const glassWall = (x, z, length, axis='x', doorAt=null) => {
-    const h=3.15, t=.10, door=1.65;
-    const pane = (cx,cz,len) => {
-      const m = axis==='x' ? meshBox(cx,h/2,cz,len,h,t,glass,true,false) : meshBox(cx,h/2,cz,t,h,len,glass,true,false);
-      m.renderOrder = 2;
-      // mullions
-      const count=Math.max(1,Math.floor(len/3));
-      for(let i=0;i<=count;i++){
-        const p=-len/2+(len*i/count);
-        axis==='x' ? meshBox(cx+p,h/2,cz,t*.7,h,.08,glassEdge,false) : meshBox(cx,h/2,cz+p,.08,h,t*.7,glassEdge,false);
-      }
-      axis==='x' ? meshBox(cx,h,cz,len+.08,.08,.12,glassEdge,false) : meshBox(cx,h,cz,.12,.08,len+.08,glassEdge,false);
-    };
-    if(doorAt===null){ pane(x,z,length); return; }
-    const start=-length/2, left=doorAt-door/2-start, right=length-left-door;
-    if(left>.05){ const c=start+left/2; axis==='x'?pane(x+c,z,left):pane(x,z+c,left); }
-    if(right>.05){ const c=doorAt+door/2+right/2; axis==='x'?pane(x+c,z,right):pane(x,z+c,right); }
-  };
-
-  // Exterior shell is glass as requested; it is a movement boundary but bullets pass through it.
-  glassWall(0,-18,64,'x'); glassWall(0,18,64,'x'); glassWall(-32,0,36,'z'); glassWall(32,0,36,'z');
-
-  // North offices (top of plan): corridor-facing fronts and office-to-office glass partitions.
-  glassWall(-26,-10,12,'x',0); glassWall(-10,-10,20,'x',0); glassWall(10.5,-10,21,'x',0); glassWall(29,-10,6,'x',0);
-  [-20,0,21,26].forEach(x => glassWall(x,-14,8,'z',0));
-  // WC in north-east, also glass-partitioned.
-  glassWall(26,-14,8,'z',2.2);
-
-  // South offices.
-  glassWall(-26,10,12,'x',0); glassWall(-10,10,20,'x',0); glassWall(10,10,20,'x',0); glassWall(26,10,12,'x',0);
-  [-20,0,20].forEach(x => glassWall(x,14,8,'z',0));
-
-  // Two explicitly marked HORMIGÓN blocks from the plan.
-  meshBox(-20,1.7,0,3.1,3.4,8.4,concrete,true,true);
-  meshBox(20,1.7,0,3.1,3.4,8.4,concrete,true,true);
-
-  // Central square garden: low concrete planter, soil and dense plants. Low enough to shoot over.
-  meshBox(0,.35,0,11.5,.7,11.5,concrete,true,true);
-  meshBox(0,.72,0,10.6,.08,10.6,soil,false);
-  const plant = (x,z,s=.8) => {
-    meshBox(x,.72,z,.16,.75,.16,wood,false);
-    const crown=new THREE.Mesh(new THREE.SphereGeometry(s,8,6),leaf); crown.scale.y=1.35; crown.position.set(x,1.25,z); crown.castShadow=true; scene.add(crown);
-  };
-  [[-3.7,-3.5],[-1.2,-3.8],[2,-3.2],[3.7,-.8],[-3.8,.2],[-1.4,2.7],[1.4,3.5],[3.8,3]].forEach(p=>plant(...p,.7));
-
-  // High tables beside the concrete blocks.
-  const highTable = x => {
-    meshBox(x,1.05,0,4.4,.18,2.5,wood,true,true);
-    for(const sx of [-1,1]) for(const sz of [-1,1]) meshBox(x+sx*1.65,.52,sz*.75,.14,1.04,.14,dark,true,true);
-  };
-  highTable(-26); highTable(26);
-
-  // Office furniture: desks, computers, chairs and occasional plants/TVs.
-  const officeCenters=[[-26,-14],[-10,-14],[10,-14],[29,-14],[-26,14],[-10,14],[10,14],[26,14]];
-  officeCenters.forEach(([x,z],i)=>{
-    const deskZ=z+(z<0?1.2:-1.2);
-    meshBox(x,.43,deskZ,3.8,.12,1.35,wood,true,true);
-    for(const sx of [-1,1]) meshBox(x+sx*1.45,.22,deskZ,.14,.44,1.05,dark,true,true);
-    // monitor + stand
-    meshBox(x,.94,deskZ,1.15,.68,.10,screen,true,true);
-    meshBox(x,.62,deskZ,.10,.28,.10,dark,true,true);
-    // keyboard
-    meshBox(x,.53,deskZ+(z<0?.42:-.42),.9,.035,.28,dark,false);
-    // chair
-    meshBox(x,.46,deskZ+(z<0?1.15:-1.15),.7,.12,.7,dark,true,true);
-    meshBox(x,.88,deskZ+(z<0?1.42:-1.42),.72,.8,.12,dark,true,true);
-    if(i%2===0){
-      const px=x+(i%4<2?3.8:-3.8), pz=z;
-      meshBox(px,.3,pz,.65,.6,.65,white,true,true); plant(px,pz,.55);
-    }
-    if(i===1||i===5){ // wall-mounted TVs in two larger offices
-      const tvZ=z+(z<0?-3.86:3.86);
-      meshBox(x,1.95,tvZ,3.2,1.65,.08,screen,false);
-    }
+  // ---------- Floors ----------
+  // Light carpet everywhere indoors first (the "common areas" carpet), dark carpet patches for
+  // each office bay laid a hair above it so the two never z-fight, and a separate stone terrace
+  // floor for the two exterior strips behind the office rows.
+  const indoor = new THREE.Mesh(new THREE.PlaneGeometry(64, 36), carpetLight);
+  indoor.rotation.x = -Math.PI / 2; indoor.position.y = 0; indoor.receiveShadow = true;
+  scene.add(indoor); floorMeshes.push(indoor);
+  [[0, -21], [0, 21]].forEach(([x, z]) => {
+    const t = new THREE.Mesh(new THREE.PlaneGeometry(64, 6), terraceMat);
+    t.rotation.x = -Math.PI / 2; t.position.set(x, 0, z); t.receiveShadow = true;
+    scene.add(t); floorMeshes.push(t);
   });
 
-  // Ceiling light strips without a solid ceiling, preserving visibility and performance.
-  const lightMat=new THREE.MeshStandardMaterial({color:0xf7fbff,emissive:0xe8f4ff,emissiveIntensity:1.5});
-  for(let x=-27;x<=27;x+=9) for(const z of [-7,7]) meshBox(x,3.55,z,4.8,.06,.22,lightMat,false);
-  const keyLight=new THREE.PointLight(0xf2f7ff,2.2,45,2); keyLight.position.set(0,5,0); scene.add(keyLight);
+  // ---------- Glass wall helper ----------
+  // Frames are visual only too, so a bullet can wallbang the complete partition.
+  const glassWall = (x, z, length, axis = 'x', doorAt = null, h = 3.15) => {
+    const t = .10, door = 1.65;
+    const pane = (cx, cz, len) => {
+      const m = axis === 'x' ? meshBox(cx, h / 2, cz, len, h, t, glass, true, false) : meshBox(cx, h / 2, cz, t, h, len, glass, true, false);
+      m.renderOrder = 2;
+      const count = Math.max(1, Math.floor(len / 3));
+      for (let i = 0; i <= count; i++) {
+        const p = -len / 2 + (len * i / count);
+        axis === 'x' ? meshBox(cx + p, h / 2, cz, t * .7, h, .08, glassEdge, false) : meshBox(cx, h / 2, cz + p, .08, h, t * .7, glassEdge, false);
+      }
+      axis === 'x' ? meshBox(cx, h, cz, len + .08, .08, .12, glassEdge, false) : meshBox(cx, h, cz, .12, .08, len + .08, glassEdge, false);
+    };
+    if (doorAt === null) { pane(x, z, length); return; }
+    const start = -length / 2, left = doorAt - door / 2 - start, right = length - left - door;
+    if (left > .05) { const c = start + left / 2; axis === 'x' ? pane(x + c, z, left) : pane(x, z + c, left); }
+    if (right > .05) { const c = doorAt + door / 2 + right / 2; axis === 'x' ? pane(x + c, z, right) : pane(x, z + c, right); }
+  };
+
+  // ---------- Terrace shell ----------
+  // East/west walls now run the full depth (indoor + both terraces); the terrace's own outer
+  // edge gets a low glass railing rather than a full wall - it is a walkway, not another room.
+  glassWall(-32, 0, 48, 'z'); glassWall(32, 0, 48, 'z');
+  [-24, 24].forEach(z => glassWall(0, z, 64, 'x', null, 1.05));
+
+  // ---------- Central garden ----------
+  meshBox(0, .35, 0, 11.5, .7, 11.5, concreteCream, true, true);
+  meshBox(0, .72, 0, 10.6, .08, 10.6, soil, false);
+  const plant = (x, z, s = .8) => {
+    meshBox(x, .72, z, .16, .75, .16, wood, false);
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), leaf); crown.scale.y = 1.35; crown.position.set(x, 1.25, z); crown.castShadow = true; scene.add(crown);
+  };
+  [[-3.7, -3.5], [-1.2, -3.8], [2, -3.2], [3.7, -.8], [-3.8, .2], [-1.4, 2.7], [1.4, 3.5], [3.8, 3]].forEach(p => plant(...p, .7));
+
+  // ---------- Boardrooms flanking the garden ----------
+  // Each one sits in the gap between the garden and one of the plan's marked concrete cores,
+  // which becomes the boardroom's own back wall - every other wall is glass with a door facing
+  // the garden corridor.
+  const boardroom = (coreX, dir) => { // dir: which way the room sits from its core (+1 = toward +x)
+    meshBox(coreX, 1.7, 0, 3.1, 3.4, 8.4, concreteCream, true, true); // the core itself, now cream concrete
+    const innerFace = coreX + dir * 1.65; // the core's room-facing surface
+    const roomHalfW = 5.5; // gap between the core and the garden edge
+    const frontX = innerFace + dir * roomHalfW * 2;
+    const roomCx = innerFace + dir * roomHalfW;
+    glassWall(frontX, 0, 8.4, 'z', 0); // front, facing the garden - with a door
+    glassWall(roomCx, -4.2, roomHalfW * 2, 'x'); glassWall(roomCx, 4.2, roomHalfW * 2, 'x'); // side walls
+    // big TV on the inside of the concrete wall
+    meshBox(innerFace + dir * .05, 1.9, 0, .08, 1.9, 3.6, screen, false);
+    // long conference table with chairs down both sides
+    const tableCx = roomCx - dir * .4; // biased toward the door end, not crowding the TV wall
+    meshBox(tableCx, .74, 0, roomHalfW * 1.55, .06, 2.5, wood, true, true);
+    [-1, 1].forEach(lx => meshBox(tableCx + lx * (roomHalfW * 1.55 / 2 - .3), .37, 0, .08, .74, 2.3, dark, false));
+    for (let i = 0; i < 3; i++) {
+      const sx = tableCx - roomHalfW * .62 + i * (roomHalfW * .62);
+      [-1, 1].forEach(sz => {
+        meshBox(sx, .45, sz * 1.75, .55, .12, .55, dark, true, true);
+        meshBox(sx, .82, sz * 2.0, .55, .7, .1, dark, true, true);
+      });
+    }
+  };
+  boardroom(-20, 1);  // west core: the room sits east of it, toward the garden (+x)
+  boardroom(20, -1);  // east core: the room sits west of it, toward the garden (-x)
+
+  // ---------- Office bays ----------
+  // Four bays a side, 16 units wide each, boundaries at x = -32,-16,0,16,32. Front wall (glass,
+  // door) faces the central corridor; back wall (glass, door) opens onto the terrace; the walls
+  // between neighbouring bays are solid cream concrete, not glass.
+  const bayXs = [-24, -8, 8, 24];
+  const partitionXs = [-16, 0, 16];
+  const longDesk = (bx, bz, facingSign) => {
+    const deskW = 11, deskD = 1.3;
+    meshBox(bx, .74, bz, deskW, .06, deskD, deskTop, true, true);
+    [-1, 1].forEach(sx => meshBox(bx + sx * deskW / 2 * .92, .37, bz, .08, .74, deskD * .8, dark, false));
+    const seats = 3;
+    for (let i = 0; i < seats; i++) {
+      const sx = bx - deskW / 2 + (deskW / (seats + 1)) * (i + 1);
+      meshBox(sx, .97, bz - facingSign * .35, .64, .42, .045, screen, false); // curved-monitor stand-in
+      meshBox(sx, .78, bz - facingSign * .35, .05, .2, .05, dark, false);
+      meshBox(sx, .77, bz + facingSign * .3, .42, .02, .16, dark, false); // keyboard
+      const chairZ = bz + facingSign * (deskD / 2 + .55);
+      meshBox(sx, .45, chairZ, .55, .12, .55, dark, true, true);
+      meshBox(sx, .82, chairZ + facingSign * .25, .55, .7, .1, dark, true, true);
+    }
+  };
+  [-1, 1].forEach(side => { // -1 = north row (z<0), 1 = south row (z>0)
+    const frontZ = side * 10, backZ = side * 18, bayCz = side * 14;
+    bayXs.forEach(bx => {
+      glassWall(bx, frontZ, 16, 'x', 0); // doorAt is relative to the wall's own centre - 0 = dead centre
+      glassWall(bx, backZ, 16, 'x', 0);
+      meshBox(bx, .012, bayCz, 15.4, .02, 7.4, carpetDark, false);
+      longDesk(bx, bayCz, side); // seated side faces the front (door) wall, not the terrace
+    });
+    partitionXs.forEach(px => meshBox(px, 1.575, bayCz, .12, 3.15, 8, concreteCream, true, true));
+  });
+
+  // ---------- Ceiling light strips (no solid ceiling, keeps visibility and perf) ----------
+  const lightMat = new THREE.MeshStandardMaterial({ color: 0xf7fbff, emissive: 0xe8f4ff, emissiveIntensity: 1.5 });
+  for (let x = -27; x <= 27; x += 9) for (const z of [-13, -7, 7, 13]) meshBox(x, 3.55, z, 4.8, .06, .22, lightMat, false);
+  const keyLight = new THREE.PointLight(0xf2f7ff, 2.2, 45, 2); keyLight.position.set(0, 5, 0); scene.add(keyLight);
 
   return {
-    spawn:new THREE.Vector3(-27,2,0), tSpawn:new THREE.Vector3(-27,2,0), ctSpawn:new THREE.Vector3(27,2,0),
-    tSpawnZone:{xMin:-30,xMax:-24,zMin:-6,zMax:6}, ctSpawnZone:{xMin:24,xMax:30,zMin:-6,zMax:6}, sites:[]
+    spawn: new THREE.Vector3(-27, 2, 0), tSpawn: new THREE.Vector3(-27, 2, 0), ctSpawn: new THREE.Vector3(27, 2, 0),
+    tSpawnZone: { xMin: -30, xMax: -24, zMin: -6, zMax: 6 }, ctSpawnZone: { xMin: 24, xMax: 30, zMin: -6, zMax: 6 }, sites: [],
+    ffa: OFFICE_FFA_LAYOUT
   };
 }
