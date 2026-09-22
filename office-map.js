@@ -212,14 +212,14 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
     partitionXs.forEach(px => meshBox(px, 1.575, bayCz, .12, 3.15, 8, concreteCream, true, true));
   });
 
-  // Easter egg: a hand-drawn-marker-style doodle on the narrow left pane of the north-east
-  // bay's own front door wall (bx=24, the short segment west of the door) - decal only, doesn't
-  // touch the glass material or collision underneath it.
+  // Easter egg: a hand-drawn-marker-style doodle on the north-east bay's back (terrace) wall,
+  // on its far right as you walk in through the front door - decal only, doesn't touch the
+  // glass material or collision underneath it.
   {
     const eggTex = loadTiledTexture('assets/textures/stars_easter.png', 1, 1);
     const eggMat = new THREE.MeshBasicMaterial({ map: eggTex, transparent: true, opacity: .85, alphaTest: .02, side: THREE.DoubleSide, depthWrite: false });
     const egg = new THREE.Mesh(new THREE.PlaneGeometry(.5, .5), eggMat);
-    egg.position.set(16.3, 1.55, -10 + .04); // just off the glass, on the corridor-facing side
+    egg.position.set(27, 1.55, -18 + .04); // just off the glass, facing into the room
     egg.renderOrder = 3;
     scene.add(egg);
   }
