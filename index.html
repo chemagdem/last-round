@@ -23,11 +23,11 @@
   #crosshair .chRight{left:calc(var(--crosshair-gap) + 2px);}
   #crosshair .chTop{bottom:var(--crosshair-gap);}
   #crosshair .chBottom{top:calc(var(--crosshair-gap) + 2px);}
-  #hitmarker{position:absolute;top:50%;left:50%;width:26px;height:26px;transform:translate(-50%,-50%) rotate(45deg);opacity:0;pointer-events:none;}
-  #hitmarker:before,#hitmarker:after{content:'';position:absolute;background:#aaaaaa;}
-  #hitmarker.kill:before,#hitmarker.kill:after{background:#ff3333;}
-  #hitmarker:before{left:50%;top:0;width:3px;height:100%;transform:translateX(-50%);}
-  #hitmarker:after{top:50%;left:0;height:3px;width:100%;transform:translateY(-50%);}
+  #hitmarker,#killcamHitmarker{position:absolute;top:50%;left:50%;width:26px;height:26px;transform:translate(-50%,-50%) rotate(45deg);opacity:0;pointer-events:none;}
+  #hitmarker:before,#hitmarker:after,#killcamHitmarker:before,#killcamHitmarker:after{content:'';position:absolute;background:#aaaaaa;}
+  #hitmarker.kill:before,#hitmarker.kill:after,#killcamHitmarker.kill:before,#killcamHitmarker.kill:after{background:#ff3333;}
+  #hitmarker:before,#killcamHitmarker:before{left:50%;top:0;width:3px;height:100%;transform:translateX(-50%);}
+  #hitmarker:after,#killcamHitmarker:after{top:50%;left:0;height:3px;width:100%;transform:translateY(-50%);}
   #adsDot{position:fixed;top:50%;left:50%;width:6px;height:6px;background:#e5473c;border-radius:50%;transform:translate(-50%,-50%);display:none;box-shadow:0 0 4px rgba(0,0,0,0.9);z-index:12;}
   #scopeOverlay{position:fixed;top:50%;left:50%;width:82vmin;height:82vmin;border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 0 9999px #000;display:none;z-index:11;background:radial-gradient(circle at 50% 50%,rgba(0,0,0,0) 60%,rgba(0,0,0,0.55) 100%);}
   #scopeOverlay .reticleV{position:absolute;left:50%;top:0;width:2px;height:100%;background:#000;transform:translateX(-50%);}
@@ -120,6 +120,7 @@
   @keyframes killIn{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:translateX(0)}}
   .kfKiller,.kfVictim{min-width:0;overflow:hidden;text-overflow:ellipsis;font:800 13px/1 'Baserona','Arial Narrow',sans-serif;letter-spacing:1.2px;text-transform:uppercase;padding-top:7px;}
   .kfKiller{color:#ff6257;text-align:right;text-shadow:0 0 12px rgba(255,73,61,.32);}
+  .kfAssist{display:block;margin-top:3px;color:#aab3b9;font:600 8px/1.1 Inter,'Segoe UI',sans-serif;letter-spacing:.5px;text-transform:uppercase;text-shadow:none;}
   .kfVictim{color:#d8dde0;text-align:left;}
   .kfWeapon{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#aab3b9;font:700 8px/1 Inter,'Segoe UI',sans-serif;letter-spacing:.7px;text-transform:uppercase;padding-top:7px;}
   .kfWeapon::before{content:"";display:block;width:30px;height:3px;background:linear-gradient(90deg,transparent,#d7b66c 22%,#d7b66c 78%,transparent);transform:skewX(-28deg);box-shadow:0 0 8px rgba(215,182,108,.45);}
@@ -584,6 +585,7 @@
   </div>
 </div>
 
+<div id="killcamHitmarker"></div>
 <div id="killcamOverlay">
   <div class="killcamBar killcamBarTop"></div>
   <div class="killcamBar killcamBarBottom"></div>
@@ -620,6 +622,7 @@
     </div>
     <label class="motionSetting"><input type="checkbox" id="reducedMotion"> REDUCED CAMERA MOTION</label>
     <button class="pauseBtn" id="resumeBtn">RESUME</button>
+    <button class="pauseBtn" id="endFfaBtn" hidden>END FFA MATCH</button>
     <button class="pauseBtn" id="mainMenuBtn">MAIN MENU</button>
   </div>
 </div>

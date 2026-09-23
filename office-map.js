@@ -81,7 +81,9 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   const deskTop = new THREE.MeshStandardMaterial({ color: 0xe9e7e1, roughness: 0.55 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x20262a, roughness: 0.5, metalness: 0.2 });
   const screen = new THREE.MeshStandardMaterial({ color: 0x07131a, emissive: 0x153b50, emissiveIntensity: 0.65, roughness: 0.2 });
-  const leaf = new THREE.MeshStandardMaterial({ color: 0x315f3c, roughness: 0.95 });
+  const leaf = new THREE.MeshStandardMaterial({ color: 0x315f3c, roughness: 0.88 });
+  const leafLight = new THREE.MeshStandardMaterial({ color: 0x4f7d4b, roughness: 0.9 });
+  const bark = new THREE.MeshStandardMaterial({ color: 0x5a3b27, roughness: 1 });
   const soil = new THREE.MeshStandardMaterial({ color: 0x3c3024, roughness: 1 });
   const white = new THREE.MeshStandardMaterial({ color: 0xe8e5dd, roughness: 0.75 });
 
@@ -153,11 +155,25 @@ export function buildOffice({ scene, floorMeshes, addBox, loadTiledTexture }) {
   // ---------- Central garden ----------
   meshBox(0, .35, 0, 11.5, .7, 11.5, concreteCream, true, true);
   meshBox(0, .72, 0, 10.6, .08, 10.6, soil, false);
-  const plant = (x, z, s = .8) => {
-    meshBox(x, .72, z, .16, .75, .16, wood, false);
-    const crown = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), leaf); crown.scale.y = 1.35; crown.position.set(x, 1.25, z); crown.castShadow = true; scene.add(crown);
+  // Layered procedural indoor trees: tapered trunk + irregular foliage clusters. The previous
+  // single stretched sphere read as a placeholder from every angle, especially in the killcam.
+  const plant = (x, z, s = .8, seed = 0) => {
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.08*s,.14*s,.95*s,9), bark);
+    trunk.position.set(x,1.18,z); trunk.castShadow=true; trunk.receiveShadow=true; scene.add(trunk);
+    const clusters=[[0,.58,0,.62],[-.32,.36,.08,.43],[.30,.32,-.12,.46],[-.08,.28,.30,.40],[.10,.18,-.32,.38]];
+    clusters.forEach((c,i)=>{
+      const crown=new THREE.Mesh(new THREE.IcosahedronGeometry(c[3]*s,2), i%2?leafLight:leaf);
+      crown.scale.set(1+.08*Math.sin(seed+i),1.15+.12*Math.cos(seed*1.7+i),.92+.08*Math.cos(seed+i));
+      crown.position.set(x+c[0]*s,1.25*s+c[1]*s,z+c[2]*s);
+      crown.rotation.set(seed*.13+i*.31,seed*.21+i*.47,seed*.08); crown.castShadow=true; crown.receiveShadow=true; scene.add(crown);
+    });
+    // A few small stones break up the perfectly flat soil bed.
+    for(let i=0;i<3;i++){
+      const stone=new THREE.Mesh(new THREE.DodecahedronGeometry(.08+.025*((seed+i)%3),0),white);
+      stone.scale.y=.55; stone.position.set(x+Math.sin(seed*2+i*2.1)*.48,.79,z+Math.cos(seed+i*1.7)*.48); scene.add(stone);
+    }
   };
-  [[-3.7, -3.5], [-1.2, -3.8], [2, -3.2], [3.7, -.8], [-3.8, .2], [-1.4, 2.7], [1.4, 3.5], [3.8, 3]].forEach(p => plant(...p, .7));
+  [[-3.7,-3.5],[-1.2,-3.8],[2,-3.2],[3.7,-.8],[-3.8,.2],[-1.4,2.7],[1.4,3.5],[3.8,3]].forEach((p,i)=>plant(p[0],p[1],.82+(i%3)*.08,i+1));
 
   // ---------- Boardrooms flanking the garden ----------
   // Each one sits in the gap between the garden and one of the plan's marked concrete cores,
