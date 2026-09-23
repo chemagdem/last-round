@@ -2137,7 +2137,6 @@ function weaponBox(width, height, depth, material, radius = 0.018){
 
 function makeStatTrakDisplay(id){
   if (!STATTRAK_WEAPON_IDS.includes(id)) return null;
-
   // The counter is a physical module fixed flush to the INNER/LEFT side of the weapon.  The old
   // version was an XY billboard in front of the receiver; in first person that looked like a sign
   // floating out of the gun and could cover the skin.  This housing is only a few millimetres thick
@@ -7173,6 +7172,7 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
     // column (pre-migration schema) instead of/alongside the new per-weapon `equippedSkins` -
     // sanitize rather than trust the cloud payload's shape blindly.
     playerProfile.equippedSkins = sanitizeEquippedSkins(cloudFields.equippedSkins, cloudFields.equippedSkin);
+    playerProfile.weaponKills = sanitizeWeaponKills(cloudFields.weaponKills);
     delete playerProfile.equippedSkin;
     // The server checks the confirmed Auth identity before granting this entitlement.
     playerProfile.isFounder = founderEntitled;
