@@ -130,3 +130,8 @@ $$;
 
 grant execute on function public.find_or_queue(text, text, integer) to anon, authenticated;
 grant execute on function public.leave_queue(text) to anon, authenticated;
+
+
+-- Migration 6: persistent per-weapon StatTrak counters. The client increments the counter only
+-- when this account is credited with the kill; guest profiles use the same shape in localStorage.
+alter table public.player_profiles add column if not exists "weaponKills" jsonb not null default '{}'::jsonb;

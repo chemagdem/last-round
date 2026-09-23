@@ -1997,13 +1997,15 @@ let cloudProfileActive = false;
 // Only the guns whose model actually builds skinnable parts from a shared material in
 // buildWeaponVisual's switch - knife/grenade/smoke/flash are utility items with no finish to equip.
 const WEAPON_SKIN_IDS = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp'];
+const STATTRAK_WEAPON_IDS = ['knife', ...WEAPON_SKIN_IDS, 'grenade'];
 // A factory, not a shared object literal: `{...DEFAULT_PROFILE}` only shallow-copies, so every
 // caller used to get the SAME nested equippedSkins object - equipping a skin silently mutated
 // "the default" itself, and any later `{...defaultProfile(), ...somethingWithNoSkins}` merge
 // picked up that leftover mutation instead of a clean gold baseline.
 function defaultProfile(){
   return { name: 'Player', country: '', clan: '', rating: 1000, wins: 0, losses: 0, matches: 0,
-    equippedSkins: Object.fromEntries(WEAPON_SKIN_IDS.map(id => [id, 'gold'])) };
+    equippedSkins: Object.fromEntries(WEAPON_SKIN_IDS.map(id => [id, 'gold'])),
+    weaponKills: Object.fromEntries(STATTRAK_WEAPON_IDS.map(id => [id, 0])) };
 }
 // Fills in any weapon missing a valid skin id (unset, or not in SKIN_CATALOG) with `fallback` -
 // used both for a fresh/partial local save and for whatever a cloud profile sends back.
@@ -2014,6 +2016,18 @@ function sanitizeEquippedSkins(source, fallback = 'gold'){
   for (const id of WEAPON_SKIN_IDS) out[id] = SKIN_CATALOG[skins[id]] ? skins[id] : legacy;
   return out;
 }
+
+function sanitizeWeaponKills(source){
+  const raw = source && typeof source === 'object' ? source : {};
+  return Object.fromEntries(STATTRAK_WEAPON_IDS.map(id => [id, Math.max(0, Math.floor(Number(raw[id]) || 0))]));
+}
+function addStatTrakKill(weaponId){
+  if (!STATTRAK_WEAPON_IDS.includes(weaponId)) return;
+  playerProfile.weaponKills = sanitizeWeaponKills(playerProfile.weaponKills);
+  playerProfile.weaponKills[weaponId]++;
+  savePlayerProfile();
+  if (currentVisual?.weaponId === weaponId) updateStatTrakDisplay(currentVisual);
+}
 // Founder entitlement comes from the authenticated database RPC, never guest storage.
 let playerProfile = defaultProfile();
 try {
@@ -2023,6 +2037,7 @@ try {
 // Migrate the old single shared-skin field into the new per-weapon map - everything used to
 // equip whatever that one field named - and backfill any weapon a save is missing.
 playerProfile.equippedSkins = sanitizeEquippedSkins(playerProfile.equippedSkins, playerProfile.equippedSkin);
+playerProfile.weaponKills = sanitizeWeaponKills(playerProfile.weaponKills);
 delete playerProfile.equippedSkin;
 playerProfile.isFounder = false;
 function savePlayerProfile(){
@@ -2117,6 +2132,58 @@ function weaponBox(width, height, depth, material, radius = 0.018){
   const mesh = new THREE.Mesh(new RoundedBoxGeometry(width, height, depth, 3, Math.min(radius, width / 3, height / 3, depth / 3)), material);
   mesh.castShadow = true;
   return mesh;
+}
+
+function makeStatTrakDisplay(id){
+  if (!STATTRAK_WEAPON_IDS.includes(id)) return null;
+
+  // The counter is a physical module fixed flush to the INNER/LEFT side of the weapon.  The old
+  // version was an XY billboard in front of the receiver; in first person that looked like a sign
+  // floating out of the gun and could cover the skin.  This housing is only a few millimetres thick
+  // and its display lies in the YZ plane, so it follows the receiver surface during inspect/recoil.
+  const compact = id === 'knife' || id === 'grenade';
+  const pistol = ['glock', 'deagle', 'tec9', 'duals'].includes(id);
+  const widthZ = compact ? 0.085 : (pistol ? 0.105 : 0.145);
+  const heightY = compact ? 0.028 : (pistol ? 0.032 : 0.038);
+  const centerX = id === 'knife' ? 0.194 : (pistol ? 0.178 : 0.174);
+  const centerY = id === 'knife' ? -0.17 : (pistol ? -0.205 : -0.205);
+  const centerZ = id === 'knife' ? -0.235 : (pistol ? -0.34 : -0.39);
+
+  const root = new THREE.Group();
+  root.position.set(centerX, centerY, centerZ);
+
+  const housingMat = new THREE.MeshStandardMaterial({ color: 0x171916, roughness: 0.52, metalness: 0.68 });
+  const housing = weaponBox(0.012, heightY + 0.012, widthZ + 0.014, housingMat, 0.006);
+  root.add(housing);
+
+  const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64;
+  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter; texture.magFilter = THREE.LinearFilter;
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: false, depthTest: true, depthWrite: true, side: THREE.FrontSide });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(widthZ, heightY), material);
+  // PlaneGeometry starts in XY. Rotating -90 degrees around Y makes its front normal point -X,
+  // directly toward the camera-facing side of our right-handed viewmodel.
+  mesh.rotation.y = -Math.PI / 2;
+  mesh.position.x = -0.00615;
+  mesh.renderOrder = 2;
+  root.add(mesh);
+
+  return { id, canvas, texture, mesh, root };
+}
+function updateStatTrakDisplay(visual){
+  const st = visual?.statTrak; if (!st) return;
+  const ctx = st.canvas.getContext('2d');
+  ctx.clearRect(0, 0, st.canvas.width, st.canvas.height);
+  ctx.fillStyle = '#11130f'; ctx.fillRect(0, 0, 256, 64);
+  ctx.strokeStyle = '#343930'; ctx.lineWidth = 5; ctx.strokeRect(2.5, 2.5, 251, 59);
+  // Keep the face deliberately minimal: the physical housing already identifies the module and a
+  // large orange number stays legible without hiding the equipped finish underneath it.
+  ctx.fillStyle = '#ff8614';
+  ctx.shadowColor = 'rgba(255,110,0,.55)'; ctx.shadowBlur = 5;
+  ctx.font = 'bold 38px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(playerProfile.weaponKills?.[st.id] || 0).padStart(6, '0'), 128, 34);
+  ctx.shadowBlur = 0; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  st.texture.needsUpdate = true;
 }
 
 function buildWeaponVisual(id){
@@ -2513,10 +2580,14 @@ function buildWeaponVisual(id){
   flashLight.position.copy(muzzle || new THREE.Vector3(0.22, -0.2, -0.6));
   flashSprite.position.copy(flashLight.position);
   group.add(flashLight, flashSprite);
-  return {
-    group, sight, aimOffset, magazine, chargingHandle, magRestY: magazine ? magazine.position.y : 0, chargeRestX: chargingHandle ? chargingHandle.position.x : 0, muzzle, knifeParts,
+  const statTrak = makeStatTrakDisplay(id);
+  if (statTrak) group.add(statTrak.root);
+  const visual = {
+    weaponId: id, group, sight, aimOffset, magazine, chargingHandle, magRestY: magazine ? magazine.position.y : 0, chargeRestX: chargingHandle ? chargingHandle.position.x : 0, muzzle, knifeParts, statTrak,
     boltHandle, boltRestZ: boltHandle ? boltHandle.position.z : 0, boltRestX: boltHandle ? boltHandle.position.x : 0
   };
+  updateStatTrakDisplay(visual);
+  return visual;
 }
 
 function equipSlot(slot, force = false){
@@ -2960,34 +3031,29 @@ function updateKnifeFlip(dt){
 function updateWeaponInspect(dt){
   if (weaponInspectT < 0 || !currentVisual) return;
   weaponInspectT += dt;
-  const duration = 1.15;
+  const duration = 2.35;
   const p = Math.min(1, weaponInspectT / duration);
-  const phase = p < 0.18 ? p / 0.18 : p > 0.78 ? (1 - p) / 0.22 : 1;
-  const eased = Math.sin(Math.max(0, phase) * Math.PI / 2);
-  const id = weaponInspectId;
-  if (id === 'knife') {
-    currentVisual.group.rotation.z = eased * Math.PI * 0.85;
-    currentVisual.group.rotation.y = eased * 0.55;
-    currentVisual.group.position.set(-eased * 0.06, eased * 0.035, eased * 0.04);
-  } else if (id === 'awp') {
-    currentVisual.group.rotation.y = -eased * 0.48;
-    currentVisual.group.rotation.z = eased * 0.16;
-    currentVisual.group.position.set(-eased * 0.1, eased * 0.06, eased * 0.08);
-  } else if (id === 'grenade' || id === 'smoke' || id === 'flash') {
-    currentVisual.group.rotation.y = -eased * 0.7;
-    currentVisual.group.rotation.z = eased * 0.28;
-    currentVisual.group.position.set(-eased * 0.08, eased * 0.08, eased * 0.06);
+  const smooth = t => t * t * (3 - 2 * t);
+  // CS-style presentation: bring the gun inward/up, show the left receiver, roll it to expose
+  // the top/right side, then return. Translation compensates for rotation around the viewmodel
+  // origin so the weapon stays framed instead of swinging outside the camera.
+  let x=0,y=0,z=0,rx=0,ry=0,rz=0;
+  if (p < .18) {
+    const t=smooth(p/.18); x=-.075*t; y=.085*t; z=.13*t; rx=-.10*t; ry=-.34*t; rz=.10*t;
+  } else if (p < .48) {
+    const t=smooth((p-.18)/.30); x=-.075+.045*t; y=.085+.025*t; z=.13+.035*t; rx=-.10-.13*t; ry=-.34+.12*t; rz=.10-.22*t;
+  } else if (p < .72) {
+    const t=smooth((p-.48)/.24); x=-.03+.07*t; y=.11-.015*t; z=.165-.01*t; rx=-.23+.18*t; ry=-.22+.42*t; rz=-.12+.20*t;
   } else {
-    // Pistols and assault rifles rotate just enough to expose the slide, magazine and receiver.
-    currentVisual.group.rotation.y = -eased * 0.62;
-    currentVisual.group.rotation.z = eased * 0.12;
-    currentVisual.group.position.set(-eased * 0.09, eased * 0.045, eased * 0.07);
+    const t=smooth((p-.72)/.28); x=.04*(1-t); y=.095*(1-t); z=.155*(1-t); rx=-.05*(1-t); ry=.20*(1-t); rz=.08*(1-t);
   }
+  if (weaponInspectId === 'knife') { ry *= 1.55; rz += Math.sin(p*Math.PI)*.42; x -= Math.sin(p*Math.PI)*.025; }
+  if (weaponInspectId === 'awp') { ry *= .72; z *= .82; x *= .75; }
+  currentVisual.group.position.set(x,y,z);
+  currentVisual.group.rotation.set(rx,ry,rz);
   if (p >= 1) {
-    weaponInspectT = -1;
-    weaponInspectId = null;
-    currentVisual.group.position.set(0, 0, 0);
-    currentVisual.group.rotation.set(0, 0, 0);
+    weaponInspectT = -1; weaponInspectId = null;
+    currentVisual.group.position.set(0,0,0); currentVisual.group.rotation.set(0,0,0);
   }
 }
 
@@ -3964,6 +4030,11 @@ function makeEnemySoldier(){
   gunMag.castShadow = true;
   gunProp.add(gunBody, gunBarrel, gunStock, gunSight, gunMag);
   gunProp.position.set(0.02, -0.02, -0.32); // small local grip adjustment relative to the hand socket
+  // The procedural soldier mesh was authored visually facing +Z, while the FPS/network yaw
+  // convention uses -Z as forward. Rotate the visible body 180 degrees (see animation below),
+  // then counter-rotate the rifle here so body AND barrel share the same -Z forward direction.
+  // This fixes the long-standing 'soldier is showing his back / gun points backwards' bug.
+  gunProp.rotation.y = Math.PI;
   rig.weaponSocket.add(gunProp);
 
   const muzzle = new THREE.Object3D();
@@ -3982,34 +4053,46 @@ function animateSoldierRig(mesh, dt, speed, crouching = false){
   const rig = mesh.userData.rig;
   if (!rig) return;
   const t = performance.now() * 0.001;
-  mesh.userData.crouchBlend = THREE.MathUtils.lerp(mesh.userData.crouchBlend || 0, crouching ? 1 : 0, Math.min(1, dt * 12));
-  const crouch = mesh.userData.crouchBlend;
-  const moving = speed > 0.05;
-  if (moving) mesh.userData.animPhase += dt * speed * 3.2;
-  const phase = mesh.userData.animPhase;
+  const smooth = (current, target, rate) => THREE.MathUtils.lerp(current || 0, target, 1 - Math.exp(-rate * dt));
+  mesh.userData.crouchBlend = smooth(mesh.userData.crouchBlend, crouching ? 1 : 0, 12);
+  mesh.userData.moveBlend = smooth(mesh.userData.moveBlend, speed > 0.08 ? 1 : 0, 10);
+  mesh.userData.runBlend = smooth(mesh.userData.runBlend, speed > 8.5 ? 1 : 0, 8);
+  mesh.userData.hitReact = Math.max(0, (mesh.userData.hitReact || 0) - dt * 4.8);
 
-  const strideAmp = moving ? Math.min(0.55, 0.18 + speed * 0.12) : 0;
+  const crouch = mesh.userData.crouchBlend;
+  const moving = mesh.userData.moveBlend;
+  const running = mesh.userData.runBlend;
+  if (speed > 0.05) mesh.userData.animPhase += dt * (5.2 + Math.min(speed, 14) * 0.72);
+  const phase = mesh.userData.animPhase;
+  const strideAmp = moving * Math.min(0.72, 0.14 + speed * 0.052) * (1 + running * 0.18);
   const leftHipWalk = Math.sin(phase) * strideAmp;
   const rightHipWalk = -Math.sin(phase) * strideAmp;
-  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.6)) * strideAmp * 1.3;
-  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.6)) * strideAmp * 1.3;
-  // A crouch is a joint pose, not a root translation: the feet stay planted while hips descend,
-  // thighs angle forward and shins fold back. This prevents the old half-body-through-floor look.
+  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.55)) * strideAmp * 1.45;
+  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.55)) * strideAmp * 1.45;
+
   rig.legs.L.hip.rotation.x = THREE.MathUtils.lerp(leftHipWalk, -0.58, crouch);
   rig.legs.R.hip.rotation.x = THREE.MathUtils.lerp(rightHipWalk, -0.58, crouch);
   rig.legs.L.knee.rotation.x = THREE.MathUtils.lerp(leftKneeWalk, 1.12, crouch);
   rig.legs.R.knee.rotation.x = THREE.MathUtils.lerp(rightKneeWalk, 1.12, crouch);
   rig.hips.position.y = THREE.MathUtils.lerp(HIP_TO_GROUND, 0.62, crouch);
 
-  // idle breathing (always) + a walking bob layered on top (only while moving)
-  const breathe = Math.sin(t * 1.6) * 0.006;
-  const stepBob = moving ? Math.abs(Math.sin(phase)) * 0.02 : 0;
-  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04;
-  rig.torso.rotation.x = -crouch * 0.16;
+  // Breathing, footfall compression and forward run lean are blended rather than snapped.
+  const breathe = Math.sin(t * 1.6) * 0.006 * (1 - running * 0.4);
+  const stepBob = Math.abs(Math.sin(phase)) * 0.022 * moving;
+  const hit = mesh.userData.hitReact || 0;
+  const hitSide = mesh.userData.hitReactSide || 1;
+  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04 - running * 0.018;
+  rig.torso.rotation.x = -crouch * 0.16 + running * 0.12 - hit * 0.10;
+  rig.torso.rotation.z = hit * hitSide * 0.13;
+  // Visual rig was modelled facing +Z, but gameplay/camera forward is -Z. Keep a permanent
+  // 180-degree basis correction and layer the locomotion twist on top of it.
+  rig.hips.rotation.y = Math.PI + Math.sin(phase) * 0.035 * moving;
 
-  // a small counter-sway on the support arm only - the gun-holding arm stays put so the weapon
-  // doesn't wobble around while walking
-  rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0) + crouch * 0.12;
+  // Arms remain weapon-ready but gain controlled locomotion and hit reaction.
+  rig.arms.L.shoulder.rotation.x = 1.0 + Math.sin(phase) * 0.075 * moving + crouch * 0.12 + running * 0.08;
+  rig.arms.R.shoulder.rotation.x = 1.0 - Math.sin(phase) * 0.025 * moving + crouch * 0.08 + running * 0.06;
+  rig.arms.L.shoulder.rotation.z = 0.35 + hit * hitSide * 0.08;
+  rig.arms.R.shoulder.rotation.z = -0.35 + hit * hitSide * 0.06;
 }
 
 const BOT_NAMES = ['Hani', 'Augusto', 'Tiago', 'Mathew', 'Sam', 'Marco', 'Shemeem', 'Aleef', 'Pablo', 'Chema'];
@@ -4046,10 +4129,16 @@ function spawnEnemy(spawnPos){
 function damageEnemy(enemy, dmg, point, meta){
   if (!enemy.alive || (isFfa() && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
   if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
+    spawnBlood(point);
+    enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
+    enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
     trackDamageDealt(enemy.netId, dmg);
     return hitFfaBot({targetId:enemy.netId,fromId:netMyId,dmg,weaponName:meta?.weaponName,headshot:meta?.headshot,instantKill:meta?.instantKill});
   }
   spawnBlood(point);
+  // A short procedural flinch makes hits readable on the body instead of only in the HUD.
+  enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
+  enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
   if (isFfa() && enemy.netId) killcamHits.push({ t: performance.now(), shooterId: netMyId, targetId: enemy.netId, point: point.toArray(), headshot: !!meta?.headshot });
   if (enemy.isRemote) {
     trackDamageDealt(enemy.netId, dmg);
@@ -4071,6 +4160,7 @@ function killEnemy(enemy, meta = {}){
   // fall roughly backward away from whoever they were facing (the shot's general direction), with some spread
   enemy.fallDir = enemy.mesh.rotation.y + Math.PI + (Math.random() - 0.5) * 1.4;
   kills++; score += 100; money += 150;
+  addStatTrakKill(weaponIdFromName(meta.weaponName));
   spawnBloodDecal(enemy.mesh.position.x, enemy.mesh.position.z);
   updateEnemyHUD();
   updateMoneyHUD();
@@ -4290,7 +4380,8 @@ function updateCarrierEnemy(enemy, dt){
   const dist = toSite.length();
   if (dist > site.radius * 0.5) {
     toSite.normalize();
-    enemy.mesh.rotation.y = Math.atan2(toSite.x, toSite.z);
+    // Gameplay forward is -Z (same convention as the player camera).
+    enemy.mesh.rotation.y = Math.atan2(-toSite.x, -toSite.z);
     ePos.x += toSite.x * enemy.speed * dt;
     ePos.z += toSite.z * enemy.speed * dt;
     ePos.y = groundHeightAt(ePos.x, ePos.z);
@@ -5263,6 +5354,7 @@ function applyKillMessage(msg){
   delete damageDealt[msg.victimId]; delete damageTaken[msg.victimId];
   ensureStats(msg.victimId).deaths++;
   if (msg.killerId) ensureStats(msg.killerId).kills++;
+  if (msg.killerId === netMyId) addStatTrakKill(weaponIdFromName(msg.weaponName));
   (msg.assistIds || []).forEach(id => ensureStats(id).assists++);
 }
 
@@ -5923,7 +6015,8 @@ function updateEnemies(dt){
     toPlayer.y = 0;
     toPlayer.normalize();
 
-    const targetAngle = Math.atan2(toPlayer.x, toPlayer.z);
+    // Match the player/network yaw convention: local -Z is forward.
+    const targetAngle = Math.atan2(-toPlayer.x, -toPlayer.z);
     enemy.mesh.rotation.y = targetAngle;
 
     if (dist > 12) {
@@ -6260,7 +6353,8 @@ function updatePlayer(dt){
   }
 
   // Smooth transitions and bounded inertia affect the model only, never camera aim.
-  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion);
+  const lateralSpeed = horizontalSpeed > 0.01 ? THREE.MathUtils.clamp(movementVelocity.dot(right) / Math.max(player.speed, 0.01), -1, 1) : 0;
+  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion, lateralSpeed, sprinting && horizontalSpeed > player.speed * 0.65);
   const targetPos = player.ads ? (currentVisual.aimOffset || adsPos) : hipPos;
   // Procedural sway must disappear at full ADS or the physical sights drift
   // away from the camera ray even while the player's aim remains stationary.
@@ -6268,12 +6362,16 @@ function updatePlayer(dt){
   motion.x *= sightMotion;
   motion.y *= sightMotion;
   motion.roll *= sightMotion;
+  motion.yaw *= sightMotion;
+  motion.pitch *= sightMotion;
+  motion.z *= sightMotion;
   const poseBlend = 1 - Math.exp(-18 * dt);
   weaponGroup.position.x += (targetPos.x + motion.x - weaponGroup.position.x) * poseBlend;
   weaponGroup.position.y += (targetPos.y + motion.y - weaponGroup.position.y) * poseBlend;
-  weaponGroup.position.z += (targetPos.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
-  weaponGroup.rotation.z = motion.roll;
-  if (!reloadRuntime.reloading) weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * Math.min(1, dt * 10);
+  weaponGroup.position.z += (targetPos.z + motion.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
+  weaponGroup.rotation.z += (motion.roll - weaponGroup.rotation.z) * (1 - Math.exp(-18 * dt));
+  weaponGroup.rotation.y += (motion.yaw - weaponGroup.rotation.y) * (1 - Math.exp(-16 * dt));
+  if (!reloadRuntime.reloading) weaponGroup.rotation.x += (motion.pitch - weaponGroup.rotation.x) * Math.min(1, dt * 10);
 
   fireCooldown -= dt;
   if (mouseLocked && mouseDown && fireCooldown <= 0) fireWeapon();
@@ -7065,6 +7163,7 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
     // column (pre-migration schema) instead of/alongside the new per-weapon `equippedSkins` -
     // sanitize rather than trust the cloud payload's shape blindly.
     playerProfile.equippedSkins = sanitizeEquippedSkins(cloudFields.equippedSkins, cloudFields.equippedSkin);
+    playerProfile.weaponKills = sanitizeWeaponKills(cloudFields.weaponKills);
     delete playerProfile.equippedSkin;
     // The server checks the confirmed Auth identity before granting this entitlement.
     playerProfile.isFounder = founderEntitled;
