@@ -3680,7 +3680,7 @@ let hitMarkerTimer;
 function showHitMarker(isHeadshot, isKill = false){
   clearTimeout(hitMarkerTimer);
   if (isHeadshot) audio.headshot(); else if (!audio.playSample('hitmarkerHit', 0.9)) audio.hitmarker();
-  const el = document.getElementById('hitmarker');
+  const el = document.getElementById(killcamActive ? 'killcamHitmarker' : 'hitmarker');
   el.classList.toggle('kill', isKill);
   el.style.opacity = 1;
   el.style.transform = `translate(-50%,-50%) rotate(45deg) scale(${isHeadshot ? 1.7 : 1.3})`;
@@ -3982,34 +3982,44 @@ function animateSoldierRig(mesh, dt, speed, crouching = false){
   const rig = mesh.userData.rig;
   if (!rig) return;
   const t = performance.now() * 0.001;
-  mesh.userData.crouchBlend = THREE.MathUtils.lerp(mesh.userData.crouchBlend || 0, crouching ? 1 : 0, Math.min(1, dt * 12));
-  const crouch = mesh.userData.crouchBlend;
-  const moving = speed > 0.05;
-  if (moving) mesh.userData.animPhase += dt * speed * 3.2;
-  const phase = mesh.userData.animPhase;
+  const smooth = (current, target, rate) => THREE.MathUtils.lerp(current || 0, target, 1 - Math.exp(-rate * dt));
+  mesh.userData.crouchBlend = smooth(mesh.userData.crouchBlend, crouching ? 1 : 0, 12);
+  mesh.userData.moveBlend = smooth(mesh.userData.moveBlend, speed > 0.08 ? 1 : 0, 10);
+  mesh.userData.runBlend = smooth(mesh.userData.runBlend, speed > 8.5 ? 1 : 0, 8);
+  mesh.userData.hitReact = Math.max(0, (mesh.userData.hitReact || 0) - dt * 4.8);
 
-  const strideAmp = moving ? Math.min(0.55, 0.18 + speed * 0.12) : 0;
+  const crouch = mesh.userData.crouchBlend;
+  const moving = mesh.userData.moveBlend;
+  const running = mesh.userData.runBlend;
+  if (speed > 0.05) mesh.userData.animPhase += dt * (5.2 + Math.min(speed, 14) * 0.72);
+  const phase = mesh.userData.animPhase;
+  const strideAmp = moving * Math.min(0.72, 0.14 + speed * 0.052) * (1 + running * 0.18);
   const leftHipWalk = Math.sin(phase) * strideAmp;
   const rightHipWalk = -Math.sin(phase) * strideAmp;
-  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.6)) * strideAmp * 1.3;
-  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.6)) * strideAmp * 1.3;
-  // A crouch is a joint pose, not a root translation: the feet stay planted while hips descend,
-  // thighs angle forward and shins fold back. This prevents the old half-body-through-floor look.
+  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.55)) * strideAmp * 1.45;
+  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.55)) * strideAmp * 1.45;
+
   rig.legs.L.hip.rotation.x = THREE.MathUtils.lerp(leftHipWalk, -0.58, crouch);
   rig.legs.R.hip.rotation.x = THREE.MathUtils.lerp(rightHipWalk, -0.58, crouch);
   rig.legs.L.knee.rotation.x = THREE.MathUtils.lerp(leftKneeWalk, 1.12, crouch);
   rig.legs.R.knee.rotation.x = THREE.MathUtils.lerp(rightKneeWalk, 1.12, crouch);
   rig.hips.position.y = THREE.MathUtils.lerp(HIP_TO_GROUND, 0.62, crouch);
 
-  // idle breathing (always) + a walking bob layered on top (only while moving)
-  const breathe = Math.sin(t * 1.6) * 0.006;
-  const stepBob = moving ? Math.abs(Math.sin(phase)) * 0.02 : 0;
-  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04;
-  rig.torso.rotation.x = -crouch * 0.16;
+  // Breathing, footfall compression and forward run lean are blended rather than snapped.
+  const breathe = Math.sin(t * 1.6) * 0.006 * (1 - running * 0.4);
+  const stepBob = Math.abs(Math.sin(phase)) * 0.022 * moving;
+  const hit = mesh.userData.hitReact || 0;
+  const hitSide = mesh.userData.hitReactSide || 1;
+  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04 - running * 0.018;
+  rig.torso.rotation.x = -crouch * 0.16 + running * 0.12 - hit * 0.10;
+  rig.torso.rotation.z = hit * hitSide * 0.13;
+  rig.hips.rotation.y = Math.sin(phase) * 0.035 * moving;
 
-  // a small counter-sway on the support arm only - the gun-holding arm stays put so the weapon
-  // doesn't wobble around while walking
-  rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0) + crouch * 0.12;
+  // Arms remain weapon-ready but gain controlled locomotion and hit reaction.
+  rig.arms.L.shoulder.rotation.x = 1.0 + Math.sin(phase) * 0.075 * moving + crouch * 0.12 + running * 0.08;
+  rig.arms.R.shoulder.rotation.x = 1.0 - Math.sin(phase) * 0.025 * moving + crouch * 0.08 + running * 0.06;
+  rig.arms.L.shoulder.rotation.z = 0.35 + hit * hitSide * 0.08;
+  rig.arms.R.shoulder.rotation.z = -0.35 + hit * hitSide * 0.06;
 }
 
 const BOT_NAMES = ['Hani', 'Augusto', 'Tiago', 'Mathew', 'Sam', 'Marco', 'Shemeem', 'Aleef', 'Pablo', 'Chema'];
@@ -4046,10 +4056,17 @@ function spawnEnemy(spawnPos){
 function damageEnemy(enemy, dmg, point, meta){
   if (!enemy.alive || (isFfa() && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
   if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
+    spawnBlood(point);
+    enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
+    enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
     trackDamageDealt(enemy.netId, dmg);
     return hitFfaBot({targetId:enemy.netId,fromId:netMyId,dmg,weaponName:meta?.weaponName,headshot:meta?.headshot,instantKill:meta?.instantKill});
   }
   spawnBlood(point);
+  // A short procedural flinch makes hits readable on the body instead of only in the HUD.
+  enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
+  enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
+  if (isFfa() && enemy.netId) killcamHits.push({ t: performance.now(), shooterId: netMyId, targetId: enemy.netId, point: point.toArray(), headshot: !!meta?.headshot });
   if (enemy.isRemote) {
     trackDamageDealt(enemy.netId, dmg);
     // don't own their health - tell their real client what happened and let their own broadcast update us.
@@ -4609,7 +4626,7 @@ function resetFfaBot(bot){
   const p=ffaSpawn(bot.netId);
   bot.mesh.position.copy(p);bot.targetPos.copy(p);bot.mesh.rotation.set(0,Math.atan2(-p.x,-p.z),0);
   bot.alive=true;bot.health=100;bot.dying=false;bot.deathT=0;bot.mesh.visible=true;
-  bot.spawnProtected=true;bot.protection=FFA.protection;bot.respawnT=0;bot.targetId=null;
+  bot.spawnProtected=true;bot.protection=FFA.protection;bot.respawnT=0;bot.targetId=null;bot.attackers=[];
   bot.flashedT=0;bot.memory=0;bot.patrol=null;bot.lastSeen=null;bot.target=null;
   bot.thinkT=Math.random()*.2;bot.reaction=.35;bot.fireCooldown=.5;bot.burst=0;bot.path=[];bot.pathT=0;
 }
@@ -4633,7 +4650,7 @@ function syncFfaBots(){
 function startFfa(rematch=false){
   if (!currentMapMeta.ffa) return;
   document.body.classList.add('ffaActive');
-  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null; killcamHistory.clear(); killcamShots.length=0; killcamDeaths.length=0; killcamRecordT=0;
+  matchFinished=false; ffaState.active=true; ffaState.resultShown=false; lastFfaKill=null; killcamHistory.clear(); killcamShots.length=0; killcamDeaths.length=0; killcamHits.length=0; killcamRecordT=0;
   ffaState.navigation=currentMapMeta.navigation ? currentMapMeta.navigation() : buildNavigation(currentMapMeta.ffa);
   if (netRole==='host'){
     ffaState.phase='waiting';ffaState.timer=FFA.warmup;ffaState.sendT=0;
@@ -4699,12 +4716,17 @@ function hitFfaBot(msg){
   const bot=ffaState.bots.get(msg.targetId);
   if(!bot||!bot.alive||bot.protection>0||ffaState.phase==='ended'||!Number.isFinite(msg.dmg)||msg.dmg<=0)return false;
   if(!netRoster.some(p=>p.id===msg.fromId&&p.ready))return false;
+  const now=performance.now()/1000;
+  bot.attackers=(bot.attackers||[]).filter(a=>a.id!==msg.fromId&&now-a.t<ASSIST_WINDOW);
+  bot.attackers.push({id:msg.fromId,t:now});
+  const botBloodPoint=bot.mesh.position.clone().add(new THREE.Vector3(0,1.15,0)); spawnBlood(botBloodPoint);
+  if(isFfa()) killcamHits.push({t:performance.now(),shooterId:msg.fromId,targetId:bot.netId,point:botBloodPoint.toArray(),headshot:!!(msg.headshot||msg.isHeadshot)});
   bot.health-=msg.instantKill?101:Math.min(msg.dmg,250);
   if(bot.health>0)return false;
   bot.alive=false;bot.health=0;bot.dying=true;bot.deathT=0;bot.fallDir=bot.mesh.rotation.y+Math.PI;
   bot.respawnT=FFA.respawn;spawnBloodDecal(bot.mesh.position.x,bot.mesh.position.z);
   const kill={type:'kill',roundNum:1,deathId:crypto.randomUUID(),victimId:bot.netId,killerId:msg.fromId,
-    assistIds:[],scoring:ffaState.phase==='live',weaponName:msg.weaponName||'M4A1',headshot:!!(msg.headshot||msg.isHeadshot)};
+    assistIds:(bot.attackers||[]).map(a=>a.id).filter(id=>id!==msg.fromId),scoring:ffaState.phase==='live',weaponName:msg.weaponName||'M4A1',headshot:!!(msg.headshot||msg.isHeadshot)};
   applyKillMessage(kill);netBroadcast(kill);return true;
 }
 function fireFfaBot(bot,target){
@@ -4822,9 +4844,10 @@ function playKillcam(onDone){
   if(!track||track.length<2||kill.t<track[0].t){onDone();return;}
   const start=Math.max(track[0].t,kill.t-KILLCAM_WINDOW_MS);
   const shots=killcamShots.filter(e=>e.t>=start&&e.t<=kill.t+120);
+  const hits=killcamHits.filter(e=>e.t>=start&&e.t<=kill.t+160&&e.shooterId===kill.killerId);
   const fatalShot=shots.filter(e=>e.id===kill.killerId&&e.t<=kill.t+30).at(-1);
   const fatalTime=fatalShot&&kill.t-fatalShot.t<750?fatalShot.t:kill.t;
-  replay={kill,start,time:start-.001,end:kill.t+KILLCAM_TAIL_MS,fatalTime,shots,
+  replay={kill,start,time:start-.001,end:kill.t+KILLCAM_TAIL_MS,fatalTime,shots,hits,
     cameraPosition:camera.position.clone(),cameraRotation:camera.rotation.clone(),fov:camera.fov,
     weaponPosition:weaponGroup.position.clone(),weaponRotation:weaponGroup.rotation.clone(),weaponVisible:weaponGroup.visible,
     muzzlePosition:flashLight.position.clone(),spritePosition:flashSprite.position.clone(),actors:[],kick:0,flash:0,weaponId:null};
@@ -4911,6 +4934,12 @@ function updateKillcam(dt){
   if(killcamWeaponVisual){killcamWeaponVisual.group.position.z=replay.kick*.09;killcamWeaponVisual.group.rotation.x=replay.kick*.10;}
   if(!replay.flash){flashLight.intensity=0;flashSpriteMat.opacity=0;}
   for(const shot of replayEvents(replay.shots,previous,replay.time))fireKillcamShot(shot);
+  for(const hit of replayEvents(replay.hits,previous,replay.time)){
+    const targetTrack=killcamHistory.get(hit.targetId), targetPose=sampleReplay(targetTrack,hit.t);
+    const point=targetPose ? new THREE.Vector3(targetPose.x,targetPose.feet+(targetPose.crouching?.85:1.15),targetPose.z) : (hit.point?new THREE.Vector3().fromArray(hit.point):null);
+    if(point) spawnBlood(point);
+    showHitMarker(!!hit.headshot, hit.targetId===replay.kill.victimId && Math.abs(hit.t-replay.kill.t)<800);
+  }
   if(replay.time>=replay.end)finishKillcam();
 }
 function renderFfaRanking(order){
@@ -4948,6 +4977,13 @@ function finishFfa(){
   document.getElementById('rematchControls').hidden=netRole!=='host';document.getElementById('rematchWaiting').hidden=netRole==='host';
   playMatchEndSequence(order, () => document.getElementById('matchResult').showModal());
 }
+
+function endFfaManually(){
+  if(!isFfa() || netRole!=='host' || !ffaState.active || ffaState.phase==='ended') return;
+  finishFfa();
+  sendFfaSnapshot();
+}
+
 function updateFfa(dt){
   if(!ffaState.active)return;
   killcamRecordT-=dt; if(killcamRecordT<=0){killcamRecordT=1/30;recordKillcamFrame();}
@@ -5173,7 +5209,7 @@ let lastFfaKill = null;
 const killcamHistory = new Map();
 let killcamRecordT = 0;
 const KILLCAM_HISTORY_MS = 6000;
-const killcamShots=[],killcamDeaths=[];
+const killcamShots=[],killcamDeaths=[],killcamHits=[];
 function recordKillcamShot(msg){
   if(!isFfa()||killcamActive||ffaState.phase!=='live')return;
   recordKillcamFrame();
@@ -5200,6 +5236,7 @@ function recordKillcamFrame(){
       alive:e.alive,crouching:!!e.targetCrouching,weaponId:e.weaponId||e.mesh.userData.weaponId,pose:meshPose(e.mesh)});
   }
   while(killcamDeaths.length&&t-killcamDeaths[0].t>KILLCAM_HISTORY_MS)killcamDeaths.shift();
+  while(killcamHits.length&&t-killcamHits[0].t>KILLCAM_HISTORY_MS)killcamHits.shift();
 }
 let lastDamageMeta = {};
 // Per-life damage exchange with each opponent, from the local player's own perspective only -
@@ -5233,7 +5270,7 @@ function applyKillMessage(msg){
   if (isFfa()) { killcamDeaths.push({id:msg.victimId,t:performance.now()}); }
   if (isFfa()) lastFfaKill = { killerId: msg.killerId, victimId: msg.victimId, weaponName: msg.weaponName || 'Unknown', headshot: !!msg.headshot, t: performance.now() };
   const nameOf = id => id === netMyId ? 'YOU' : netRoster.find(p => p.id === id)?.name || 'Player';
-  showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD');
+  showKillFeed(msg.weaponName || 'Unknown', !!msg.headshot, nameOf(msg.victimId), msg.killerId ? nameOf(msg.killerId) : 'WORLD', (msg.assistIds || []).map(nameOf));
   if (msg.killerId === netMyId) { showHitMarker(!!msg.headshot, true); showDamageExchange(msg.victimId); }
   if (msg.victimId === netMyId && msg.killerId) {
     showDamageExchange(msg.killerId);
@@ -5331,6 +5368,9 @@ function handleNetMessage(msg, fromId){
       if (isFfa() && netRole === 'host' && ffaState.bots.has(msg.targetId)) { hitFfaBot(msg); break; }
       if (msg.targetId === netMyId && Number.isFinite(msg.dmg) && msg.dmg > 0 && roundState.phase !== 'ended') {
         lastDamageMeta = { weaponName: msg.weaponName, headshot: !!msg.isHeadshot };
+        const bloodPoint = player.pos.clone().add(new THREE.Vector3(0, player.crouching ? .85 : 1.15, 0));
+        spawnBlood(bloodPoint);
+        if (isFfa()) killcamHits.push({ t: performance.now(), shooterId: msg.fromId, targetId: netMyId, point: bloodPoint.toArray(), headshot: !!msg.isHeadshot });
         damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
       }
       break;
@@ -6236,7 +6276,8 @@ function updatePlayer(dt){
   }
 
   // Smooth transitions and bounded inertia affect the model only, never camera aim.
-  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion);
+  const lateralSpeed = horizontalSpeed > 0.01 ? THREE.MathUtils.clamp(movementVelocity.dot(right) / Math.max(player.speed, 0.01), -1, 1) : 0;
+  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion, lateralSpeed, sprinting && horizontalSpeed > player.speed * 0.65);
   const targetPos = player.ads ? (currentVisual.aimOffset || adsPos) : hipPos;
   // Procedural sway must disappear at full ADS or the physical sights drift
   // away from the camera ray even while the player's aim remains stationary.
@@ -6244,12 +6285,16 @@ function updatePlayer(dt){
   motion.x *= sightMotion;
   motion.y *= sightMotion;
   motion.roll *= sightMotion;
+  motion.yaw *= sightMotion;
+  motion.pitch *= sightMotion;
+  motion.z *= sightMotion;
   const poseBlend = 1 - Math.exp(-18 * dt);
   weaponGroup.position.x += (targetPos.x + motion.x - weaponGroup.position.x) * poseBlend;
   weaponGroup.position.y += (targetPos.y + motion.y - weaponGroup.position.y) * poseBlend;
-  weaponGroup.position.z += (targetPos.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
-  weaponGroup.rotation.z = motion.roll;
-  if (!reloadRuntime.reloading) weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * Math.min(1, dt * 10);
+  weaponGroup.position.z += (targetPos.z + motion.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
+  weaponGroup.rotation.z += (motion.roll - weaponGroup.rotation.z) * (1 - Math.exp(-18 * dt));
+  weaponGroup.rotation.y += (motion.yaw - weaponGroup.rotation.y) * (1 - Math.exp(-16 * dt));
+  if (!reloadRuntime.reloading) weaponGroup.rotation.x += (motion.pitch - weaponGroup.rotation.x) * Math.min(1, dt * 10);
 
   fireCooldown -= dt;
   if (mouseLocked && mouseDown && fireCooldown <= 0) fireWeapon();
@@ -6322,13 +6367,15 @@ function showWaveBanner(text){
   el.style.opacity = 1;
   setTimeout(() => el.style.opacity = 0, 1800);
 }
-function showKillFeed(weaponName, isHeadshot, victimName, killerName = 'YOU'){
+function showKillFeed(weaponName, isHeadshot, victimName, killerName = 'YOU', assistNames = []){
   const feed = document.getElementById('killfeed');
   const entry = document.createElement('div');
   entry.className = 'killEntry';
   for (const [className, text] of [['kfKiller', killerName], ['kfWeapon', `${weaponName}${isHeadshot ? ' · HEADSHOT' : ''}`], ['kfVictim', victimName]]) {
     const span = document.createElement('span'); span.className = className;
-    span.textContent = text; entry.appendChild(span);
+    span.textContent = text;
+    if(className==='kfKiller' && assistNames.length){ const assist=document.createElement('small'); assist.className='kfAssist'; assist.textContent=` + ${assistNames.join(', ')}`; span.appendChild(assist); }
+    entry.appendChild(span);
   }
   feed.insertBefore(entry, feed.firstChild);
   while (feed.children.length > 5) feed.removeChild(feed.lastChild);
@@ -6422,6 +6469,7 @@ let listeningForBind = null; // action name currently waiting for a keypress, or
 function togglePauseMenu(){
   if (!gameStarted || shopOpen || matchFinished) return;
   document.getElementById('practiceTools').hidden = gameMode !== 'practice';
+  document.getElementById('endFfaBtn').hidden = !(isFfa() && netRole==='host' && ffaState.active && ffaState.phase!=='ended');
   socialUI.cancel();
   pauseMenuOpen = !pauseMenuOpen;
   document.getElementById('pauseMenu').style.display = pauseMenuOpen ? 'flex' : 'none';
@@ -6488,6 +6536,7 @@ document.getElementById('fovSlider').addEventListener('input', event => {
 });
 
 document.getElementById('resumeBtn').addEventListener('click', togglePauseMenu);
+document.getElementById('endFfaBtn').addEventListener('click', endFfaManually);
 document.getElementById('resultReturn').addEventListener('click', () => location.reload());
 document.getElementById('rematchStart').addEventListener('click', () => {
   if (netRole !== 'host' || !matchFinished) return;
