@@ -3964,6 +3964,11 @@ function makeEnemySoldier(){
   gunMag.castShadow = true;
   gunProp.add(gunBody, gunBarrel, gunStock, gunSight, gunMag);
   gunProp.position.set(0.02, -0.02, -0.32); // small local grip adjustment relative to the hand socket
+  // The procedural soldier mesh was authored visually facing +Z, while the FPS/network yaw
+  // convention uses -Z as forward. Rotate the visible body 180 degrees (see animation below),
+  // then counter-rotate the rifle here so body AND barrel share the same -Z forward direction.
+  // This fixes the long-standing 'soldier is showing his back / gun points backwards' bug.
+  gunProp.rotation.y = Math.PI;
   rig.weaponSocket.add(gunProp);
 
   const muzzle = new THREE.Object3D();
@@ -3982,34 +3987,46 @@ function animateSoldierRig(mesh, dt, speed, crouching = false){
   const rig = mesh.userData.rig;
   if (!rig) return;
   const t = performance.now() * 0.001;
-  mesh.userData.crouchBlend = THREE.MathUtils.lerp(mesh.userData.crouchBlend || 0, crouching ? 1 : 0, Math.min(1, dt * 12));
-  const crouch = mesh.userData.crouchBlend;
-  const moving = speed > 0.05;
-  if (moving) mesh.userData.animPhase += dt * speed * 3.2;
-  const phase = mesh.userData.animPhase;
+  const smooth = (current, target, rate) => THREE.MathUtils.lerp(current || 0, target, 1 - Math.exp(-rate * dt));
+  mesh.userData.crouchBlend = smooth(mesh.userData.crouchBlend, crouching ? 1 : 0, 12);
+  mesh.userData.moveBlend = smooth(mesh.userData.moveBlend, speed > 0.08 ? 1 : 0, 10);
+  mesh.userData.runBlend = smooth(mesh.userData.runBlend, speed > 8.5 ? 1 : 0, 8);
+  mesh.userData.hitReact = Math.max(0, (mesh.userData.hitReact || 0) - dt * 4.8);
 
-  const strideAmp = moving ? Math.min(0.55, 0.18 + speed * 0.12) : 0;
+  const crouch = mesh.userData.crouchBlend;
+  const moving = mesh.userData.moveBlend;
+  const running = mesh.userData.runBlend;
+  if (speed > 0.05) mesh.userData.animPhase += dt * (5.2 + Math.min(speed, 14) * 0.72);
+  const phase = mesh.userData.animPhase;
+  const strideAmp = moving * Math.min(0.72, 0.14 + speed * 0.052) * (1 + running * 0.18);
   const leftHipWalk = Math.sin(phase) * strideAmp;
   const rightHipWalk = -Math.sin(phase) * strideAmp;
-  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.6)) * strideAmp * 1.3;
-  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.6)) * strideAmp * 1.3;
-  // A crouch is a joint pose, not a root translation: the feet stay planted while hips descend,
-  // thighs angle forward and shins fold back. This prevents the old half-body-through-floor look.
+  const leftKneeWalk = Math.max(0, -Math.sin(phase + 0.55)) * strideAmp * 1.45;
+  const rightKneeWalk = Math.max(0, Math.sin(phase - 0.55)) * strideAmp * 1.45;
+
   rig.legs.L.hip.rotation.x = THREE.MathUtils.lerp(leftHipWalk, -0.58, crouch);
   rig.legs.R.hip.rotation.x = THREE.MathUtils.lerp(rightHipWalk, -0.58, crouch);
   rig.legs.L.knee.rotation.x = THREE.MathUtils.lerp(leftKneeWalk, 1.12, crouch);
   rig.legs.R.knee.rotation.x = THREE.MathUtils.lerp(rightKneeWalk, 1.12, crouch);
   rig.hips.position.y = THREE.MathUtils.lerp(HIP_TO_GROUND, 0.62, crouch);
 
-  // idle breathing (always) + a walking bob layered on top (only while moving)
-  const breathe = Math.sin(t * 1.6) * 0.006;
-  const stepBob = moving ? Math.abs(Math.sin(phase)) * 0.02 : 0;
-  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04;
-  rig.torso.rotation.x = -crouch * 0.16;
+  // Breathing, footfall compression and forward run lean are blended rather than snapped.
+  const breathe = Math.sin(t * 1.6) * 0.006 * (1 - running * 0.4);
+  const stepBob = Math.abs(Math.sin(phase)) * 0.022 * moving;
+  const hit = mesh.userData.hitReact || 0;
+  const hitSide = mesh.userData.hitReactSide || 1;
+  rig.torso.position.y = 0.02 + breathe + stepBob - crouch * 0.04 - running * 0.018;
+  rig.torso.rotation.x = -crouch * 0.16 + running * 0.12 - hit * 0.10;
+  rig.torso.rotation.z = hit * hitSide * 0.13;
+  // Visual rig was modelled facing +Z, but gameplay/camera forward is -Z. Keep a permanent
+  // 180-degree basis correction and layer the locomotion twist on top of it.
+  rig.hips.rotation.y = Math.PI + Math.sin(phase) * 0.035 * moving;
 
-  // a small counter-sway on the support arm only - the gun-holding arm stays put so the weapon
-  // doesn't wobble around while walking
-  rig.arms.L.shoulder.rotation.x = 1.0 + (moving ? Math.sin(phase) * 0.08 : 0) + crouch * 0.12;
+  // Arms remain weapon-ready but gain controlled locomotion and hit reaction.
+  rig.arms.L.shoulder.rotation.x = 1.0 + Math.sin(phase) * 0.075 * moving + crouch * 0.12 + running * 0.08;
+  rig.arms.R.shoulder.rotation.x = 1.0 - Math.sin(phase) * 0.025 * moving + crouch * 0.08 + running * 0.06;
+  rig.arms.L.shoulder.rotation.z = 0.35 + hit * hitSide * 0.08;
+  rig.arms.R.shoulder.rotation.z = -0.35 + hit * hitSide * 0.06;
 }
 
 const BOT_NAMES = ['Hani', 'Augusto', 'Tiago', 'Mathew', 'Sam', 'Marco', 'Shemeem', 'Aleef', 'Pablo', 'Chema'];
@@ -4046,10 +4063,16 @@ function spawnEnemy(spawnPos){
 function damageEnemy(enemy, dmg, point, meta){
   if (!enemy.alive || (isFfa() && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
   if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
+    spawnBlood(point);
+    enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
+    enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
     trackDamageDealt(enemy.netId, dmg);
     return hitFfaBot({targetId:enemy.netId,fromId:netMyId,dmg,weaponName:meta?.weaponName,headshot:meta?.headshot,instantKill:meta?.instantKill});
   }
   spawnBlood(point);
+  // A short procedural flinch makes hits readable on the body instead of only in the HUD.
+  enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
+  enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
   if (isFfa() && enemy.netId) killcamHits.push({ t: performance.now(), shooterId: netMyId, targetId: enemy.netId, point: point.toArray(), headshot: !!meta?.headshot });
   if (enemy.isRemote) {
     trackDamageDealt(enemy.netId, dmg);
@@ -4290,7 +4313,8 @@ function updateCarrierEnemy(enemy, dt){
   const dist = toSite.length();
   if (dist > site.radius * 0.5) {
     toSite.normalize();
-    enemy.mesh.rotation.y = Math.atan2(toSite.x, toSite.z);
+    // Gameplay forward is -Z (same convention as the player camera).
+    enemy.mesh.rotation.y = Math.atan2(-toSite.x, -toSite.z);
     ePos.x += toSite.x * enemy.speed * dt;
     ePos.z += toSite.z * enemy.speed * dt;
     ePos.y = groundHeightAt(ePos.x, ePos.z);
@@ -5923,7 +5947,8 @@ function updateEnemies(dt){
     toPlayer.y = 0;
     toPlayer.normalize();
 
-    const targetAngle = Math.atan2(toPlayer.x, toPlayer.z);
+    // Match the player/network yaw convention: local -Z is forward.
+    const targetAngle = Math.atan2(-toPlayer.x, -toPlayer.z);
     enemy.mesh.rotation.y = targetAngle;
 
     if (dist > 12) {
@@ -6260,7 +6285,8 @@ function updatePlayer(dt){
   }
 
   // Smooth transitions and bounded inertia affect the model only, never camera aim.
-  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion);
+  const lateralSpeed = horizontalSpeed > 0.01 ? THREE.MathUtils.clamp(movementVelocity.dot(right) / Math.max(player.speed, 0.01), -1, 1) : 0;
+  const motion = combatMotion.update(dt, player.onGround ? horizontalSpeed : 0, player.ads, settings.reducedMotion, lateralSpeed, sprinting && horizontalSpeed > player.speed * 0.65);
   const targetPos = player.ads ? (currentVisual.aimOffset || adsPos) : hipPos;
   // Procedural sway must disappear at full ADS or the physical sights drift
   // away from the camera ray even while the player's aim remains stationary.
@@ -6268,12 +6294,16 @@ function updatePlayer(dt){
   motion.x *= sightMotion;
   motion.y *= sightMotion;
   motion.roll *= sightMotion;
+  motion.yaw *= sightMotion;
+  motion.pitch *= sightMotion;
+  motion.z *= sightMotion;
   const poseBlend = 1 - Math.exp(-18 * dt);
   weaponGroup.position.x += (targetPos.x + motion.x - weaponGroup.position.x) * poseBlend;
   weaponGroup.position.y += (targetPos.y + motion.y - weaponGroup.position.y) * poseBlend;
-  weaponGroup.position.z += (targetPos.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
-  weaponGroup.rotation.z = motion.roll;
-  if (!reloadRuntime.reloading) weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * Math.min(1, dt * 10);
+  weaponGroup.position.z += (targetPos.z + motion.z - weaponGroup.position.z) * (1 - Math.exp(-15 * dt));
+  weaponGroup.rotation.z += (motion.roll - weaponGroup.rotation.z) * (1 - Math.exp(-18 * dt));
+  weaponGroup.rotation.y += (motion.yaw - weaponGroup.rotation.y) * (1 - Math.exp(-16 * dt));
+  if (!reloadRuntime.reloading) weaponGroup.rotation.x += (motion.pitch - weaponGroup.rotation.x) * Math.min(1, dt * 10);
 
   fireCooldown -= dt;
   if (mouseLocked && mouseDown && fireCooldown <= 0) fireWeapon();
