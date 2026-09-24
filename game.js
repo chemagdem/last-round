@@ -1707,7 +1707,6 @@ function buildSkylineMap(){
 }
 
 
-
 function scrapyardTexture(kind='#777', accent='#333', size=512){
   const c=document.createElement('canvas'); c.width=c.height=size;
   const x=c.getContext('2d');
@@ -1890,7 +1889,6 @@ function buildScrapyardMap(){
     bulb.position.set(x,6,z); scene.add(bulb);
     const light=new THREE.PointLight(0xffb96d,1.3,15,2); light.position.set(x,5.8,z); scene.add(light);
   }
-
   // Ground identity: faded runway markings, tire tracks and maintenance labels.
   addScrapyardDecal(0,-31,24,3,'ZONE 02');
   addScrapyardDecal(0,31,24,3,'ZONE 07',Math.PI);
@@ -1945,6 +1943,7 @@ function buildScrapyardMap(){
     d.position.set(Math.cos(a)*r,1.2+Math.random()*2,Math.sin(a)*r);
     d.lookAt(0,d.position.y,0);scene.add(d);
   }
+}
   return {
     spawn:new THREE.Vector3(0,2,-35), tSpawn:new THREE.Vector3(0,2,-35), ctSpawn:new THREE.Vector3(0,2,35),
     tSpawnZone:{xMin:-15,xMax:15,zMin:-39,zMax:-32},
