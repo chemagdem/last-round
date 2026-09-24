@@ -1706,6 +1706,252 @@ function buildSkylineMap(){
   };
 }
 
+
+
+function scrapyardTexture(kind='#777', accent='#333', size=512){
+  const c=document.createElement('canvas'); c.width=c.height=size;
+  const x=c.getContext('2d');
+  const base=kind;
+  x.fillStyle=base; x.fillRect(0,0,size,size);
+
+  // Multi-scale surface variation.
+  for(let i=0;i<9000;i++){
+    const a=Math.random()*.075;
+    const v=Math.random()>.5?255:0;
+    x.fillStyle=`rgba(${v},${v},${v},${a})`;
+    const r=Math.random()*2.2+.25;
+    x.fillRect(Math.random()*size,Math.random()*size,r,r);
+  }
+
+  // Large stains / oxidation clouds.
+  for(let i=0;i<65;i++){
+    const px=Math.random()*size, py=Math.random()*size, rr=10+Math.random()*55;
+    const g=x.createRadialGradient(px,py,0,px,py,rr);
+    g.addColorStop(0, accent+'55'); g.addColorStop(1, accent+'00');
+    x.fillStyle=g; x.beginPath(); x.arc(px,py,rr,0,Math.PI*2); x.fill();
+  }
+
+  // Scratches.
+  x.lineCap='round';
+  for(let i=0;i<120;i++){
+    const px=Math.random()*size, py=Math.random()*size;
+    x.strokeStyle=`rgba(235,225,205,${.025+Math.random()*.08})`;
+    x.lineWidth=.4+Math.random()*1.4;
+    x.beginPath(); x.moveTo(px,py);
+    x.lineTo(px+(Math.random()-.5)*70,py+(Math.random()-.5)*10);
+    x.stroke();
+  }
+
+  const t=new THREE.CanvasTexture(c);
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||4;
+  t.colorSpace=THREE.SRGBColorSpace;
+  return t;
+}
+function scrapyardNormalLike(size=512){
+  const c=document.createElement('canvas');c.width=c.height=size;
+  const x=c.getContext('2d');x.fillStyle='#8080ff';x.fillRect(0,0,size,size);
+  for(let i=0;i<5000;i++){
+    const v=115+Math.floor(Math.random()*28);
+    x.fillStyle=`rgb(${v},${v},255)`;
+    x.fillRect(Math.random()*size,Math.random()*size,1+Math.random()*2,1+Math.random()*2);
+  }
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;return t;
+}
+function makeScrapyardMat(base, stain, repeatX=2, repeatY=2, metalness=.05, roughness=.85){
+  const map=scrapyardTexture(base,stain);
+  map.repeat.set(repeatX,repeatY);
+  const bump=scrapyardNormalLike(); bump.repeat.set(repeatX,repeatY);
+  return new THREE.MeshStandardMaterial({
+    map, bumpMap:bump, bumpScale:.045, metalness, roughness
+  });
+}
+function addScrapyardDecal(x,z,w,d,text,rotation=0){
+  const c=document.createElement('canvas');c.width=512;c.height=128;
+  const q=c.getContext('2d');q.clearRect(0,0,512,128);
+  q.font='900 66px Arial';q.textAlign='center';q.textBaseline='middle';
+  q.fillStyle='rgba(238,221,175,.72)';q.fillText(text,256,64);
+  q.strokeStyle='rgba(45,34,26,.35)';q.lineWidth=3;q.strokeText(text,256,64);
+  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+  const m=new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false});
+  const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,d),m);
+  mesh.rotation.x=-Math.PI/2;mesh.rotation.z=rotation;
+  mesh.position.set(x,.012,z);scene.add(mesh);
+}
+function addScrapyardDebris(count=110){
+  const mat=new THREE.MeshStandardMaterial({color:0x51483f,roughness:.95,metalness:.08});
+  for(let i=0;i<count;i++){
+    const g=Math.random()>.55?new THREE.BoxGeometry(.04+Math.random()*.18,.02+Math.random()*.06,.08+Math.random()*.35):
+      new THREE.CylinderGeometry(.015+.025*Math.random(),.015+.025*Math.random(),.12+.35*Math.random(),5);
+    const m=new THREE.Mesh(g,mat);
+    m.position.set((Math.random()-.5)*80,.03,(Math.random()-.5)*80);
+    m.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+    scene.add(m);
+  }
+}
+
+
+function makeCorrugatedScrapMat(base='#596065', rust='#6b3c28'){
+  const c=document.createElement('canvas'); c.width=c.height=512; const x=c.getContext('2d');
+  x.fillStyle=base;x.fillRect(0,0,512,512);
+  for(let px=0;px<512;px+=18){
+    const g=x.createLinearGradient(px,0,px+18,0);
+    g.addColorStop(0,'rgba(0,0,0,.28)');g.addColorStop(.45,'rgba(255,255,255,.12)');g.addColorStop(1,'rgba(0,0,0,.18)');
+    x.fillStyle=g;x.fillRect(px,0,18,512);
+  }
+  for(let i=0;i<85;i++){const px=Math.random()*512,py=Math.random()*512,r=5+Math.random()*30;const g=x.createRadialGradient(px,py,0,px,py,r);g.addColorStop(0,rust+'aa');g.addColorStop(1,rust+'00');x.fillStyle=g;x.fillRect(px-r,py-r,r*2,r*2);}
+  for(let y=0;y<512;y+=128){x.fillStyle='rgba(10,10,10,.28)';x.fillRect(0,y,512,3);}
+  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(3,3);t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;t.colorSpace=THREE.SRGBColorSpace;
+  return new THREE.MeshStandardMaterial({map:t,roughness:.72,metalness:.34,bumpMap:scrapyardNormalLike(),bumpScale:.055});
+}
+function buildTrickshotTower(x,z,steel,dark,rust){
+  const corr=makeCorrugatedScrapMat('#4d5559','#713d26');
+  const beam=new THREE.MeshStandardMaterial({color:0x34383a,roughness:.67,metalness:.55});
+  beam.userData.minimapProp=true; corr.userData.minimapProp=true;
+  // 9m watchtower with a broad launch deck.
+  for(const dx of [-2.35,2.35])for(const dz of [-2.35,2.35]) makeBoxProp(x+dx,z+dz,.28,8.7,.28,beam);
+  for(const y of [2.2,4.4,6.6]){
+    for(const dz of [-2.35,2.35]) makeBoxProp(x,z+dz,5,.18,.18,beam);
+    for(const dx of [-2.35,2.35]) makeBoxProp(x+dx,z,.18,.18,5,beam);
+  }
+  // Climbable stair flight disguised as a maintenance ladder/stair hybrid.
+  const steps=12, rise=.62, run=.58;
+  for(let i=0;i<steps;i++){
+    const sy=.31+i*rise, sz=z+5.5-i*run;
+    makeBoxProp(x,sz,2.0,.16,.58,dark);
+    makeBoxProp(x-1.05,sz,.10,.78,.10,beam);makeBoxProp(x+1.05,sz,.10,.78,.10,beam);
+  }
+  // Main deck and corrugated equipment cabin.
+  makeBoxProp(x,z,6.3,.26,6.3,corr);
+  const deck=scene.children[scene.children.length-1]; if(deck) deck.position.y=7.55;
+  // Add stepped support boxes so the existing collision system lets the player climb naturally.
+  for(let i=0;i<steps;i++){
+    const h=.31+i*rise, sz=z+5.5-i*run;
+    const b=makeBoxProp(x,sz,1.85,h*2,.5,dark); if(b)b.position.y=h;
+  }
+  makeBoxProp(x,z,3.2,2.1,2.6,corr); const cabin=scene.children[scene.children.length-1]; if(cabin)cabin.position.y=8.72;
+  // Railings leave the front corner open as the trickshot launch point.
+  const railY=8.28;
+  for(const [rx,rz,w,d] of [[x,z-3,6,.08],[x-3,z,.08,6],[x+3,z-1.2,.08,3.6]]){const r=makeBoxProp(rx,rz,w,.08,d,beam);if(r)r.position.y=railY;}
+  // Red obstruction beacon.
+  const beaconMat=new THREE.MeshStandardMaterial({color:0xff3a22,emissive:0xff1800,emissiveIntensity:3});
+  const beacon=new THREE.Mesh(new THREE.SphereGeometry(.12,10,8),beaconMat);beacon.position.set(x,10,z);scene.add(beacon);
+  const pl=new THREE.PointLight(0xff321e,.9,5);pl.position.copy(beacon.position);scene.add(pl);
+}
+
+function buildScrapyardMap(){
+  WORLD_SIZE = 92;
+  groundHeightAt = () => 0;
+  sky.material.map = desertSkyGradientTexture(); sky.material.needsUpdate = true;
+  scene.fog.color.set(0xb99a72); scene.fog.density = 0.0017;
+  hemi.color.set(0xffd7a5); hemi.groundColor.set(0x4a382b); hemi.intensity = 1.05;
+  sun.color.set(0xffc47f); sun.intensity = 1.55; fillLight.intensity = .42;
+
+  const sandMap=scrapyardTexture('#a98b62','#66513b',1024); sandMap.repeat.set(14,14);
+  const sandBump=scrapyardNormalLike(1024); sandBump.repeat.set(14,14);
+  const sand = new THREE.MeshStandardMaterial({map:sandMap,bumpMap:sandBump,bumpScale:.075,color:0xd0b181,roughness:.98});
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(86,86,24,24), sand);
+  floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor); floorMeshes.push(floor);
+  const steel = makeScrapyardMat('#777d7e','#6e3f28',3,2,.32,.68);
+  const dark = makeScrapyardMat('#3c4142','#7b472d',3,2,.24,.78);
+  const rust = makeScrapyardMat('#8b5335','#392d25',2,2,.16,.86);
+  const concrete = makeScrapyardMat('#82796d','#4d453c',3,3,.01,.97);
+  steel.userData.minimapProp=dark.userData.minimapProp=rust.userData.minimapProp=concrete.userData.minimapProp=true;
+
+  for(const [x,z,w,d] of [[0,-43,86,1],[0,43,86,1],[-43,0,1,86],[43,0,1,86]])
+    makeBoxProp(x,z,w,2.2,d,concrete);
+
+  // Abstract aircraft-graveyard geometry: MW2-era desert/industrial mood without copying a specific map.
+  for(const side of [-1,1]){
+    makeBoxProp(side*13,0,5.5,2.6,25,steel);
+    makeBoxProp(side*13,-13,11,1.2,3,dark);
+    makeBoxProp(side*13,13,11,1.2,3,dark);
+  }
+  makeBoxProp(0,0,4,1.45,5,rust);
+  makeBoxProp(0,4.8,6,1.45,3,rust);
+
+  // Every step is <= jump height, creating four practical trickshot perches.
+  const stairTower=(x,z,flip=1)=>{
+    makeBoxProp(x,z,5.5,1.5,5.5,dark);
+    makeBoxProp(x+flip*4.2,z,2.4,.75,2.4,rust);
+    makeBoxProp(x+flip*6.5,z,2.4,.38,2.4,rust);
+    makeBoxProp(x-flip*4.2,z+2.2,2.6,1.5,2.6,steel);
+  };
+  stairTower(-29,-25,1); stairTower(29,25,-1);
+  stairTower(-29,25,1); stairTower(29,-25,-1);
+
+  [[-25,0],[25,0],[0,-25],[0,25],[-7,-20],[7,20]].forEach(([x,z],i)=>
+    makeBoxProp(x,z,i%2?6:4,1.55,i%2?3:6,i%2?rust:dark));
+
+  const lampMat=new THREE.MeshStandardMaterial({color:0xffd9a0,emissive:0xffb55c,emissiveIntensity:1.8});
+  for(const [x,z] of [[-37,-37],[37,-37],[-37,37],[37,37]]){
+    makeBoxProp(x,z,.3,6,.3,dark);
+    const bulb=new THREE.Mesh(new THREE.SphereGeometry(.18,8,6),lampMat);
+    bulb.position.set(x,6,z); scene.add(bulb);
+    const light=new THREE.PointLight(0xffb96d,1.3,15,2); light.position.set(x,5.8,z); scene.add(light);
+  }
+
+  // Ground identity: faded runway markings, tire tracks and maintenance labels.
+  addScrapyardDecal(0,-31,24,3,'ZONE 02');
+  addScrapyardDecal(0,31,24,3,'ZONE 07',Math.PI);
+  for(let z=-28;z<=28;z+=8){
+    makeBoxProp(-.85,z,.12,.018,4,new THREE.MeshStandardMaterial({color:0xd8c590,roughness:.95}));
+    makeBoxProp(.85,z,.12,.018,4,new THREE.MeshStandardMaterial({color:0xd8c590,roughness:.95}));
+  }
+
+  // Broken concrete pads under the aircraft hulks.
+  const pad=makeScrapyardMat('#777064','#3e3933',5,2,.01,.96);
+  makeBoxProp(-13,0,13,.07,29,pad); makeBoxProp(13,0,13,.07,29,pad);
+
+  // Hazard-striped climb cues make trickshot routes readable without looking gamey.
+  const hazardCanvas=document.createElement('canvas');hazardCanvas.width=256;hazardCanvas.height=64;
+  const hx=hazardCanvas.getContext('2d');hx.fillStyle='#b28b32';hx.fillRect(0,0,256,64);
+  hx.strokeStyle='#272522';hx.lineWidth=22;
+  for(let i=-80;i<340;i+=52){hx.beginPath();hx.moveTo(i,64);hx.lineTo(i+64,0);hx.stroke();}
+  const hazardTex=new THREE.CanvasTexture(hazardCanvas);hazardTex.wrapS=hazardTex.wrapT=THREE.RepeatWrapping;hazardTex.repeat.set(2,1);
+  const hazard=new THREE.MeshStandardMaterial({map:hazardTex,roughness:.82,metalness:.1});
+  [[-29,-25],[29,25],[-29,25],[29,-25]].forEach(([x,z])=>makeBoxProp(x,z,5.6,.08,5.6,hazard));
+
+  // Small industrial props and debris break up large flat areas.
+  addScrapyardDebris(140);
+  const barrelMat=makeScrapyardMat('#4f5b55','#8a4e2d',1,2,.28,.74);
+  for(const [x,z] of [[-35,-8],[-34,-6],[34,8],[35,6],[-8,35],[8,-35]]){
+    const b=new THREE.Mesh(new THREE.CylinderGeometry(.38,.38,.95,14),barrelMat);
+    b.position.set(x,.48,z);b.castShadow=b.receiveShadow=true;scene.add(b);
+  }
+
+  // Hero trickshot landmark: a tall maintenance/watch tower with a climb route and open launch corner.
+  buildTrickshotTower(-33,8,steel,dark,rust);
+
+  // Denser material storytelling: scrap plates, cable trenches, concrete patches and oil spills.
+  const plate=makeCorrugatedScrapMat('#656b6c','#7d4328');
+  for(const [x,z,w,d,r] of [[-20,-32,7,3,.08],[19,31,8,3,-.05],[-4,18,5,2,.2],[7,-14,6,2,-.16]]){
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d),plate);m.rotation.x=-Math.PI/2;m.rotation.z=r;m.position.set(x,.025,z);m.receiveShadow=true;scene.add(m);
+  }
+  const oilMat=new THREE.MeshStandardMaterial({color:0x211d18,roughness:.32,metalness:.08,transparent:true,opacity:.72});
+  for(const [x,z,sx,sz] of [[-12,-8,2.8,1.1],[16,18,1.8,.8],[-30,-13,1.5,.7]]){
+    const o=new THREE.Mesh(new THREE.CircleGeometry(1,24),oilMat);o.rotation.x=-Math.PI/2;o.scale.set(sx,sz,1);o.position.set(x,.03,z);scene.add(o);
+  }
+  const cableMat=new THREE.MeshStandardMaterial({color:0x242322,roughness:.9});
+  for(const [x,z,len,rot] of [[-5,-34,12,.1],[24,-10,9,1.2],[-21,19,8,-.8]]){
+    const cable=new THREE.Mesh(new THREE.TorusGeometry(len/2,.045,5,40,Math.PI*.75),cableMat);cable.rotation.x=Math.PI/2;cable.rotation.z=rot;cable.position.set(x,.06,z);scene.add(cable);
+  }
+
+  // Warm dust haze near the horizon.
+  const dustMat=new THREE.MeshBasicMaterial({color:0xd2b184,transparent:true,opacity:.055,depthWrite:false});
+  for(let i=0;i<18;i++){
+    const d=new THREE.Mesh(new THREE.PlaneGeometry(7+Math.random()*10,2+Math.random()*4),dustMat);
+    const a=Math.random()*Math.PI*2,r=30+Math.random()*12;
+    d.position.set(Math.cos(a)*r,1.2+Math.random()*2,Math.sin(a)*r);
+    d.lookAt(0,d.position.y,0);scene.add(d);
+  }
+  return {
+    spawn:new THREE.Vector3(0,2,-35), tSpawn:new THREE.Vector3(0,2,-35), ctSpawn:new THREE.Vector3(0,2,35),
+    tSpawnZone:{xMin:-15,xMax:15,zMin:-39,zMax:-32},
+    ctSpawnZone:{xMin:-15,xMax:15,zMin:32,zMax:39}, sites:[]
+  };
+}
+
 function buildOfficeMap(){
   WORLD_SIZE = 74;
   groundHeightAt = () => 0;
@@ -1777,6 +2023,7 @@ const MAPS = {
   warehouse: { name: 'Warehouse', build: buildWarehouseMap },
   subway: { name: 'Subway', build: buildSubwayMap, dualFfa: true },
   skyline: { name: 'Skyline', build: buildSkylineMap },
+  scrapyard: { name: 'Scrapyard', build: buildScrapyardMap },
   foundry: { name: 'Foundry', build: buildFoundryMap },
   office: { name: 'Office', build: buildOfficeMap, dualFfa: true }
 };
@@ -1818,7 +2065,7 @@ function buildMap(id){
     graffitiDecals.forEach(decal => decal.mat.dispose());
     graffitiDecals.length = 0;
   }
-  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, foundry: 317, dockyard: 401, atrium: 503, ski: 601, mall: 719 })[id]);
+  mapRandom = seededRandom(({ arena: 47, warehouse: 91, subway: 137, skyline: 211, scrapyard: 263, foundry: 317, dockyard: 401, atrium: 503, ski: 601, mall: 719 })[id]);
   const result = MAPS[id].build();
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
@@ -2618,6 +2865,7 @@ function equipSlot(slot, force = false){
   weaponGroup.scale.setScalar(0.78);
   weaponGroup.position.set(0.015, -0.015, 0.04);
   weaponGroup.rotation.x = 0;
+  weaponDrawT = WEAPON_DRAW_DURATION;
   updateAmmoHUD();
 }
 
@@ -2851,6 +3099,8 @@ let weaponInspectT = -1;
 let weaponInspectId = null;
 let weaponRecoilT = -1;
 let shotVisualScale = 1;
+let weaponDrawT = 0;
+const WEAPON_DRAW_DURATION = 0.34;
 
 function currentWeaponDef(){
   if (currentSlot === 'melee') return WEAPONS.knife;
@@ -2915,9 +3165,12 @@ function updateReloadAnimation(dt){
   reloadRuntime.reloadT += dt;
   const p = Math.min(1, reloadRuntime.reloadT / reloadRuntime.duration);
 
-  const tilt = Math.sin(p * Math.PI) * 0.45;
+  const smooth = p * p * (3 - 2 * p);
+  const tilt = Math.sin(smooth * Math.PI) * 0.58;
   weaponGroup.rotation.x = tilt;
-  weaponGroup.position.y = -Math.sin(p * Math.PI) * 0.1;
+  weaponGroup.rotation.z = Math.sin(smooth * Math.PI) * -0.16;
+  weaponGroup.position.y = -Math.sin(smooth * Math.PI) * 0.13;
+  weaponGroup.position.x += Math.sin(smooth * Math.PI) * 0.045;
 
   const magRestY = currentVisual.magRestY, chargeRestX = currentVisual.chargeRestX;
   if (p < 0.05) {
@@ -2945,6 +3198,18 @@ function updateReloadAnimation(dt){
   } else {
     chargingHandle.position.x = chargeRestX;
   }
+}
+
+
+function updateWeaponDraw(dt){
+  if(weaponDrawT<=0 || reloadRuntime.reloading) return;
+  weaponDrawT=Math.max(0,weaponDrawT-dt);
+  const p=1-weaponDrawT/WEAPON_DRAW_DURATION;
+  const ease=1-Math.pow(1-p,3), inv=1-ease;
+  weaponGroup.position.y-=inv*.34;
+  weaponGroup.position.z+=inv*.22;
+  weaponGroup.rotation.x+=inv*.48;
+  weaponGroup.rotation.z-=inv*.38;
 }
 
 // bolt-action cycling between shots (AWP): the scope drops the instant the shot fires (see
@@ -4139,7 +4404,7 @@ function damageEnemy(enemy, dmg, point, meta){
   // A short procedural flinch makes hits readable on the body instead of only in the HUD.
   enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
   enemy.mesh.userData.hitReactSide = Math.random() < 0.5 ? -1 : 1;
-  if (isFfa() && enemy.netId) killcamHits.push({ t: performance.now(), shooterId: netMyId, targetId: enemy.netId, point: point.toArray(), headshot: !!meta?.headshot });
+  if ((isFfa() || gameMode === 'practice') && enemy.netId) killcamHits.push({ t: performance.now(), shooterId: netMyId, targetId: enemy.netId, point: point.toArray(), headshot: !!meta?.headshot });
   if (enemy.isRemote) {
     trackDamageDealt(enemy.netId, dmg);
     // don't own their health - tell their real client what happened and let their own broadcast update us.
@@ -4166,6 +4431,11 @@ function killEnemy(enemy, meta = {}){
   updateMoneyHUD();
   const weaponName = meta.weaponName || 'Unknown';
   showKillFeed(weaponName, !!meta.headshot, enemy.name || 'BOT');
+  if(gameMode==='practice'&&enemy.netId){
+    const now=performance.now();
+    killcamDeaths.push({id:enemy.netId,t:now});
+    lastFfaKill={killerId:netMyId,victimId:enemy.netId,weaponName,headshot:!!meta.headshot,t:now};
+  }
   if (gameMode === 'bomb' && enemy.isCarrier) {
     roundState.carrier = null;
     roundState.plantProgress = 0;
@@ -4896,6 +5166,7 @@ function killcamName(id){ return id === netMyId ? 'YOU' : (netRoster.find(p => p
 // Replay owns camera and actor transforms until cleanup; live death animation is suspended.
 const KILLCAM_WINDOW_MS = 5000, RANKING_DURATION = 5, KILLCAM_TAIL_MS = 900;
 let killcamActive=false, killcamDone=null, killcamWeaponVisual=null, replay=null;
+let replayWeaponChangedAt=0;
 function meshPose(mesh){
   const nodes=[];mesh.traverse(node=>nodes.push(node));
   const pose=new Float32Array(nodes.length*10);
@@ -4947,7 +5218,7 @@ function playKillcam(onDone){
 function equipReplayWeapon(id){
   if(replay.weaponId===id)return;
   if(killcamWeaponVisual)weaponGroup.remove(killcamWeaponVisual.group);
-  replay.weaponId=id;
+  replay.weaponId=id;replayWeaponChangedAt=replay?.time||0;
   killcamWeaponVisual=WEAPONS[id]?buildWeaponVisual(id):null;
   if(killcamWeaponVisual)weaponGroup.add(killcamWeaponVisual.group);
 }
@@ -5006,7 +5277,27 @@ function updateKillcam(dt){
     }
   }
   replay.kick*=Math.exp(-simulationDt*15);replay.flash=Math.max(0,replay.flash-simulationDt);
-  if(killcamWeaponVisual){killcamWeaponVisual.group.position.z=replay.kick*.09;killcamWeaponVisual.group.rotation.x=replay.kick*.10;}
+  if(killcamWeaponVisual){
+    const g=killcamWeaponVisual.group;
+    g.position.set(0,0,replay.kick*.09); g.rotation.set(replay.kick*.10,0,0);
+    const rp=pose.reloadP||0;
+    if(rp>0){
+      const wave=Math.sin(rp*Math.PI);
+      g.position.y-=wave*.14; g.position.x+=wave*.055;
+      g.rotation.x+=wave*.62; g.rotation.z-=wave*.18;
+      if(killcamWeaponVisual.magazine){
+        const m=killcamWeaponVisual.magazine;
+        if(rp<.38){m.visible=true;m.position.y=killcamWeaponVisual.magRestY-(rp/.38)*.35;}
+        else if(rp<.56)m.visible=false;
+        else {m.visible=true;m.position.y=killcamWeaponVisual.magRestY-.35+Math.min(1,(rp-.56)/.30)*.35;}
+      }
+    }
+    const drawAge=(replay.time-replayWeaponChangedAt)/1000;
+    if(drawAge>=0&&drawAge<WEAPON_DRAW_DURATION){
+      const p=Math.min(1,drawAge/WEAPON_DRAW_DURATION),inv=Math.pow(1-p,3);
+      g.position.y-=inv*.34;g.position.z+=inv*.22;g.rotation.x+=inv*.48;g.rotation.z-=inv*.38;
+    }
+  }
   if(!replay.flash){flashLight.intensity=0;flashSpriteMat.opacity=0;}
   for(const shot of replayEvents(replay.shots,previous,replay.time))fireKillcamShot(shot);
   for(const hit of replayEvents(replay.hits,previous,replay.time)){
@@ -5037,7 +5328,7 @@ function playMatchEndSequence(order, onDone){
 function finishFfa(){
   if(ffaState.resultShown)return;
   ffaState.resultShown=true;ffaState.phase='ended';roundState.phase='ended';matchFinished=true;
-  clearGameplayInput();shopOpen=false;document.getElementById('buyMenu').style.display='none';
+  clearGameplayInput();shopOpen=false;pauseMenuOpen=false;document.getElementById('buyMenu').style.display='none';document.getElementById('pauseMenu').style.display='none';
   document.exitPointerLock();
   const order=rankPlayers(netRoster,netStats),winner=order[0],stats=ensureStats(netMyId);
   const top=winner?ensureStats(winner.id):{kills:0,deaths:0};
@@ -5286,7 +5577,7 @@ let killcamRecordT = 0;
 const KILLCAM_HISTORY_MS = 6000;
 const killcamShots=[],killcamDeaths=[],killcamHits=[];
 function recordKillcamShot(msg){
-  if(!isFfa()||killcamActive||ffaState.phase!=='live')return;
+  if((!isFfa() && gameMode!=='practice')||killcamActive||(isFfa()&&ffaState.phase!=='live'))return;
   recordKillcamFrame();
   const avatar=enemies.find(e=>e.netId===msg.id);
   const origin=msg.origin||avatar?.mesh.position.clone().add(new THREE.Vector3(0,1.4,0)).toArray();
@@ -5302,7 +5593,7 @@ function recordKillcamFrame(){
   };
   push(netMyId,{x:player.pos.x,y:player.pos.y,z:player.pos.z,feet:player.pos.y-(player.crouching?player.crouchHeight:player.height),
     yaw:camera.rotation.y,pitch:camera.rotation.x,fov:camera.fov,alive:player.alive,crouching:player.crouching,
-    weaponId:inventory[currentSlot]||'knife'});
+    weaponId:inventory[currentSlot]||'knife',reloadP:reloadRuntime.reloading?Math.min(1,reloadRuntime.reloadT/reloadRuntime.duration):0});
   for(const e of enemies){
     if(!e.netId)continue;
     const h=e.targetCrouching?player.crouchHeight:player.height;
@@ -6377,6 +6668,7 @@ function updatePlayer(dt){
   if (mouseLocked && mouseDown && fireCooldown <= 0) fireWeapon();
 
   updateReloadAnimation(dt);
+  updateWeaponDraw(dt);
   updateWeaponRecoil(dt);
   updateBoltCycle(dt);
   updateWeaponInspect(dt);
@@ -6614,6 +6906,7 @@ document.getElementById('fovSlider').addEventListener('input', event => {
 
 document.getElementById('resumeBtn').addEventListener('click', togglePauseMenu);
 document.getElementById('endFfaBtn').addEventListener('click', endFfaManually);
+document.getElementById('endPracticeBtn').addEventListener('click', endPracticeManually);
 document.getElementById('resultReturn').addEventListener('click', () => location.reload());
 document.getElementById('rematchStart').addEventListener('click', () => {
   if (netRole !== 'host' || !matchFinished) return;
@@ -7059,6 +7352,18 @@ function renderSkylineThumbnail(){
   return cvs.toDataURL();
 }
 document.querySelector('.mapCard[data-map="skyline"] .swatch').style.backgroundImage = `url(${renderSkylineThumbnail()})`;
+
+function renderScrapyardThumbnail(){
+  const c=document.createElement('canvas');c.width=200;c.height=200;const x=c.getContext('2d');
+  x.fillStyle='#9b7a55';x.fillRect(0,0,200,200);x.strokeStyle='#44382e';x.lineWidth=5;x.strokeRect(8,8,184,184);
+  x.fillStyle='#646b6d';x.fillRect(58,45,18,110);x.fillRect(124,45,18,110);
+  x.fillStyle='#8b4e31';[[25,25],[175,25],[25,175],[175,175]].forEach(([a,b])=>x.fillRect(a-10,b-10,20,20));
+  x.fillStyle='#363b3d';[[30,100],[170,100],[100,30],[100,170]].forEach(([a,b])=>x.fillRect(a-12,b-7,24,14));
+  x.fillStyle='rgba(255,210,130,.35)';x.fillRect(82,82,36,36);return c.toDataURL();
+}
+const scrapyardSwatch=document.querySelector('.mapCard[data-map="scrapyard"] .swatch');
+if(scrapyardSwatch)scrapyardSwatch.style.backgroundImage=`url(${renderScrapyardThumbnail()})`;
+
 function renderOfficeThumbnail(){
   const c=document.createElement('canvas'); c.width=320; c.height=180; const ctx=c.getContext('2d');
   ctx.fillStyle='#d8d8d2'; ctx.fillRect(0,0,320,180);
@@ -7290,8 +7595,10 @@ const PRACTICE_TARGET_POS = [[10, -5], [10, 5], [-5, -8], [-5, 8], [3, 10], [3, 
 const PRACTICE_DURATION = 3600; // 60 minutes
 let practiceTimer = PRACTICE_DURATION;
 
+let practiceTargetSerial=0;
 function spawnPracticeTarget(pos){
   const enemy = spawnEnemy(pos);
+  enemy.netId=`practice-target-${++practiceTargetSerial}`;
   enemy.isStatic = true;
   enemy.spawnPos = pos.clone();
   // the rig's rest pose is already a natural standing pose (not a T-pose), so a static target
@@ -7302,6 +7609,8 @@ function spawnPracticeTarget(pos){
 
 function startPractice(){
   money = 9999999;
+  lastFfaKill=null; killcamHistory.clear(); killcamShots.length=0; killcamDeaths.length=0;
+  killcamHits.length=0; killcamRecordT=0; practiceTargetSerial=0;
   updateMoneyHUD();
   practiceTimer = PRACTICE_DURATION;
   (selectedMap === 'foundry' ? FOUNDRY.practiceTargets : PRACTICE_TARGET_POS).forEach(([x, z]) => {
@@ -7311,7 +7620,23 @@ function startPractice(){
   });
 }
 
+
+function endPracticeManually(){
+  if(gameMode!=='practice'||matchFinished)return;
+  pauseMenuOpen=false;
+  document.getElementById('pauseMenu').style.display='none';
+  shopOpen=false;
+  clearGameplayInput();
+  document.exitPointerLock();
+  if(!lastFfaKill){ location.reload(); return; }
+  recordKillcamFrame();
+  matchFinished=true;
+  playKillcam(()=>location.reload());
+}
+
 function updatePractice(dt){
+  killcamRecordT-=dt;
+  if(killcamRecordT<=0){killcamRecordT=1/30;recordKillcamFrame();}
   if (practiceTimer > 0) {
     practiceTimer = Math.max(0, practiceTimer - dt);
     if (practiceTimer === 0) showWaveBanner('Practice time is up');
