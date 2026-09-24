@@ -1943,7 +1943,7 @@ function buildScrapyardMap(){
     d.position.set(Math.cos(a)*r,1.2+Math.random()*2,Math.sin(a)*r);
     d.lookAt(0,d.position.y,0);scene.add(d);
   }
-}
+
   return {
     spawn:new THREE.Vector3(0,2,-35), tSpawn:new THREE.Vector3(0,2,-35), ctSpawn:new THREE.Vector3(0,2,35),
     tSpawnZone:{xMin:-15,xMax:15,zMin:-39,zMax:-32},
