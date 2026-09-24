@@ -1803,39 +1803,122 @@ function makeCorrugatedScrapMat(base='#596065', rust='#6b3c28'){
   const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(3,3);t.anisotropy=renderer.capabilities.getMaxAnisotropy?.()||8;t.colorSpace=THREE.SRGBColorSpace;
   return new THREE.MeshStandardMaterial({map:t,roughness:.72,metalness:.34,bumpMap:scrapyardNormalLike(),bumpScale:.055});
 }
+// A cylinder-from-two-points helper so the tower's legs can taper inward like a real lattice
+// watchtower instead of standing as plain vertical box beams.
+function makeStrut(p0,p1,radiusBottom,radiusTop,mat,collide){
+  const dir=new THREE.Vector3().subVectors(p1,p0);
+  const len=dir.length();
+  const mesh=new THREE.Mesh(new THREE.CylinderGeometry(radiusTop,radiusBottom,len,8),mat);
+  mesh.position.copy(p0).addScaledVector(dir,0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir.clone().normalize());
+  mesh.castShadow=mesh.receiveShadow=true;
+  scene.add(mesh);
+  if(collide) addBox(mesh);
+  return mesh;
+}
+
 function buildTrickshotTower(x,z,steel,dark,rust){
   const corr=makeCorrugatedScrapMat('#4d5559','#713d26');
   const beam=new THREE.MeshStandardMaterial({color:0x34383a,roughness:.67,metalness:.55});
-  beam.userData.minimapProp=true; corr.userData.minimapProp=true;
-  // 9m watchtower with a broad launch deck.
-  for(const dx of [-2.35,2.35])for(const dz of [-2.35,2.35]) makeBoxProp(x+dx,z+dz,.28,8.7,.28,beam);
-  for(const y of [2.2,4.4,6.6]){
-    for(const dz of [-2.35,2.35]) makeBoxProp(x,z+dz,5,.18,.18,beam);
-    for(const dx of [-2.35,2.35]) makeBoxProp(x+dx,z,.18,.18,5,beam);
+  const roofMat=new THREE.MeshStandardMaterial({color:0x5a4132,roughness:.85,metalness:.1});
+  const glassPanel=new THREE.MeshStandardMaterial({color:0x9fd8d4,roughness:.2,metalness:.1,transparent:true,opacity:.5,emissive:0x1d3230,emissiveIntensity:.4});
+  const sandbagMat=new THREE.MeshStandardMaterial({color:0xab9463,roughness:.95});
+  beam.userData.minimapProp=roofMat.userData.minimapProp=true; corr.userData.minimapProp=true;
+
+  const deckY=7.55, deckHalf=3.15, legBottomHalf=2.6, legTopHalf=2.1;
+  // Four tapering lattice legs (military watchtower silhouette) plus X-bracing between them.
+  const corners=[[-1,-1],[1,-1],[-1,1],[1,1]];
+  const legTop={};
+  for(const [dx,dz] of corners){
+    const bottom=new THREE.Vector3(x+dx*legBottomHalf,0,z+dz*legBottomHalf);
+    const top=new THREE.Vector3(x+dx*legTopHalf,deckY-.1,z+dz*legTopHalf);
+    legTop[`${dx},${dz}`]=top;
+    makeStrut(bottom,top,.22,.16,beam,true);
   }
-  // Climbable stair flight disguised as a maintenance ladder/stair hybrid.
-  const steps=12, rise=.62, run=.58;
-  for(let i=0;i<steps;i++){
-    const sy=.31+i*rise, sz=z+5.5-i*run;
-    makeBoxProp(x,sz,2.0,.16,.58,dark);
-    makeBoxProp(x-1.05,sz,.10,.78,.10,beam);makeBoxProp(x+1.05,sz,.10,.78,.10,beam);
+  // Diagonal cross-bracing, visual only - a true diagonal AABB would falsely block a wide
+  // horizontal band of open air next to the tower.
+  const braceBand=(loY,hiY)=>{
+    for(const [[dx0,dz0],[dx1,dz1]] of [[[-1,-1],[1,-1]],[[-1,1],[1,1]],[[-1,-1],[-1,1]],[[1,-1],[1,1]]]){
+      const t0=THREE.MathUtils.lerp(legBottomHalf,legTopHalf,loY/deckY), t1=THREE.MathUtils.lerp(legBottomHalf,legTopHalf,hiY/deckY);
+      const p0=new THREE.Vector3(x+dx0*t0,loY,z+dz0*t0), p1=new THREE.Vector3(x+dx1*t1,hiY,z+dz1*t1);
+      makeStrut(p0,p1,.06,.06,beam,false);
+      makeStrut(new THREE.Vector3(x+dx0*t0,hiY,z+dz0*t0),new THREE.Vector3(x+dx1*t1,loY,z+dz1*t1),.06,.06,beam,false);
+    }
+  };
+  braceBand(1.4,3.6); braceBand(3.9,6.1);
+
+  // Sandbag ring grounds the base like a real guard-post perimeter.
+  for(let i=0;i<14;i++){
+    const a=(i/14)*Math.PI*2, r=3.85;
+    const bag=new THREE.Mesh(new THREE.CapsuleGeometry(.32,.55,4,8),sandbagMat);
+    bag.rotation.z=Math.PI/2; bag.rotation.y=a;
+    bag.position.set(x+Math.cos(a)*r,.32,z+Math.sin(a)*r);
+    bag.castShadow=bag.receiveShadow=true; scene.add(bag);
   }
-  // Main deck and corrugated equipment cabin.
-  makeBoxProp(x,z,6.3,.26,6.3,corr);
-  const deck=scene.children[scene.children.length-1]; if(deck) deck.position.y=7.55;
-  // Add stepped support boxes so the existing collision system lets the player climb naturally.
-  for(let i=0;i<steps;i++){
-    const h=.31+i*rise, sz=z+5.5-i*run;
-    const b=makeBoxProp(x,sz,1.85,h*2,.5,dark); if(b)b.position.y=h;
+
+  // Main deck, then a proper enclosed lookout cabin - glazed on all sides (a real watchtower
+  // cabin is built for visibility) framed by thin corner posts instead of a blind box.
+  // Built directly (not via makeBoxProp) so the collider is computed at the deck's real height -
+  // makeBoxProp snapshots its Box3 at the ground-level position it first places the mesh at,
+  // and repositioning the mesh afterward doesn't move that already-pushed collider with it.
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(6.3,.26,6.3),corr);
+  deck.position.set(x,deckY,z); deck.castShadow=deck.receiveShadow=true;
+  scene.add(deck); addBox(deck);
+  const cabinY=9.0, cabinHalf=1.6, cabinH=1.8;
+  for(const [dx,dz] of corners){
+    const post=makeStrut(new THREE.Vector3(x+dx*cabinHalf,cabinY-cabinH/2,z+dz*cabinHalf),new THREE.Vector3(x+dx*cabinHalf,cabinY+cabinH/2,z+dz*cabinHalf),.07,.07,beam,true);
   }
-  makeBoxProp(x,z,3.2,2.1,2.6,corr); const cabin=scene.children[scene.children.length-1]; if(cabin)cabin.position.y=8.72;
-  // Railings leave the front corner open as the trickshot launch point.
-  const railY=8.28;
-  for(const [rx,rz,w,d] of [[x,z-3,6,.08],[x-3,z,.08,6],[x+3,z-1.2,.08,3.6]]){const r=makeBoxProp(rx,rz,w,.08,d,beam);if(r)r.position.y=railY;}
-  // Red obstruction beacon.
+  for(const [dx,dz,w,d] of [[0,-1,cabinHalf*2,.06],[0,1,cabinHalf*2,.06],[-1,0,.06,cabinHalf*2],[1,0,.06,cabinHalf*2]]){
+    const pane=new THREE.Mesh(new THREE.BoxGeometry(w,cabinH*.85,d),glassPanel);
+    pane.position.set(x+dx*cabinHalf,cabinY,z+dz*cabinHalf);
+    scene.add(pane); addBox(pane,false);
+  }
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(cabinHalf*1.7,1.3,4),roofMat);
+  roof.rotation.y=Math.PI/4; roof.position.set(x,cabinY+cabinH/2+.65,z);
+  roof.castShadow=roof.receiveShadow=true; scene.add(roof); addBox(roof);
+
+  // Railings leave the whole north edge open as the trickshot launch point (unchanged from the
+  // original layout), while the west rail - the ladder's face - gets a shoulder-width gap so
+  // climbing straight onto the deck doesn't bonk into a solid beam.
+  const railY=deckY+.73, gapHalf=.65, ladderZ=z;
+  { const r=makeBoxProp(x,z-deckHalf,6.3,.08,.08,beam); if(r)r.position.y=railY; } // south rail
+  { const r=makeBoxProp(x+deckHalf,z-deckHalf*.4,.08,.08,deckHalf*1.2,beam); if(r)r.position.y=railY; } // partial east rail
+  for(const [a,b] of [[-deckHalf,ladderZ-z-gapHalf],[ladderZ-z+gapHalf,deckHalf]]){
+    if(b-a<=.2) continue;
+    const cz=z+(a+b)/2, d=b-a;
+    const r=makeBoxProp(x-deckHalf,cz,.08,.08,d,beam); if(r)r.position.y=railY;
+  }
+
+  // Roof-mounted searchlight + a small red warning beacon, replacing the old bare floating sphere.
+  const housingMat=new THREE.MeshStandardMaterial({color:0x2b2e2f,roughness:.5,metalness:.6});
+  const lampMat=new THREE.MeshStandardMaterial({color:0xfff2cf,emissive:0xffe9a8,emissiveIntensity:2.2});
+  const housing=new THREE.Mesh(new THREE.CylinderGeometry(.22,.26,.34,10),housingMat);
+  housing.rotation.z=Math.PI/2.4; housing.position.set(x+.9,cabinY+cabinH/2+.3,z-.9); scene.add(housing);
+  const lamp=new THREE.Mesh(new THREE.CircleGeometry(.2,12),lampMat);
+  lamp.position.copy(housing.position).addScaledVector(new THREE.Vector3(Math.cos(.3),0,-Math.sin(.3)),.18);
+  lamp.lookAt(lamp.position.x+1,lamp.position.y-.5,lamp.position.z-1); scene.add(lamp);
+  const spot=new THREE.SpotLight(0xfff2cf,1.4,26,Math.PI/7,.4,1.3);
+  spot.position.copy(housing.position); spot.target.position.set(x+9,0,z-9);
+  scene.add(spot); scene.add(spot.target);
   const beaconMat=new THREE.MeshStandardMaterial({color:0xff3a22,emissive:0xff1800,emissiveIntensity:3});
-  const beacon=new THREE.Mesh(new THREE.SphereGeometry(.12,10,8),beaconMat);beacon.position.set(x,10,z);scene.add(beacon);
-  const pl=new THREE.PointLight(0xff321e,.9,5);pl.position.copy(beacon.position);scene.add(pl);
+  const beacon=new THREE.Mesh(new THREE.SphereGeometry(.11,10,8),beaconMat);
+  beacon.position.set(x,cabinY+cabinH/2+1.35,z); scene.add(beacon);
+  const pl=new THREE.PointLight(0xff321e,.8,5); pl.position.copy(beacon.position); scene.add(pl);
+
+  // Cosmetic rungs only - climbing itself is handled by the proximity ladder zone below, COD-style:
+  // walk up to it and you rise automatically, no jump-scumming up a staircase.
+  const railMat=beam;
+  for(const side of [-1,1]) makeStrut(new THREE.Vector3(x-deckHalf,.2,z+side*.42),new THREE.Vector3(x-deckHalf,deckY+.15,z+side*.42),.045,.045,railMat,false);
+  for(let ry=.55;ry<deckY;ry+=.42){
+    const rung=new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,.9,6),railMat);
+    rung.rotation.z=Math.PI/2; rung.position.set(x-deckHalf,ry,z);
+    scene.add(rung);
+  }
+
+  // top releases comfortably below the deck's own collider top (deckY + .13) so the hand-off to
+  // the normal floor-snap in updatePlayer is unambiguous - releasing right at the deck surface
+  // left a dead zone where climbing and gravity fought over the same single frame and stalled.
+  return { ladder: { x: x - deckHalf, z: ladderZ, radius: 1.0, bottom: 0, top: deckY - .15 } };
 }
 
 function buildScrapyardMap(){
@@ -1919,7 +2002,7 @@ function buildScrapyardMap(){
   }
 
   // Hero trickshot landmark: a tall maintenance/watch tower with a climb route and open launch corner.
-  buildTrickshotTower(-33,8,steel,dark,rust);
+  const tower=buildTrickshotTower(-33,8,steel,dark,rust);
 
   // Denser material storytelling: scrap plates, cable trenches, concrete patches and oil spills.
   const plate=makeCorrugatedScrapMat('#656b6c','#7d4328');
@@ -1947,7 +2030,7 @@ function buildScrapyardMap(){
   return {
     spawn:new THREE.Vector3(0,2,-35), tSpawn:new THREE.Vector3(0,2,-35), ctSpawn:new THREE.Vector3(0,2,35),
     tSpawnZone:{xMin:-15,xMax:15,zMin:-39,zMax:-32},
-    ctSpawnZone:{xMin:-15,xMax:15,zMin:32,zMax:39}, sites:[]
+    ctSpawnZone:{xMin:-15,xMax:15,zMin:32,zMax:39}, sites:[], ladders:[tower.ladder]
   };
 }
 
@@ -6598,15 +6681,31 @@ function updatePlayer(dt){
   const targetHeight = player.crouching ? player.crouchHeight : player.height;
 
   const jumpDown = !!keys[settings.binds.jump];
+  const jumpPressed = jumpDown && !jumpWasDown;
   // Raising velY alone (keeping the old gravity) made the jump reach the same height but hang in
   // the air far longer, which read as low-gravity/floaty. Scaling gravity up together with velY
   // keeps roughly the original snappy up-and-down timing while still clearing a typical
   // ~1.6-1.7-tall crate/barrel (max height ~1.74) with a little room to spare.
   const GRAVITY = 26;
-  if (jumpDown && !jumpWasDown && player.onGround && !player.crouching) { player.velY = 9.5; player.onGround = false; }
+  // COD-style proximity ladder (Scrapyard's watchtower): just standing in the zone climbs you,
+  // no jump-scumming up a staircase. Holding Back descends instead; pressing Jump lets go of the
+  // rung you're on and arcs off, same as bailing out of a real ladder mid-climb.
+  const feetY = player.pos.y - targetHeight;
+  const ladderZone = currentMapMeta?.ladders?.find(l => {
+    const dx = player.pos.x - l.x, dz = player.pos.z - l.z;
+    return dx * dx + dz * dz <= l.radius * l.radius && feetY < l.top && feetY > l.bottom - 0.6;
+  });
+  if (ladderZone && !jumpPressed) {
+    const LADDER_SPEED = 3.4;
+    const descend = !!keys[settings.binds.back] && !keys[settings.binds.forward];
+    player.pos.y += (descend ? -1 : 1) * LADDER_SPEED * dt;
+    player.velY = 0; player.onGround = false;
+  } else {
+    if (jumpPressed && (player.onGround || ladderZone) && !player.crouching) { player.velY = ladderZone ? 6.5 : 9.5; player.onGround = false; }
+    player.velY -= GRAVITY * dt;
+    player.pos.y += player.velY * dt;
+  }
   jumpWasDown = jumpDown;
-  player.velY -= GRAVITY * dt;
-  player.pos.y += player.velY * dt;
 
   // landing on top of a crate/barrel works the same way as landing on terrain: take whichever is
   // higher, terrain or the top of any collider under the player's feet - but only a collider
