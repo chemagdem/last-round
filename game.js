@@ -1825,7 +1825,7 @@ function buildTrickshotTower(x,z,steel,dark,rust){
   const sandbagMat=new THREE.MeshStandardMaterial({color:0xab9463,roughness:.95});
   beam.userData.minimapProp=roofMat.userData.minimapProp=true; corr.userData.minimapProp=true;
 
-  const deckY=7.55, deckHalf=3.15, legBottomHalf=2.6, legTopHalf=2.1;
+  const deckY=7.55*1.5, deckHalf=3.15, legBottomHalf=2.6, legTopHalf=2.1;
   // Four tapering lattice legs (military watchtower silhouette) plus X-bracing between them.
   const corners=[[-1,-1],[1,-1],[-1,1],[1,1]];
   const legTop={};
@@ -1845,7 +1845,7 @@ function buildTrickshotTower(x,z,steel,dark,rust){
       makeStrut(new THREE.Vector3(x+dx0*t0,hiY,z+dz0*t0),new THREE.Vector3(x+dx1*t1,loY,z+dz1*t1),.06,.06,beam,false);
     }
   };
-  braceBand(1.4,3.6); braceBand(3.9,6.1);
+  braceBand(1.4*1.5,3.6*1.5); braceBand(3.9*1.5,6.1*1.5);
 
   // Sandbag ring grounds the base like a real guard-post perimeter.
   for(let i=0;i<14;i++){
@@ -1864,7 +1864,7 @@ function buildTrickshotTower(x,z,steel,dark,rust){
   const deck=new THREE.Mesh(new THREE.BoxGeometry(6.3,.26,6.3),corr);
   deck.position.set(x,deckY,z); deck.castShadow=deck.receiveShadow=true;
   scene.add(deck); addBox(deck);
-  const cabinY=9.0, cabinHalf=1.6, cabinH=1.8;
+  const cabinY=deckY+1.45, cabinHalf=1.6, cabinH=1.8;
   for(const [dx,dz] of corners){
     const post=makeStrut(new THREE.Vector3(x+dx*cabinHalf,cabinY-cabinH/2,z+dz*cabinHalf),new THREE.Vector3(x+dx*cabinHalf,cabinY+cabinH/2,z+dz*cabinHalf),.07,.07,beam,true);
   }
@@ -1873,9 +1873,12 @@ function buildTrickshotTower(x,z,steel,dark,rust){
     pane.position.set(x+dx*cabinHalf,cabinY,z+dz*cabinHalf);
     scene.add(pane); addBox(pane,false);
   }
+  // Decorative only, no collider: a 4-sided cone's AABB is a full square spanning its diagonal,
+  // not just its visual radius - that phantom-blocked a much wider column of air above the deck
+  // than the roof actually occupies, capping jumps that should've been totally clear.
   const roof=new THREE.Mesh(new THREE.ConeGeometry(cabinHalf*1.7,1.3,4),roofMat);
   roof.rotation.y=Math.PI/4; roof.position.set(x,cabinY+cabinH/2+.65,z);
-  roof.castShadow=roof.receiveShadow=true; scene.add(roof); addBox(roof);
+  roof.castShadow=roof.receiveShadow=true; scene.add(roof);
 
   // Railings leave the whole north edge open as the trickshot launch point (unchanged from the
   // original layout), while the west rail - the ladder's face - gets a shoulder-width gap so
@@ -2606,20 +2609,29 @@ function buildWeaponVisual(id){
       const guard = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.014, 0.018), gunMat);
       guard.position.set(0.22, -0.17, -0.205);
 
-      // gentle bow in the grip - a real karambit's handle curves opposite the blade's hook
-      const handleCurve = new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.22, -0.17, -0.205),
-        new THREE.Vector3(0.222, -0.185, -0.15),
-        new THREE.Vector3(0.22, -0.17, -0.095),
-      ]);
-      const handle = new THREE.Mesh(new THREE.TubeGeometry(handleCurve, 16, 0.021, 8, false), knifeHandleMat);
+      // gentle bow in the grip - a real karambit's handle curves opposite the blade's hook.
+      // Two straight segments meeting at a shallow angle, not a TubeGeometry along a curve: a
+      // CatmullRom curve this close to straight hits a known degenerate case in the tube's
+      // Frenet-frame math (NaN vertex positions), which silently made the whole handle invisible.
+      const segment = (p0, p1, r0, r1, mat) => {
+        const dir = new THREE.Vector3().subVectors(p1, p0);
+        const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, dir.length(), 8), mat);
+        mesh.position.copy(p0).addScaledVector(dir, 0.5);
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+        return mesh;
+      };
+      const handleGuardEnd = new THREE.Vector3(0.22, -0.17, -0.205);
+      const handleMid = new THREE.Vector3(0.222, -0.185, -0.15);
+      const handleRingEnd = new THREE.Vector3(0.22, -0.17, -0.095);
+      const handleA = segment(handleGuardEnd, handleMid, 0.023, 0.021, knifeHandleMat);
+      const handleB = segment(handleMid, handleRingEnd, 0.021, 0.019, knifeHandleMat);
 
       const ring = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 8, 16), gunMat);
-      ring.position.set(0.22, -0.17, -0.09);
+      ring.position.copy(handleRingEnd);
       ring.rotation.y = Math.PI / 2;
 
-      group.add(blade, guard, handle, ring);
-      knifeParts = { handle, blade };
+      group.add(blade, guard, handleA, handleB, ring);
+      knifeParts = { handle: handleA, blade };
       muzzle = null;
       break;
     }
