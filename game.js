@@ -2267,6 +2267,10 @@ const inventory = { primary: null, secondary: null };
 let knifeAvailable = true;
 let knifeCount = 1;
 let selectedRuleset = 'standard';
+// Practice/FFA-only: doubles every enemy's hit-detection scale for the raycast's duration (see
+// raycastEnemies below), so trickshots land more forgivingly without changing how big anyone
+// looks - the mesh is scaled up, ray-tested, then scaled back before the next render.
+let trickshotMode = false;
 const isFfa = () => selectedRuleset === 'ffa';
 const ffaState = { phase: 'waiting', timer: FFA.warmup, sendT: 0, active: false, bots: new Map(), navigation: null, respawnT: 0, protection: 0, serial: 0, resultShown: false };
 // Host-chosen kill/time limits, picked from the room-control panel before creating a room and
@@ -2313,8 +2317,13 @@ const pinkSiberianTexture = loadTiledTexture('assets/pink_siberian.png', 3, 3);
 const greekGodsTexture = loadTiledTexture('assets/greek.png', 1.4, 1.4);
 const founderTexture = loadTiledTexture('assets/founder.png', 1.4, 1.4);
 const samuraiTexture = loadTiledTexture('assets/samurai.png', 1.4, 1.4);
-let founderEntitled = false; 
+let founderEntitled = false;
 let founderStatus = 'FOUNDER ACCESS: SIGN IN REQUIRED';
+// Trickshot mode is a personal dev/testing toggle, not a real game option - gated on this one
+// signed-in email rather than shown to everyone. Set from the cloud account's confirmed Auth
+// identity (see applyProfile below), never from anything the client could spoof on its own.
+const TRICKSHOT_MODE_EMAIL = 'josemgarciademarina@hotmail.com';
+let signedInEmail = '';
 const SKIN_CATALOG = {
   founder: { name: 'First Light · 001', meta: 'FOUNDER EXCLUSIVE · Obsidian / gold inlay', preview: 'founder', color: 0xffffff, roughness: 0.3, metalness: 0.82 },
   gold: { name: 'Gold Standard', meta: 'Metallic gold · equipped by default', preview: 'gold', owned: true, color: 0xffffff, roughness: 0.3, metalness: 0.88 },
@@ -3464,6 +3473,21 @@ function updateKnifeSwing(dt){
 }
 
 const raycaster = new THREE.Raycaster();
+// Trickshot mode's hitbox inflation: scale every candidate enemy mesh up before the ray test and
+// straight back down after, all synchronously - no render happens in between, so nobody actually
+// looks bigger. updateMatrixWorld is called by hand because normally only the renderer's own
+// per-frame pass refreshes it, and a raycast right after setting .scale would otherwise still see
+// the old (pre-scale) world matrix.
+function raycastEnemies(ray, list){
+  // Gated on the current mode too, not just the checkbox's last value - otherwise picking it in
+  // Practice and later starting a real ranked/PVP match without ever re-touching the (now hidden)
+  // checkbox would silently carry the hitbox buff into a match where it doesn't belong.
+  const active = trickshotMode && (gameMode === 'practice' || isFfa());
+  if (!active || !list.length) return ray.intersectObjects(list.map(e => e.mesh), true);
+  for (const e of list) { e.mesh.scale.setScalar(2); e.mesh.updateMatrixWorld(true); }
+  try { return ray.intersectObjects(list.map(e => e.mesh), true); }
+  finally { for (const e of list) { e.mesh.scale.setScalar(1); e.mesh.updateMatrixWorld(true); } }
+}
 const thrownKnives = [];
 const thrownKnifeRay = new THREE.Raycaster();
 const thrownKnifeGeometry = new THREE.ConeGeometry(0.035, 0.35, 4);
@@ -3540,7 +3564,7 @@ function updateThrownKnives(dt){
     thrownKnifeRay.far = distance;
     const walls = thrownKnifeRay.intersectObjects(envMeshes.concat(floorMeshes), false);
     const targets = enemies.filter(enemy => enemy.alive && !(gameMode === 'pvp' && enemy.team === myTeam()));
-    const hits = knife.damaging && !knife.hitEnemy ? thrownKnifeRay.intersectObjects(targets.map(enemy => enemy.mesh), true) : [];
+    const hits = knife.damaging && !knife.hitEnemy ? raycastEnemies(thrownKnifeRay, targets) : [];
     const hit = hits[0];
     const blocked = walls.length && (!hit || walls[0].distance <= hit.distance);
     if (hit && !blocked && knife.damaging && knife.epoch === matchEpoch && knife.round === roundState.roundNum) {
@@ -3616,7 +3640,7 @@ function fireWeapon(){
     const origin = camera.getWorldPosition(new THREE.Vector3());
     raycaster.set(origin, dir);
     raycaster.far = def.range;
-    const enemyHits = raycaster.intersectObjects(enemies.map(e => e.mesh), true);
+    const enemyHits = raycastEnemies(raycaster, enemies);
     let hit = false;
     if (enemyHits.length > 0) {
       let obj = enemyHits[0].object;
@@ -3700,7 +3724,7 @@ function fireWeapon(){
   raycaster.far = def.range;
 
   const hittableEnemies = enemies.filter(e => e.alive);
-  const enemyHits = raycaster.intersectObjects(hittableEnemies.map(e => e.mesh), true);
+  const enemyHits = raycastEnemies(raycaster, hittableEnemies);
   const envHits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
 
   recordKillcamShot({id:netMyId,weaponId,origin:origin.toArray(),end:origin.clone().addScaledVector(dir,Math.min(enemyHits[0]?.distance??def.range,envHits[0]?.distance??def.range)).toArray()});
@@ -3731,7 +3755,7 @@ function fireWeapon(){
     const behindOrigin = envHits[0].point.clone().addScaledVector(dir, 0.05);
     raycaster.set(behindOrigin, dir);
     raycaster.far = Math.max(0, def.range - envHits[0].distance);
-    const behindEnemyHits = raycaster.intersectObjects(hittableEnemies.map(e => e.mesh), true);
+    const behindEnemyHits = raycastEnemies(raycaster, hittableEnemies);
     const behindEnvHits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
     if (behindEnemyHits.length > 0 && (behindEnvHits.length === 0 || behindEnemyHits[0].distance < behindEnvHits[0].distance)) {
       tracerLen = envHits[0].distance + behindEnemyHits[0].distance + 0.05;
@@ -5036,6 +5060,8 @@ function selectFfaMaps(){
   });
   document.querySelectorAll('.teamSizeBtn').forEach(button => { button.hidden = isFfa(); });
   document.getElementById('ffaOptions').hidden = !isFfa();
+  document.getElementById('trickshotModeOption').hidden =
+    signedInEmail !== TRICKSHOT_MODE_EMAIL || !(isFfa() || selectedMode === 'practice');
   document.querySelectorAll('#rematchMap option').forEach(option => {
     option.disabled = !mapStillValid(option.value); option.hidden = option.disabled;
   });
@@ -7563,6 +7589,9 @@ document.getElementById('ffaTimeLimitSelect').addEventListener('change', e => {
   ffaTimeLimit = Number(e.target.value) || Infinity;
   if (netRole === 'host' && !gameStarted) broadcastRoster();
 });
+document.getElementById('trickshotModeCheck').addEventListener('change', e => {
+  trickshotMode = e.target.checked;
+});
 
 document.querySelectorAll('.pvpChoiceBtn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -7600,6 +7629,8 @@ if (CLOUD_ACCOUNTS_ENABLED) mountAccount({
   applyProfile: profile => {
     cloudProfileActive = true;
     const { email, founderAccess, founderStatus: accessStatus, ...cloudFields } = profile;
+    signedInEmail = String(email || '').trim().toLowerCase();
+    selectFfaMaps(); // re-evaluate trickshot-option visibility now that the account is known
     founderStatus = accessStatus || 'FOUNDER ACCESS: CHECK UNAVAILABLE';
     founderEntitled = founderAccess === true;
     // Keep each signed-in account in its own durable local mirror. Cloud remains authoritative for

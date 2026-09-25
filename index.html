@@ -306,6 +306,8 @@
   .modeCard[data-mode="practice"]::before{background:linear-gradient(180deg,#6cc6ff,#1a4c74);}
   .modeCard[data-mode="knife"]::before{background:linear-gradient(180deg,#d7b66c,#7a5e28);}
   .modeCard[data-mode="ffa"]::before{background:linear-gradient(180deg,#c771ff,#4a1a74);}
+  #trickshotModeOption{padding-left:24px;}
+  #trickshotModeOption label{display:flex;align-items:center;gap:8px;font:600 11px/1.4 Inter,'Segoe UI',sans-serif;letter-spacing:1.5px;color:#d7b66c;cursor:pointer;}
   #pvpPanel{grid-area:pvp;justify-self:center;width:min(680px,100%);margin-top:4px;}
   #startBtn{grid-area:ready;justify-self:center;margin-top:6px;background:linear-gradient(135deg,#ffd873,#c9932c);border:1px solid rgba(255,255,255,.4);color:#241505;text-shadow:none;box-shadow:0 14px 34px rgba(201,147,44,.32),inset 0 1px rgba(255,255,255,.5);clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);}
   #startBtn:not(:disabled):hover{transform:translateY(-3px);filter:brightness(1.08);box-shadow:0 18px 40px rgba(201,147,44,.42),inset 0 1px rgba(255,255,255,.6);}
@@ -408,6 +410,9 @@
     <div class="modeCard" data-mode="practice">
       <h3>PRACTICE</h3>
       <p>Static targets to work on your aim. Unlimited budget for weapons, and a 60-minute session.</p>
+    </div>
+    <div id="trickshotModeOption" hidden>
+      <label><input type="checkbox" id="trickshotModeCheck"> TRICKSHOT MODE - doubles every target's hitbox</label>
     </div>
   </div>
   <div id="pvpPanel">
