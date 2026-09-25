@@ -1910,8 +1910,10 @@ function buildTrickshotTower(x,z,steel,dark,rust){
   const railMat=beam;
   for(const side of [-1,1]) makeStrut(new THREE.Vector3(x-deckHalf,.2,z+side*.42),new THREE.Vector3(x-deckHalf,deckY+.15,z+side*.42),.045,.045,railMat,false);
   for(let ry=.55;ry<deckY;ry+=.42){
+    // rotated around X (not Z) so the rung spans between the two side rails (along Z), instead
+    // of poking straight out from the wall face.
     const rung=new THREE.Mesh(new THREE.CylinderGeometry(.03,.03,.9,6),railMat);
-    rung.rotation.z=Math.PI/2; rung.position.set(x-deckHalf,ry,z);
+    rung.rotation.x=Math.PI/2; rung.position.set(x-deckHalf,ry,z);
     scene.add(rung);
   }
 
@@ -1952,7 +1954,7 @@ function buildScrapyardMap(){
   makeBoxProp(0,0,4,1.45,5,rust);
   makeBoxProp(0,4.8,6,1.45,3,rust);
 
-  // Every step is <= jump height, creating four practical trickshot perches.
+  // Every step is <= jump height, creating eight practical trickshot perches around the map.
   const stairTower=(x,z,flip=1)=>{
     makeBoxProp(x,z,5.5,1.5,5.5,dark);
     makeBoxProp(x+flip*4.2,z,2.4,.75,2.4,rust);
@@ -1961,6 +1963,8 @@ function buildScrapyardMap(){
   };
   stairTower(-29,-25,1); stairTower(29,25,-1);
   stairTower(-29,25,1); stairTower(29,-25,-1);
+  stairTower(18,-33,-1); stairTower(-18,33,1);
+  stairTower(35,8,-1); stairTower(0,-35,-1);
 
   [[-25,0],[25,0],[0,-25],[0,25],[-7,-20],[7,20]].forEach(([x,z],i)=>
     makeBoxProp(x,z,i%2?6:4,1.55,i%2?3:6,i%2?rust:dark));
@@ -1991,7 +1995,7 @@ function buildScrapyardMap(){
   for(let i=-80;i<340;i+=52){hx.beginPath();hx.moveTo(i,64);hx.lineTo(i+64,0);hx.stroke();}
   const hazardTex=new THREE.CanvasTexture(hazardCanvas);hazardTex.wrapS=hazardTex.wrapT=THREE.RepeatWrapping;hazardTex.repeat.set(2,1);
   const hazard=new THREE.MeshStandardMaterial({map:hazardTex,roughness:.82,metalness:.1});
-  [[-29,-25],[29,25],[-29,25],[29,-25]].forEach(([x,z])=>makeBoxProp(x,z,5.6,.08,5.6,hazard));
+  [[-29,-25],[29,25],[-29,25],[29,-25],[18,-33],[-18,33],[35,8],[0,-35]].forEach(([x,z])=>makeBoxProp(x,z,5.6,.08,5.6,hazard));
 
   // Small industrial props and debris break up large flat areas.
   addScrapyardDebris(140);
@@ -3154,6 +3158,7 @@ document.addEventListener('keydown', e => {
   if (e.code === 'Digit6') equipSlot('flash');
   if (e.code === 'KeyQ') equipSlot(lastSlot);
   if (e.code === settings.binds.inspect) playWeaponInspect();
+  if (e.code === 'KeyG' && gameMode === 'practice') spawnDummyAtLook();
 });
 document.addEventListener('wheel', e => {
   if (!gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
@@ -7703,6 +7708,28 @@ function spawnPracticeTarget(pos){
   // just needs one idle-pose update rather than any special mid-stride handling
   animateSoldierRig(enemy.mesh, 0, 0);
   return enemy;
+}
+
+// Bound to G in practice mode: drops a static target wherever the player is looking, up to 5m
+// away - a ray against real geometry so it lands on the nearest wall/crate instead of always
+// floating exactly 5m out, but never further than that even if the sightline is wide open.
+function spawnDummyAtLook(){
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  const MAX_DIST = 5;
+  const raycaster = new THREE.Raycaster(camera.position, dir, 0, MAX_DIST);
+  const hits = raycaster.intersectObjects(envMeshes.concat(floorMeshes), false);
+  let point;
+  if (hits.length) {
+    point = hits[0].point.clone().addScaledVector(dir, -0.3); // pull back off the surface it hit
+  } else {
+    // nothing within range - fall back to the horizontal component of the look direction so the
+    // target still lands on the ground instead of floating mid-air if the player was looking up.
+    const horiz = new THREE.Vector3(dir.x, 0, dir.z);
+    if (horiz.lengthSq() < 1e-6) horiz.set(0, 0, -1); else horiz.normalize();
+    point = player.pos.clone().addScaledVector(horiz, MAX_DIST);
+  }
+  spawnPracticeTarget(new THREE.Vector3(point.x, 2, point.z));
 }
 
 function startPractice(){
