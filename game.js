@@ -2439,7 +2439,7 @@ const deagleMat = chromeMat; // brushed stainless finish, matching the real Dese
 const skinMat = new THREE.MeshStandardMaterial({ color: 0xb98862, roughness: 0.8 });
 const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x3a3a35, roughness: 0.9 });
 const camoGreenMat = new THREE.MeshStandardMaterial({ map: camoTexture(['#2f3a1e', '#5a6b34', '#1c2412', '#0d0d0d']), roughness: 0.8 });
-const bladeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#b23a3a'), bumpMap: metalBumpTexture(), bumpScale: 0.001, roughness: 0.25, metalness: 0.85 });
+const bladeMat = new THREE.MeshStandardMaterial({ map: loadTiledTexture('assets/textures/emerald.jpg', 1, 1), bumpMap: metalBumpTexture(), bumpScale: 0.0006, roughness: 0.16, metalness: 0.55 });
 const handleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.55 });
 const knifeHandleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, bumpMap: checkeredGripTexture(), bumpScale: 0.0004, roughness: 0.75 });
 const grenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#384a24'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.65, metalness: 0.15 });
@@ -2586,34 +2586,39 @@ function buildWeaponVisual(id){
 
   switch (id) {
     case 'knife': {
-      // tapered clip-point blade profile, extruded flat then rotated so it points forward (-Z)
-      // with a beveled edge highlight, instead of the old flat box
+      // Karambit: a short, heavily hooked claw-blade (bezier'd instead of the old straight
+      // clip-point taper) on a curved grip, finished with the butt-end finger ring the whole
+      // shape is named for.
       const bladeShape = new THREE.Shape();
-      bladeShape.moveTo(0, 0.018);
-      bladeShape.lineTo(0.16, 0.02);
-      bladeShape.lineTo(0.24, 0.012);
-      bladeShape.lineTo(0.30, 0);
-      bladeShape.lineTo(0.24, -0.026);
-      bladeShape.lineTo(0.10, -0.022);
-      bladeShape.lineTo(0, -0.006);
-      bladeShape.lineTo(0, 0.018);
-      const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, { depth: 0.006, bevelEnabled: true, bevelThickness: 0.0015, bevelSize: 0.0025, bevelSegments: 2 });
-      bladeGeo.translate(0, 0, -0.003);
+      bladeShape.moveTo(0, 0.016);
+      bladeShape.quadraticCurveTo(0.06, 0.028, 0.11, 0.02);
+      bladeShape.quadraticCurveTo(0.145, 0.012, 0.15, -0.01);
+      bladeShape.quadraticCurveTo(0.14, -0.045, 0.10, -0.06);
+      bladeShape.quadraticCurveTo(0.06, -0.05, 0.03, -0.03);
+      bladeShape.quadraticCurveTo(0.01, -0.015, 0, -0.006);
+      bladeShape.lineTo(0, 0.016);
+      const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, { depth: 0.005, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.002, bevelSegments: 2 });
+      bladeGeo.translate(0, 0, -0.0025);
       bladeGeo.rotateY(Math.PI / 2);
       const blade = new THREE.Mesh(bladeGeo, bladeMat);
-      blade.position.set(0.22, -0.17, -0.30);
+      blade.position.set(0.22, -0.17, -0.205);
 
-      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.012, 0.02), gunMat);
-      guard.position.set(0.22, -0.17, -0.30);
+      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.014, 0.018), gunMat);
+      guard.position.set(0.22, -0.17, -0.205);
 
-      const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.024, 0.16, 8), knifeHandleMat);
-      handle.rotation.x = Math.PI / 2;
-      handle.position.set(0.22, -0.17, -0.22);
+      // gentle bow in the grip - a real karambit's handle curves opposite the blade's hook
+      const handleCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(0.22, -0.17, -0.205),
+        new THREE.Vector3(0.222, -0.185, -0.15),
+        new THREE.Vector3(0.22, -0.17, -0.095),
+      ]);
+      const handle = new THREE.Mesh(new THREE.TubeGeometry(handleCurve, 16, 0.021, 8, false), knifeHandleMat);
 
-      const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), gunMat);
-      pommel.position.set(0.22, -0.17, -0.14);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.006, 8, 16), gunMat);
+      ring.position.set(0.22, -0.17, -0.09);
+      ring.rotation.y = Math.PI / 2;
 
-      group.add(blade, guard, handle, pommel);
+      group.add(blade, guard, handle, ring);
       knifeParts = { handle, blade };
       muzzle = null;
       break;
@@ -3293,10 +3298,29 @@ function updateWeaponDraw(dt){
   weaponDrawT=Math.max(0,weaponDrawT-dt);
   const p=1-weaponDrawT/WEAPON_DRAW_DURATION;
   const ease=1-Math.pow(1-p,3), inv=1-ease;
-  weaponGroup.position.y-=inv*.34;
-  weaponGroup.position.z+=inv*.22;
-  weaponGroup.rotation.x+=inv*.48;
-  weaponGroup.rotation.z-=inv*.38;
+  const id = currentVisual?.weaponId;
+  const toss = Math.sin(Math.min(1,p)*Math.PI); // 0 -> 1 -> 0 arc, peaks mid-draw
+  if (id === 'deagle') {
+    // Backflip draw: toss the pistol up and let it spin a full backflip on the way in - the spin
+    // uses the same cubic-eased `inv` as the rest of the draw, so it decelerates into landing
+    // upright exactly as the draw finishes instead of a constant-speed spin cutting off abruptly.
+    weaponGroup.position.y += toss * 0.2 - inv * 0.22;
+    weaponGroup.position.z += inv * 0.16;
+    weaponGroup.rotation.x += inv * Math.PI * 2 + inv * 0.15;
+    weaponGroup.rotation.z -= inv * 0.2;
+  } else if (id === 'knife') {
+    // Karambit flourish: one full twirl around the grip axis while it rises into place, like
+    // spinning it once on the finger ring before settling into a reverse grip.
+    weaponGroup.position.y -= inv * 0.3;
+    weaponGroup.position.z += inv * 0.2 + toss * 0.05;
+    weaponGroup.rotation.y += inv * Math.PI * 2;
+    weaponGroup.rotation.x += inv * 0.25;
+  } else {
+    weaponGroup.position.y-=inv*.34;
+    weaponGroup.position.z+=inv*.22;
+    weaponGroup.rotation.x+=inv*.48;
+    weaponGroup.rotation.z-=inv*.38;
+  }
 }
 
 // bolt-action cycling between shots (AWP): the scope drops the instant the shot fires (see
