@@ -2271,6 +2271,10 @@ let selectedRuleset = 'standard';
 // raycastEnemies below), so trickshots land more forgivingly without changing how big anyone
 // looks - the mesh is scaled up, ray-tested, then scaled back before the next render.
 let trickshotMode = false;
+// Personal dev toggle, same account gate as trickshotMode (see DEV_TOOLS_EMAIL below) - every
+// hitscan shot auto-aims at the nearest line-of-sight enemy's head instead of the crosshair (see
+// pickAimbotTarget/fireWeapon), so it guarantees a hit whenever there's anyone visible to hit.
+let aimbotMode = false;
 const isFfa = () => selectedRuleset === 'ffa';
 const ffaState = { phase: 'waiting', timer: FFA.warmup, sendT: 0, active: false, bots: new Map(), navigation: null, respawnT: 0, protection: 0, serial: 0, resultShown: false };
 // Host-chosen kill/time limits, picked from the room-control panel before creating a room and
@@ -2319,10 +2323,10 @@ const founderTexture = loadTiledTexture('assets/founder.png', 1.4, 1.4);
 const samuraiTexture = loadTiledTexture('assets/samurai.png', 1.4, 1.4);
 let founderEntitled = false;
 let founderStatus = 'FOUNDER ACCESS: SIGN IN REQUIRED';
-// Trickshot mode is a personal dev/testing toggle, not a real game option - gated on this one
-// signed-in email rather than shown to everyone. Set from the cloud account's confirmed Auth
-// identity (see applyProfile below), never from anything the client could spoof on its own.
-const TRICKSHOT_MODE_EMAIL = 'josemgarciademarina@hotmail.com';
+// Trickshot mode and Aimbot are personal dev/testing toggles, not real game options - gated on
+// this one signed-in email rather than shown to everyone. Set from the cloud account's confirmed
+// Auth identity (see applyProfile below), never from anything the client could spoof on its own.
+const DEV_TOOLS_EMAIL = 'josemgarciademarina@hotmail.com';
 let signedInEmail = '';
 const SKIN_CATALOG = {
   founder: { name: 'First Light · 001', meta: 'FOUNDER EXCLUSIVE · Obsidian / gold inlay', preview: 'founder', color: 0xffffff, roughness: 0.3, metalness: 0.82 },
@@ -3488,6 +3492,32 @@ function raycastEnemies(ray, list){
   try { return ray.intersectObjects(list.map(e => e.mesh), true); }
   finally { for (const e of list) { e.mesh.scale.setScalar(1); e.mesh.updateMatrixWorld(true); } }
 }
+// Aimbot: nearest alive, line-of-sight, non-teammate enemy's head - reuses the same head marker
+// (userData.isHead) the normal hitscan resolver already reads for headshot damage/scoring, so an
+// aimbot shot is scored exactly like a real headshot, not a special-cased "always hits" flag.
+const aimbotLosRay = new THREE.Raycaster();
+function findHeadWorldPos(mesh){
+  let headObj = null;
+  mesh.traverse(o => { if (!headObj && o.userData.isHead) headObj = o; });
+  if (!headObj) return null;
+  return headObj.getWorldPosition(new THREE.Vector3());
+}
+function pickAimbotTarget(origin){
+  const candidates = enemies.filter(e => e.alive && !(gameMode === 'pvp' && e.team === myTeam()));
+  let best = null, bestDistSq = Infinity;
+  for (const e of candidates) {
+    const headPos = findHeadWorldPos(e.mesh);
+    if (!headPos) continue;
+    const distSq = origin.distanceToSquared(headPos);
+    if (distSq >= bestDistSq) continue;
+    const dir = headPos.clone().sub(origin).normalize();
+    aimbotLosRay.set(origin, dir);
+    aimbotLosRay.far = Math.sqrt(distSq) - 0.15;
+    if (aimbotLosRay.intersectObjects(envMeshes, false).length) continue; // blocked by a wall/obstacle
+    bestDistSq = distSq; best = headPos;
+  }
+  return best;
+}
 const thrownKnives = [];
 const thrownKnifeRay = new THREE.Raycaster();
 const thrownKnifeGeometry = new THREE.ConeGeometry(0.035, 0.35, 4);
@@ -3714,12 +3744,17 @@ function fireWeapon(){
   const stanceMultiplier = player.crouching ? 0.72 : 1;
   const baseSpread = player.ads ? 0.0024 : 0.011;
   const spread = baseSpread * stanceMultiplier + movementPenalty * (player.ads ? 0.006 : 0.018);
-  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-  dir.x += (Math.random() - 0.5) * spread;
-  dir.y += (Math.random() - 0.5) * spread;
-  dir.normalize();
-
   const origin = camera.getWorldPosition(new THREE.Vector3());
+  const aimbotTarget = aimbotMode ? pickAimbotTarget(origin) : null;
+  let dir;
+  if (aimbotTarget) {
+    dir = aimbotTarget.clone().sub(origin).normalize();
+  } else {
+    dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    dir.x += (Math.random() - 0.5) * spread;
+    dir.y += (Math.random() - 0.5) * spread;
+    dir.normalize();
+  }
   raycaster.set(origin, dir);
   raycaster.far = def.range;
 
@@ -7003,7 +7038,8 @@ function togglePauseMenu(){
   document.getElementById('practiceTools').hidden = gameMode !== 'practice';
   document.getElementById('endFfaBtn').hidden = !(isFfa() && netRole==='host' && ffaState.active && ffaState.phase!=='ended');
   document.getElementById('trickshotModeOption').hidden =
-    signedInEmail !== TRICKSHOT_MODE_EMAIL || !(gameMode === 'practice' || isFfa());
+    signedInEmail !== DEV_TOOLS_EMAIL || !(gameMode === 'practice' || isFfa());
+  document.getElementById('aimbotModeOption').hidden = signedInEmail !== DEV_TOOLS_EMAIL;
   socialUI.cancel();
   pauseMenuOpen = !pauseMenuOpen;
   document.getElementById('pauseMenu').style.display = pauseMenuOpen ? 'flex' : 'none';
@@ -7591,6 +7627,9 @@ document.getElementById('ffaTimeLimitSelect').addEventListener('change', e => {
 });
 document.getElementById('trickshotModeCheck').addEventListener('change', e => {
   trickshotMode = e.target.checked;
+});
+document.getElementById('aimbotModeCheck').addEventListener('change', e => {
+  aimbotMode = e.target.checked;
 });
 
 document.querySelectorAll('.pvpChoiceBtn').forEach(btn => {
