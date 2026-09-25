@@ -2267,7 +2267,7 @@ const inventory = { primary: null, secondary: null };
 let knifeAvailable = true;
 let knifeCount = 1;
 let selectedRuleset = 'standard';
-// Practice/FFA-only: doubles every enemy's hit-detection scale for the raycast's duration (see
+// Practice/FFA-only: triples every enemy's hit-detection scale for the raycast's duration (see
 // raycastEnemies below), so trickshots land more forgivingly without changing how big anyone
 // looks - the mesh is scaled up, ray-tested, then scaled back before the next render.
 let trickshotMode = false;
@@ -3484,7 +3484,7 @@ function raycastEnemies(ray, list){
   // checkbox would silently carry the hitbox buff into a match where it doesn't belong.
   const active = trickshotMode && (gameMode === 'practice' || isFfa());
   if (!active || !list.length) return ray.intersectObjects(list.map(e => e.mesh), true);
-  for (const e of list) { e.mesh.scale.setScalar(2); e.mesh.updateMatrixWorld(true); }
+  for (const e of list) { e.mesh.scale.setScalar(3); e.mesh.updateMatrixWorld(true); }
   try { return ray.intersectObjects(list.map(e => e.mesh), true); }
   finally { for (const e of list) { e.mesh.scale.setScalar(1); e.mesh.updateMatrixWorld(true); } }
 }
@@ -5060,8 +5060,6 @@ function selectFfaMaps(){
   });
   document.querySelectorAll('.teamSizeBtn').forEach(button => { button.hidden = isFfa(); });
   document.getElementById('ffaOptions').hidden = !isFfa();
-  document.getElementById('trickshotModeOption').hidden =
-    signedInEmail !== TRICKSHOT_MODE_EMAIL || !(isFfa() || selectedMode === 'practice');
   document.querySelectorAll('#rematchMap option').forEach(option => {
     option.disabled = !mapStillValid(option.value); option.hidden = option.disabled;
   });
@@ -7004,6 +7002,8 @@ function togglePauseMenu(){
   if (!gameStarted || shopOpen || matchFinished) return;
   document.getElementById('practiceTools').hidden = gameMode !== 'practice';
   document.getElementById('endFfaBtn').hidden = !(isFfa() && netRole==='host' && ffaState.active && ffaState.phase!=='ended');
+  document.getElementById('trickshotModeOption').hidden =
+    signedInEmail !== TRICKSHOT_MODE_EMAIL || !(gameMode === 'practice' || isFfa());
   socialUI.cancel();
   pauseMenuOpen = !pauseMenuOpen;
   document.getElementById('pauseMenu').style.display = pauseMenuOpen ? 'flex' : 'none';
