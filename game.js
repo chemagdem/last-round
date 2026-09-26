@@ -2131,16 +2131,45 @@ const MAPS = {
   dockyard: { name: 'Dockyard', ffa: true, build: () => buildFreeForAllMap('dockyard') },
   atrium: { name: 'Atrium', ffa: true, build: () => buildFreeForAllMap('atrium') },
   ski: { name: 'Ski Station', ffa: true, build: () => buildFreeForAllMap('ski') },
-  arena: { name: 'Desert', build: buildArenaMap },
-  warehouse: { name: 'Warehouse', build: buildWarehouseMap },
+  arena: { name: 'Desert', build: buildArenaMap, dualFfa: true },
+  warehouse: { name: 'Warehouse', build: buildWarehouseMap, dualFfa: true },
   subway: { name: 'Subway', build: buildSubwayMap, dualFfa: true },
-  skyline: { name: 'Skyline', build: buildSkylineMap },
-  scrapyard: { name: 'Scrapyard', build: buildScrapyardMap },
-  foundry: { name: 'Foundry', build: buildFoundryMap },
+  skyline: { name: 'Skyline', build: buildSkylineMap, dualFfa: true },
+  scrapyard: { name: 'Scrapyard', build: buildScrapyardMap, dualFfa: true },
+  foundry: { name: 'Foundry', build: buildFoundryMap, dualFfa: true },
   office: { name: 'Office', build: buildOfficeMap, dualFfa: true },
-  highrise: { name: 'Highrise', build: buildHighriseMap }
+  highrise: { name: 'Highrise', build: buildHighriseMap, dualFfa: true }
 };
 let selectedMap = 'arena';
+
+// Maps without their own hand-authored FFA nav layout (everything except the ffa-only maps,
+// Office and Subway) get one derived straight from the real colliders the map just built - a 2D
+// projection of each collider's AABB is exactly the {x,z,w,d} shape buildNavigation()/blockedAt()
+// already expect (see ffa-layouts.js), so this is the same nav data a hand-authored layout would
+// hold, just generated instead of kept in sync by hand, and it can never drift from the real
+// geometry the way a parallel hand-authored copy can (see OFFICE_FFA_LAYOUT's doorAt history).
+function deriveFfaLayout(halfWidth, halfDepth){
+  const cover = colliders.map(c => ({
+    x: (c.min.x + c.max.x) / 2, z: (c.min.z + c.max.z) / 2,
+    w: Math.max(0.4, c.max.x - c.min.x), d: Math.max(0.4, c.max.z - c.min.z)
+  }));
+  const layout = { halfWidth, halfDepth, cover };
+  // A generous ring plus a 3x3 inner grid of candidates, then keep whichever aren't blocked - maps
+  // vary too much in shape (a central core, a long crane, a sloped piste) for one fixed spawn
+  // pattern to fit all of them, so this over-generates and filters rather than guessing positions.
+  const candidates = [];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    candidates.push({ x: Math.cos(a) * halfWidth * 0.8, z: Math.sin(a) * halfDepth * 0.8 });
+  }
+  for (let gx = -1; gx <= 1; gx++) for (let gz = -1; gz <= 1; gz++) {
+    if (gx === 0 && gz === 0) continue;
+    candidates.push({ x: gx * halfWidth * 0.45, z: gz * halfDepth * 0.45 });
+  }
+  const spawns = candidates.filter(p => !blockedAt(layout, p.x, p.z, 1.2));
+  layout.spawns = spawns.length >= 4 ? spawns : candidates;
+  return layout;
+}
 
 let currentMapMeta = null;
 let persistentSceneObjects = null;
@@ -2183,6 +2212,9 @@ function buildMap(id){
   refineWorldMaterials(envMeshes.concat(floorMeshes), id);
   addWorldDetail(scene, envMeshes, id);
   addMapFinish(scene, id, groundHeightAt);
+  if (!result.ffa && MAPS[id].dualFfa) {
+    result.ffa = deriveFfaLayout(result.halfX ?? (WORLD_SIZE / 2 - 3), result.halfZ ?? (WORLD_SIZE / 2 - 3));
+  }
   currentMapMeta = result;
   player.pos.copy(result.spawn);
   player.pos.y = groundHeightAt(result.spawn.x, result.spawn.z) + player.height;
