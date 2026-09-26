@@ -15,6 +15,7 @@ import { findClearSpawn } from './map-spawns.js';
 import { createFounderFinish } from './founder-skin.js';
 import { buildFoundry } from './foundry-map.js';
 import { buildOffice } from './office-map.js';
+import { buildHighrise } from './highrise-map.js';
 import { FOUNDRY } from './foundry-layout.js';
 import { TeammateSpectator } from './spectator.js';
 import { PlayerLabels } from './player-labels.js';
@@ -898,6 +899,10 @@ function applySubwayAtmosphere(){
 
 // ---------- World / Map system ----------
 let WORLD_SIZE = 220;
+// A map with a fall-to-your-death hazard (see Highrise) gives groundHeightAt() a deeply negative
+// value outside its safe footprint instead of the usual flat 0 - once a player's eye height drops
+// past this, damagePlayer(9999, null) ends them as a fall (no killer credited).
+const FALL_DEATH_Y = -25;
 let groundHeightAt = (x, z) => 0;
 let mapRandom = seededRandom(1);
 
@@ -943,7 +948,8 @@ const MAP_TEXTURE_URLS = {
   skyline: [],
   ski: ['assets/textures/snow.png','assets/textures/cafe.png','assets/textures/mesa.png','assets/textures/arbol_tronco.png','assets/textures/arbol_hojas.png','assets/textures/cafe_gijon.png'],
   mall: [],
-  office: ['assets/textures/cream_concrete.png','assets/textures/moqueta_clara.jpg','assets/textures/moqueta_oscura.webp','assets/textures/stars_easter.png']
+  office: ['assets/textures/cream_concrete.png','assets/textures/moqueta_clara.jpg','assets/textures/moqueta_oscura.webp','assets/textures/stars_easter.png'],
+  highrise: []
 };
 const texturePreloadState = new Map();
 function preloadMapTextures(mapId){
@@ -2063,6 +2069,23 @@ function buildFoundryMap(){
   return buildFoundry({ scene, floorMeshes, addBox, makeBoxProp, loadTiledTexture, hazardStripeTexture });
 }
 
+function buildHighriseMap(){
+  WORLD_SIZE = 130;
+  groundHeightAt = () => 0; // safe flat default while every construction prop is placed
+  sky.material.map = desertSkyGradientTexture(); sky.material.needsUpdate = true;
+  scene.fog.color.set(0x93a0a8); scene.fog.density = 0.0015;
+  hemi.color.set(0xaebcc4); hemi.groundColor.set(0x3a4045); hemi.intensity = 1.1;
+  sun.color.set(0xfff0d8); sun.intensity = 1.05;
+  fillLight.color.set(0x8fa8bd); fillLight.intensity = 0.5;
+  const result = buildHighrise({ scene, floorMeshes, addBox, makeBoxProp, loadTiledTexture, hazardStripeTexture, metalScratchTexture });
+  // Now that the roof's real footprint is known, swap in the fall-hazard version: flat everywhere
+  // inside the roof, a deep sentinel outside it (crane boom included, since that's a real collider
+  // regardless of this function's return value - only matters once you step off it into open air).
+  const { halfX, halfZ } = result;
+  groundHeightAt = (x, z) => (x >= -halfX && x <= halfX && z >= -halfZ && z <= halfZ) ? 0 : FALL_DEATH_Y - 100;
+  return result;
+}
+
 function buildFreeForAllMap(id){
   applyDesertAtmosphere();
   if (id === 'mall') {
@@ -2114,7 +2137,8 @@ const MAPS = {
   skyline: { name: 'Skyline', build: buildSkylineMap },
   scrapyard: { name: 'Scrapyard', build: buildScrapyardMap },
   foundry: { name: 'Foundry', build: buildFoundryMap },
-  office: { name: 'Office', build: buildOfficeMap, dualFfa: true }
+  office: { name: 'Office', build: buildOfficeMap, dualFfa: true },
+  highrise: { name: 'Highrise', build: buildHighriseMap }
 };
 let selectedMap = 'arena';
 
@@ -6827,6 +6851,12 @@ function updatePlayer(dt){
   const floorY = standY + targetHeight;
   if (player.pos.y <= floorY) { player.pos.y = floorY; player.velY = 0; player.onGround = true; }
 
+  // Maps with a fall-to-your-death hazard (Highrise's roof edge/crane) give groundHeightAt() a
+  // deeply negative sentinel outside the safe footprint instead of the usual flat 0, so there's
+  // nothing for the snap-to-floor logic above to catch once a player walks past the edge - they
+  // just keep falling under normal gravity until they cross this threshold.
+  if (player.alive && player.pos.y < FALL_DEATH_Y) { lastDamageMeta = { weaponName: 'Fall Damage', headshot: false }; damagePlayer(9999, null); }
+
   camera.position.set(player.pos.x + shakeX, player.pos.y + shakeY, player.pos.z);
 
   // footstep audio
@@ -7592,6 +7622,22 @@ function renderFoundryThumbnail(){
   return canvas.toDataURL();
 }
 document.querySelector('.mapCard[data-map="foundry"] .swatch').style.backgroundImage = `url(${renderFoundryThumbnail()})`;
+
+function renderHighriseThumbnail(){
+  const c = document.createElement('canvas'); c.width = 200; c.height = 260;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#1c2226'; ctx.fillRect(0, 0, 200, 260);
+  ctx.fillStyle = '#9aa19c'; ctx.fillRect(12, 10, 176, 240); // roof
+  ctx.fillStyle = '#6b716c'; ctx.fillRect(70, 110, 50, 40); // central core
+  ctx.strokeStyle = '#e7c344'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(66, 52, 16, 0, Math.PI * 2); ctx.stroke(); // helipad
+  ctx.fillStyle = '#e7c344'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('H', 66, 53);
+  ctx.fillStyle = '#2c3033'; ctx.fillRect(158, 20, 14, 14); // crane mast, NE corner
+  ctx.strokeStyle = '#2c3033'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(165, 27); ctx.lineTo(165, -10); ctx.stroke(); // boom past the edge
+  ctx.fillStyle = 'rgba(126,182,255,.5)'; ctx.fillRect(12, 10, 176, 26); // T spawn
+  ctx.fillRect(12, 224, 176, 26); // CT spawn
+  return c.toDataURL();
+}
+document.querySelector('.mapCard[data-map="highrise"] .swatch').style.backgroundImage = `url(${renderHighriseThumbnail()})`;
 
 for (const id of Object.keys(FFA_MAPS)) document.querySelector(`.mapCard[data-map="${id}"] .swatch`).style.backgroundImage = `url(${ffaThumbnail(id)})`;
 
