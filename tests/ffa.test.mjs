@@ -36,3 +36,18 @@ for(const [id,map] of Object.entries(FFA_MAPS)){
     assert.equal(visited.size,nav.nodes.length);
   });
 }
+
+test('bot loadouts cover several weapons with sane fire cadence',async()=>{
+  const {BOT_LOADOUTS,pickBotLoadout}=await import('../ffa-rules.js');
+  const ids=new Set(BOT_LOADOUTS.map(l=>l.weaponId));
+  assert.equal(ids.size,BOT_LOADOUTS.length);assert.ok(ids.size>=4);
+  for(const l of BOT_LOADOUTS){
+    assert.ok(l.weight>0&&l.burst>=1&&l.interval>0&&l.spread>0);
+    assert.ok(l.pause[0]>0&&l.pause[1]>=l.pause[0]);
+  }
+  assert.equal(pickBotLoadout(()=>0),BOT_LOADOUTS[0]);
+  assert.equal(pickBotLoadout(()=>0.999999),BOT_LOADOUTS.at(-1));
+  const seen=new Set();let seed=1;const rand=()=>((seed=seed*16807%2147483647)/2147483647);
+  for(let i=0;i<500;i++)seen.add(pickBotLoadout(rand).weaponId);
+  assert.equal(seen.size,BOT_LOADOUTS.length);
+});
