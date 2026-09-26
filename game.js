@@ -3213,6 +3213,14 @@ document.addEventListener('keydown', e => {
   if (e.code === 'KeyQ') equipSlot(lastSlot);
   if (e.code === settings.binds.inspect) playWeaponInspect();
   if (e.code === 'KeyG' && gameMode === 'practice') spawnDummyAtLook();
+  // Quick aimbot toggle for the one account it's gated to - same flag the pause-menu checkbox
+  // uses, so either one stays in sync with the other (see raycastEnemies/pickAimbotTarget).
+  if (e.key === '+' && signedInEmail === DEV_TOOLS_EMAIL) {
+    aimbotMode = !aimbotMode;
+    const check = document.getElementById('aimbotModeCheck');
+    if (check) check.checked = aimbotMode;
+    socialUI.notice(aimbotMode ? 'Aimbot ON' : 'Aimbot OFF');
+  }
 });
 document.addEventListener('wheel', e => {
   if (!gameStarted || shopOpen || pauseMenuOpen || socialUI.blocked) return;
@@ -6702,6 +6710,13 @@ function checkCollision(newPos, feetYOverride){
 function updatePlayer(dt){
   if (!player.alive) return;
   if (shopOpen || pauseMenuOpen || matchFinished) return;
+
+  // Left/Right arrow keys turn the camera continuously, like nudging the mouse - an alternative to
+  // mouse-look for anyone who'd rather steer with the keyboard. Same yaw sign convention as
+  // mousemove below (moving/turning right decreases yaw).
+  const ARROW_TURN_SPEED = 2.6; // rad/sec
+  if (keys.ArrowLeft) player.yaw += ARROW_TURN_SPEED * dt;
+  if (keys.ArrowRight) player.yaw -= ARROW_TURN_SPEED * dt;
 
   // recoil / shake decay
   recoilKick = Math.max(0, recoilKick - dt * 0.08);
