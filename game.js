@@ -7,7 +7,8 @@ import * as THREE from 'three';
 import { sampleReplay, replayEvents, advanceReplay } from './killcam-timeline.js';
 import { buildMall } from './mall-map.js';
 import { mallWalk } from './mall-layout.js';
-import { FFA, botCount, canStart, rankPlayers, chooseSpawn } from './ffa-rules.js';
+import { FFA, botCount, canStart, rankPlayers, chooseSpawn, pickBotLoadout, BOT_DAMAGE_SCALE } from './ffa-rules.js';
+import { ARMOR, emptyArmor, absorbDamage } from './armor.js';
 import { FFA_MAPS, buildNavigation, blockedAt, SKI_DROP, SKI_CAFE } from './ffa-layouts.js';
 import { buildFfaMap, ffaThumbnail } from './ffa-maps.js';
 import { addMapFinish } from './map-finish.js';
@@ -2284,7 +2285,9 @@ const SPRAY_PATTERNS = {
   deagle: buildSprayPattern(7, 0.026, 0.008, 2),
   tec9: buildSprayPattern(18, 0.009, 0.004, 3),
   duals: buildSprayPattern(30, 0.008, 0.004, 3),
-  awp: buildSprayPattern(5, 0.03, 0.01, 2)
+  awp: buildSprayPattern(5, 0.03, 0.01, 2),
+  m249: buildSprayPattern(100, 0.02, 0.014, 4),
+  ump45: buildSprayPattern(25, 0.011, 0.006, 2.8)
 };
 
 // ---------- Weapon system: definitions, inventory, per-weapon visuals ----------
@@ -2298,6 +2301,8 @@ const WEAPONS = {
   m4a4:   { name: 'M4A4', slot: 'primary', price: 2900, dmg: 31, mag: 30, reserve: 90, fireRate: 0.095, range: 150, reloadDuration: 1.65, zoomFov: 48, kickPush: 0.045, kickTilt: 0.06 },
   m4a1:   { name: 'M4A1-S', slot: 'primary', price: 2750, dmg: 35, mag: 20, reserve: 80, fireRate: 0.11, range: 150, reloadDuration: 1.6, zoomFov: 45, kickPush: 0.04, kickTilt: 0.055 },
   awp:    { name: 'AWP', slot: 'primary', price: 4500, dmg: 115, mag: 5, reserve: 30, fireRate: 1.35, range: 320, reloadDuration: 2.4, zoomFov: 12, scope: true, scopeFov2: 5, kickPush: 0.15, kickTilt: 0.2, boltAction: true },
+  m249:   { name: 'M249', slot: 'primary', price: 5200, dmg: 32, mag: 100, reserve: 200, fireRate: 0.08, range: 150, reloadDuration: 4.8, zoomFov: 50, kickPush: 0.05, kickTilt: 0.065 },
+  ump45:  { name: 'UMP-45', slot: 'primary', price: 1200, dmg: 26, mag: 25, reserve: 100, fireRate: 0.092, range: 100, reloadDuration: 1.9, zoomFov: 55, kickPush: 0.035, kickTilt: 0.05 },
   grenade:{ name: 'Grenade', slot: 'grenade', price: 350, dmg: 130, radius: 9, fireRate: 0.8 },
   smoke:  { name: 'Smoke Grenade', slot: 'smoke', price: 300, radius: 10, duration: 14, fireRate: 0.8 },
   // radius is the max effective range of the blind, duration is how long a point-blank (distance
@@ -2316,7 +2321,10 @@ const GUNSHOT_PROFILES = {
   m4a1:   { noiseDur: 0.13, bpFreq: 2600, noiseDecay: 0.07, noiseVol: 0.4, oscStart: 150, oscEnd: 44, oscDecay: 0.06, oscVol: 0.35 }, // suppressed: dull, quiet crack
   // the sniper: deeper crack, longer boom tail, and a hard sub-bass thump underneath for a
   // much more aggressive, chest-punch report than the other weapons
-  awp:    { noiseDur: 0.5, bpFreq: 700, bpQ: 0.4, noiseDecay: 0.42, noiseVol: 1.5, oscStart: 55, oscEnd: 14, oscDecay: 0.36, oscVol: 1.7, tailDur: 0.7, tailVol: 0.28, subFreq: 70, subDur: 0.3, subVol: 0.9 }
+  awp:    { noiseDur: 0.5, bpFreq: 700, bpQ: 0.4, noiseDecay: 0.42, noiseVol: 1.5, oscStart: 55, oscEnd: 14, oscDecay: 0.36, oscVol: 1.7, tailDur: 0.7, tailVol: 0.28, subFreq: 70, subDur: 0.3, subVol: 0.9 },
+  // belt-fed 5.56: deeper and heavier than the M4A4
+  m249:   { noiseDur: 0.22, bpFreq: 1350, noiseDecay: 0.16, noiseVol: 1.1, oscStart: 120, oscEnd: 32, oscDecay: 0.13, oscVol: 1.05, subFreq: 70, subDur: 0.1, subVol: 0.35 },
+  ump45:  { noiseDur: 0.12, bpFreq: 1600, noiseDecay: 0.08, noiseVol: 0.85, oscStart: 150, oscEnd: 50, oscDecay: 0.07, oscVol: 0.7 } // fallback if the .45 SMG sample hasn't loaded
 };
 
 const inventory = { primary: null, secondary: null };
@@ -2352,6 +2360,22 @@ const MAX_SMOKES = 2;
 let smokeCount = 0;
 const MAX_FLASHES = 2;
 let flashCount = 0;
+// Remaining durability of each armor piece; 0 means the piece is not owned.
+let armor = emptyArmor();
+function clearArmor(){ armor = emptyArmor(); }
+// 2v2 team PvP: every spawn is invincible for a few seconds (enforced by the victim, like FFA).
+const TEAM_SPAWN_PROTECTION = 5;
+let teamSpawnProtection = 0;
+function startTeamSpawnProtection(){
+  teamSpawnProtection = gameMode === 'pvp' && !isFfa() && netTeamSize === 2 ? TEAM_SPAWN_PROTECTION : 0;
+  updateSpawnProtectionHUD();
+}
+function updateSpawnProtectionHUD(){
+  const el = document.getElementById('spawnProtectionMsg');
+  if (!el) return;
+  el.hidden = !(teamSpawnProtection > 0 && player.alive);
+  if (!el.hidden) el.textContent = `SPAWN PROTECTION · ${Math.ceil(teamSpawnProtection)}s`;
+}
 
 const weaponGroup = new THREE.Group();
 // First-person weapon proportions: the previous procedural meshes were technically small in
@@ -2402,7 +2426,7 @@ let cloudProfileActive = false;
 // equipped skin instead of one finish shared across the whole armory.
 // Only the guns whose model actually builds skinnable parts from a shared material in
 // buildWeaponVisual's switch - knife/grenade/smoke/flash are utility items with no finish to equip.
-const WEAPON_SKIN_IDS = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp'];
+const WEAPON_SKIN_IDS = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp', 'm249', 'ump45'];
 const STATTRAK_WEAPON_IDS = ['knife', ...WEAPON_SKIN_IDS, 'grenade'];
 // A factory, not a shared object literal: `{...DEFAULT_PROFILE}` only shallow-copies, so every
 // caller used to get the SAME nested equippedSkins object - equipping a skin silently mutated
@@ -2517,6 +2541,7 @@ const knifeHandleMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, bumpMap
 const grenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#384a24'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.65, metalness: 0.15 });
 const smokeGrenadeMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#8a8f88'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.6, metalness: 0.2 });
 applyEquippedSkin(); // now that awpStockMat (and every other skinnable material) exists
+const m249BrassMat = new THREE.MeshStandardMaterial({ color: 0xb8893a, roughness: 0.35, metalness: 0.85 }); // belt rounds
 const flashMat = new THREE.MeshStandardMaterial({ map: metalScratchTexture('#d8d8d0'), bumpMap: weaponMetalBump, bumpScale: 0.0008, roughnessMap: weaponMetalBump, roughness: 0.35, metalness: 0.55 });
 
 // weapon aim position (hip vs ADS)
@@ -2550,9 +2575,10 @@ function makeStatTrakDisplay(id){
   const pistol = ['glock', 'deagle', 'tec9', 'duals'].includes(id);
   const widthZ = compact ? 0.085 : (pistol ? 0.105 : 0.145);
   const heightY = compact ? 0.028 : (pistol ? 0.032 : 0.038);
-  const centerX = id === 'knife' ? 0.194 : (pistol ? 0.178 : 0.174);
+  // The UMP's receiver is narrower, and the M249's feed tray occupies the usual spot.
+  const centerX = id === 'knife' ? 0.194 : id === 'ump45' ? 0.19 : (pistol ? 0.178 : 0.174);
   const centerY = id === 'knife' ? -0.17 : (pistol ? -0.205 : -0.205);
-  const centerZ = id === 'knife' ? -0.235 : (pistol ? -0.34 : -0.39);
+  const centerZ = id === 'knife' ? -0.235 : id === 'm249' ? -0.26 : (pistol ? -0.34 : -0.39);
 
   const root = new THREE.Group();
   root.position.set(centerX, centerY, centerZ);
@@ -2955,6 +2981,166 @@ function buildWeaponVisual(id){
         mountRail, ...railSlots, scopeBody, scopeObjective, scopeEyepiece, scopeLensFront, scopeLensBack,
         ringA, ringB, mountA, mountB, boltBody, boltHandle, boltKnob, cheekRiser, bipodLegA, bipodLegB);
       muzzle.set(0.24, -0.17, -1.525);
+      break;
+    }
+    case 'm249': {
+      // M249 SAW: a tall square receiver with a hinged feed-tray cover, a 200-round box
+      // hanging off the left side and feeding a visible belt, a carry handle over the heavy
+      // barrel, a folded bipod under the gas tube and a skeleton polymer stock. The box and
+      // belt are one part (the belt is parented to the box) so the reload animation drops and
+      // reseats them together.
+      const receiver = weaponBox(0.1, 0.13, 0.46, skinMat, 0.02);
+      receiver.position.set(0.24, -0.2, -0.4);
+      const feedCover = weaponBox(0.108, 0.05, 0.3, skinMat, 0.014);
+      feedCover.position.set(0.24, -0.118, -0.37);
+      const coverHinge = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.11, 10), gunMatLight);
+      coverHinge.rotation.z = Math.PI / 2; coverHinge.position.set(0.24, -0.1, -0.52);
+      const coverLatch = weaponBox(0.05, 0.02, 0.035, gunMatLight, 0.006);
+      coverLatch.position.set(0.24, -0.088, -0.23);
+      const rearSight = weaponBox(0.04, 0.035, 0.02, gunMatLight, 0.006);
+      rearSight.position.set(0.24, -0.075, -0.27);
+      // feed tray mouth on the left side, where the belt enters
+      const feedTray = weaponBox(0.03, 0.05, 0.09, gunMat, 0.008);
+      feedTray.position.set(0.18, -0.16, -0.38);
+      const grip = weaponBox(0.065, 0.17, 0.07, handleMat, 0.02);
+      grip.position.set(0.24, -0.34, -0.22); grip.rotation.x = 0.22;
+      const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.008, 8, 16, Math.PI * 1.35), gunMat);
+      triggerGuard.rotation.z = Math.PI * 0.35; triggerGuard.position.set(0.24, -0.29, -0.27);
+      // skeleton stock: top comb, angled lower strut and a tall butt plate
+      const stockTop = weaponBox(0.075, 0.07, 0.33, handleMat, 0.02);
+      stockTop.position.set(0.24, -0.19, 0.0);
+      const stockStrut = weaponBox(0.06, 0.04, 0.36, handleMat, 0.014);
+      stockStrut.position.set(0.24, -0.3, 0.0); stockStrut.rotation.x = 0.23;
+      const buttPlate = weaponBox(0.085, 0.2, 0.04, gunMat, 0.014);
+      buttPlate.position.set(0.24, -0.25, 0.17);
+      // ribbed polymer handguard under the gas tube
+      const handguard = weaponBox(0.095, 0.085, 0.26, handleMat, 0.02);
+      handguard.position.set(0.24, -0.215, -0.77);
+      for (let i = 0; i < 5; i++) {
+        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.099, 0.06, 0.012), gunMat);
+        rib.position.set(0.24, -0.22, -0.67 - i * 0.05);
+        group.add(rib);
+      }
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.026, 0.72, 20), gunMatLight);
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0.24, -0.172, -0.99);
+      const heatShield = weaponBox(0.056, 0.022, 0.3, gunMat, 0.008);
+      heatShield.position.set(0.24, -0.143, -0.82);
+      const gasTube = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.52, 14), gunMatLight);
+      gasTube.rotation.x = Math.PI / 2; gasTube.position.set(0.24, -0.225, -1.0);
+      // carry handle clamped to the barrel
+      const handleBase = weaponBox(0.05, 0.03, 0.06, gunMat, 0.008);
+      handleBase.position.set(0.24, -0.135, -0.72);
+      const handleArm = weaponBox(0.022, 0.07, 0.022, gunMat, 0.006);
+      handleArm.position.set(0.24, -0.1, -0.72);
+      const handleBar = weaponBox(0.03, 0.026, 0.18, handleMat, 0.012);
+      handleBar.position.set(0.24, -0.06, -0.69);
+      // front sight block with a hooded post
+      const sightBlock = weaponBox(0.045, 0.06, 0.04, gunMat, 0.008);
+      sightBlock.position.set(0.24, -0.15, -1.26);
+      const sightPost = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.035, 0.01), gunMatLight);
+      sightPost.position.set(0.24, -0.105, -1.26);
+      const flashHider = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.026, 0.1, 12), gunMat);
+      flashHider.rotation.x = Math.PI / 2; flashHider.position.set(0.24, -0.172, -1.4);
+      // folded bipod: yoke on the gas block, two legs lying back along the gas tube
+      const bipodYoke = weaponBox(0.07, 0.03, 0.035, gunMat, 0.008);
+      bipodYoke.position.set(0.24, -0.245, -1.2);
+      for (const side of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.34, 8), gunMatLight);
+        leg.rotation.x = Math.PI / 2; leg.position.set(0.24 + side * 0.028, -0.255, -1.04);
+        const foot = weaponBox(0.018, 0.012, 0.03, gunMat, 0.004);
+        foot.position.set(0.24 + side * 0.028, -0.255, -0.86);
+        group.add(leg, foot);
+      }
+      // 200-round box, offset to the left under the feed tray, with a short visible belt
+      magazine = weaponBox(0.12, 0.15, 0.13, skinMat, 0.016);
+      magazine.position.set(0.2, -0.345, -0.43);
+      const boxLid = weaponBox(0.124, 0.02, 0.134, gunMat, 0.006);
+      boxLid.position.set(0, 0.078, 0);
+      magazine.add(boxLid);
+      for (let i = 0; i < 5; i++) {
+        const t = i / 4;
+        const link = new THREE.Group();
+        link.position.set(-0.04 + t * 0.005, 0.1 + t * 0.075, 0.03 - t * 0.012);
+        link.rotation.x = -0.35;
+        const round = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, 0.05, 8), m249BrassMat);
+        round.rotation.z = Math.PI / 2;
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.0055, 0.014, 8), m249BrassMat);
+        tip.rotation.z = Math.PI / 2; tip.position.x = 0.032;
+        const clip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.014, 0.014), gunMat);
+        link.add(round, tip, clip);
+        magazine.add(link);
+      }
+      // charging handle on the right side (not animated: it is out of view from the camera)
+      const cocking = weaponBox(0.025, 0.022, 0.06, gunMatLight, 0.006);
+      cocking.position.set(0.3, -0.2, -0.55);
+      group.add(receiver, feedCover, coverHinge, coverLatch, rearSight, feedTray, grip, triggerGuard,
+        stockTop, stockStrut, buttPlate, handguard, barrel, heatShield, gasTube, handleBase, handleArm,
+        handleBar, sightBlock, sightPost, flashHider, bipodYoke, magazine, cocking);
+      muzzle.set(0.24, -0.172, -1.45);
+      break;
+    }
+    // ================= NEW: UMP-45 =================
+    case 'ump45': {
+      // UMP-45: a slab-sided polymer receiver with a full-length top rail, a drum rear sight and
+      // a hooded front post, a straight 25-round .45 magazine, the large one-piece grip/trigger
+      // guard, an HK-style forward cocking handle on the left and a side-folding skeleton stock
+      // (shown extended).
+      const receiver = weaponBox(0.085, 0.12, 0.44, skinMat, 0.02);
+      receiver.position.set(0.24, -0.2, -0.4);
+      const nose = weaponBox(0.078, 0.1, 0.14, handleMat, 0.02);
+      nose.position.set(0.24, -0.21, -0.68);
+      for (let i = 0; i < 3; i++) {
+        const vent = new THREE.Mesh(new THREE.BoxGeometry(0.082, 0.03, 0.018), gunMat);
+        vent.position.set(0.24, -0.215, -0.64 - i * 0.035);
+        group.add(vent);
+      }
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.014, 0.4), gunMatLight);
+      rail.position.set(0.24, -0.133, -0.42);
+      for (let i = 0; i < 10; i++) {
+        const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.004, 0.008), gunMatLight);
+        tooth.position.set(0.24, -0.124, -0.3 - i * 0.03);
+        group.add(tooth);
+      }
+      const rearDrum = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.04, 16), gunMat);
+      rearDrum.rotation.z = Math.PI / 2; rearDrum.position.set(0.24, -0.1, -0.23);
+      const frontHood = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.005, 8, 16, Math.PI), gunMat);
+      frontHood.position.set(0.24, -0.12, -0.72);
+      const frontPost = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.024, 0.008), gunMatLight);
+      frontPost.position.set(0.24, -0.118, -0.72);
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.13, 16), gunMatLight);
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(0.24, -0.2, -0.8);
+      const threadCap = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.03, 16), gunMat);
+      threadCap.rotation.x = Math.PI / 2; threadCap.position.set(0.24, -0.2, -0.87);
+      // cocking tube above the barrel with the handle sticking out to the left
+      const cockingTube = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.18, 12), gunMat);
+      cockingTube.rotation.x = Math.PI / 2; cockingTube.position.set(0.24, -0.152, -0.62);
+      chargingHandle = weaponBox(0.05, 0.016, 0.02, gunMatLight, 0.005);
+      chargingHandle.position.set(0.195, -0.152, -0.66);
+      // straight .45 magazine with a slight forward rake, seated in a flared mag well
+      magazine = weaponBox(0.048, 0.22, 0.082, skinMat, 0.012);
+      magazine.position.set(0.24, -0.36, -0.47); magazine.rotation.x = -0.1;
+      const magWell = weaponBox(0.066, 0.05, 0.1, handleMat, 0.012);
+      magWell.position.set(0.24, -0.275, -0.47);
+      const grip = weaponBox(0.062, 0.17, 0.072, handleMat, 0.02);
+      grip.position.set(0.24, -0.335, -0.22); grip.rotation.x = 0.2;
+      // one-piece trigger guard running from the grip to the mag well
+      const guardBottom = weaponBox(0.05, 0.014, 0.16, handleMat, 0.006);
+      guardBottom.position.set(0.24, -0.33, -0.33);
+      const guardFront = weaponBox(0.05, 0.06, 0.016, handleMat, 0.006);
+      guardFront.position.set(0.24, -0.3, -0.405);
+      // side-folding skeleton stock, extended: hinge, top bar, lower bar and butt pad
+      const hinge = weaponBox(0.07, 0.07, 0.04, gunMat, 0.012);
+      hinge.position.set(0.24, -0.2, -0.16);
+      const stockTopBar = weaponBox(0.045, 0.028, 0.28, handleMat, 0.01);
+      stockTopBar.position.set(0.24, -0.175, -0.01);
+      const stockLowBar = weaponBox(0.045, 0.028, 0.28, handleMat, 0.01);
+      stockLowBar.position.set(0.24, -0.25, 0.0); stockLowBar.rotation.x = 0.12;
+      const buttPad = weaponBox(0.06, 0.16, 0.035, gunMat, 0.012);
+      buttPad.position.set(0.24, -0.215, 0.14);
+      group.add(receiver, nose, rail, rearDrum, frontHood, frontPost, barrel, threadCap, cockingTube,
+        chargingHandle, magazine, magWell, grip, guardBottom, guardFront, hinge, stockTopBar,
+        stockLowBar, buttPad);
+      muzzle.set(0.24, -0.2, -0.885);
       break;
     }
     case 'grenade': {
@@ -3769,7 +3955,7 @@ function fireWeapon(){
     boltCyclingT = BOLT_CYCLE_DURATION;
   }
 
-  const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg' };
+  const sampledWeapons = { awp: 'awp', ak47: 'ak47', m4a1: 'm4a1', glock: 'glock', deagle: 'deagle', m4a4: 'm4a4', tec9: 'smg', duals: 'smg', ump45: 'smg' };
   sessionMetrics.shots++;
   combatMotion.shot();
   if (!sampledWeapons[weaponId] || !audio.playSample(sampledWeapons[weaponId], 0.9)) audio.gunshot(GUNSHOT_PROFILES[weaponId]);
@@ -4638,7 +4824,7 @@ function spawnEnemy(spawnPos){
 // on a kill vs. the default grey for a non-lethal hit). Remote players resolve asynchronously
 // over the network, so that path always reports false here.
 function damageEnemy(enemy, dmg, point, meta){
-  if (!enemy.alive || (isFfa() && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
+  if (!enemy.alive || ((isFfa() || gameMode === 'pvp') && enemy.spawnProtected) || (gameMode === 'pvp' && roundState.phase === 'ended')) return false;
   if (isFfa() && netRole === 'host' && ffaState.bots.has(enemy.netId)) {
     spawnBlood(point);
     enemy.mesh.userData.hitReact = Math.min(1, (enemy.mesh.userData.hitReact || 0) + (meta?.headshot ? 0.9 : 0.55));
@@ -5059,7 +5245,7 @@ let netTeamSize = 1;
 let localPlayerName = 'Player';
 let netRoster = []; // [{id, team, isBot, name}] - authoritative on host, mirrored on clients
 let matchResultRecorded = false;
-const PVP_WEAPON_ROTATION = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp', 'knife'];
+const PVP_WEAPON_ROTATION = ['glock', 'deagle', 'tec9', 'duals', 'ak47', 'm4a4', 'm4a1', 'awp', 'm249', 'ump45', 'knife'];
 let weaponBag = [], previousRoundWeapon = null;
 let matchEpoch = 0;
 function nextRoundWeapon(){
@@ -5197,6 +5383,7 @@ function respawnFfaPlayer(){
   const p=ffaSpawn(netMyId);
   player.pos.copy(p); player.pos.y+=player.height;
   player.alive=true; player.health=player.maxHealth; player.crouching=false; player.ads=false;
+  clearArmor(); updateArmorHUD();
   player.scopeLevel=0; player.pitch=0; player.yaw=Math.atan2(p.x,p.z); player.velY=0;
   player.onGround=false; // force a fresh multi-level support resolve instead of trusting a stale groundLevel from the previous life
   movementVelocity.set(0,0,0); camera.position.copy(player.pos);
@@ -5220,6 +5407,8 @@ function resetFfaBot(bot){
   bot.spawnProtected=true;bot.protection=FFA.protection;bot.respawnT=0;bot.targetId=null;bot.attackers=[];
   bot.flashedT=0;bot.memory=0;bot.patrol=null;bot.lastSeen=null;bot.target=null;
   bot.thinkT=Math.random()*.2;bot.reaction=.35;bot.fireCooldown=.5;bot.burst=0;bot.path=[];bot.pathT=0;
+  // Each life draws a new weapon; the snapshot carries weaponId so every peer sees and hears it.
+  bot.loadout=pickBotLoadout();bot.weaponId=bot.loadout.weaponId;
 }
 function syncFfaBots(){
   if (netRole !== 'host' || !ffaState.active || ffaState.phase === 'ended') return;
@@ -5233,7 +5422,7 @@ function syncFfaBots(){
   while(ffaState.bots.size<desired){
     const id=`ffa-bot-${++ffaState.serial}`;
     netRoster.push({id,team:id,isBot:true,ready:true,name:`BOT ${['Augusto','Hani','Mathew','Tiago','Shemeem','Luna'][ffaState.serial%6]}`});
-    const bot=getOrCreateRemoteAvatar(id,id);bot.isBot=true;bot.speed=4.3;bot.weaponId='m4a1';
+    const bot=getOrCreateRemoteAvatar(id,id);bot.isBot=true;bot.speed=4.3;
     ffaState.bots.set(id,bot);resetFfaBot(bot);changed=true;
   }
   if(changed)broadcastRoster();
@@ -5317,7 +5506,7 @@ function hitFfaBot(msg){
   bot.alive=false;bot.health=0;bot.dying=true;bot.deathT=0;bot.fallDir=bot.mesh.rotation.y+Math.PI;
   bot.respawnT=FFA.respawn;spawnBloodDecal(bot.mesh.position.x,bot.mesh.position.z);
   const kill={type:'kill',roundNum:1,deathId:crypto.randomUUID(),victimId:bot.netId,killerId:msg.fromId,
-    assistIds:(bot.attackers||[]).map(a=>a.id).filter(id=>id!==msg.fromId),scoring:ffaState.phase==='live',weaponName:msg.weaponName||'M4A1',headshot:!!(msg.headshot||msg.isHeadshot)};
+    assistIds:(bot.attackers||[]).map(a=>a.id).filter(id=>id!==msg.fromId),scoring:ffaState.phase==='live',weaponName:msg.weaponName||WEAPONS.m4a1.name,headshot:!!(msg.headshot||msg.isHeadshot)};
   applyKillMessage(kill);netBroadcast(kill);return true;
 }
 function fireFfaBot(bot,target){
@@ -5325,7 +5514,8 @@ function fireFfaBot(bot,target){
   const origin=bot.mesh.position.clone().add(new THREE.Vector3(0,1.4,0));
   const direction=target.pos.clone().sub(origin).normalize();
   // Angular error makes distant fire less accurate without a random damage lottery.
-  direction.x+=(Math.random()-.5)*.04;direction.y+=(Math.random()-.5)*.035;direction.z+=(Math.random()-.5)*.04;direction.normalize();
+  const spread=bot.loadout?.spread??1;
+  direction.x+=(Math.random()-.5)*.04*spread;direction.y+=(Math.random()-.5)*.035*spread;direction.z+=(Math.random()-.5)*.04*spread;direction.normalize();
   const ray=new THREE.Raycaster(origin,direction,0,60);
   const wall=ray.intersectObjects(envMeshes,false)[0];let distance=wall?.distance??60,victim=null;
   for(const actor of ffaActors(bot.netId)){
@@ -5338,8 +5528,9 @@ function fireFfaBot(bot,target){
   bot.targetPitch=Math.asin(Math.max(-1,Math.min(1,direction.y)));
   showRemoteShot(shot);netBroadcast(shot);
   if(!victim)return;
-  const hit={type:'hit',roundNum:1,targetId:victim.id,fromId:bot.netId,dmg:22,weaponName:'M4A1'};
-  if(victim.id===netMyId){lastDamageMeta={weaponName:'M4A1',headshot:false};damagePlayer(hit.dmg,bot.netId);}
+  const def=WEAPONS[bot.weaponId]||WEAPONS.m4a1;
+  const hit={type:'hit',roundNum:1,targetId:victim.id,fromId:bot.netId,dmg:Math.round(def.dmg*BOT_DAMAGE_SCALE),weaponName:def.name};
+  if(victim.id===netMyId){lastDamageMeta={weaponName:def.name,headshot:false};damagePlayer(hit.dmg,bot.netId);}
   else if(ffaState.bots.has(victim.id))hitFfaBot(hit);
   else netSend(netClientConns[victim.id],hit);
 }
@@ -5399,7 +5590,8 @@ function updateFfaBots(dt){
     animateSoldierRig(bot.mesh,dt,old.distanceTo(pos)/Math.max(dt,.001),false);
     if(target&&bot.reaction<=0&&bot.fireCooldown<=0&&Math.abs(delta)<.18&&!bot.flashedT&&ffaVisible(eye,target.pos)){
       fireFfaBot(bot,target);bot.burst++;
-      bot.fireCooldown=bot.burst%3===0?.5+Math.random()*.35:.15;
+      const {burst,interval,pause}=bot.loadout;
+      bot.fireCooldown=bot.burst%burst===0?pause[0]+Math.random()*(pause[1]-pause[0]):interval;
     }
   }
 }
@@ -5479,7 +5671,7 @@ function fireKillcamShot(shot){
     const length=direction.length();if(length>.001)drawTracer(origin,direction.normalize(),length);
     if(!firstPerson)spawnEnemyMuzzleFlash(origin);
   }
-  const samples={tec9:'smg',duals:'smg'};
+  const samples={tec9:'smg',duals:'smg',ump45:'smg'};
   if(!audio.playSample(samples[shot.weaponId]||shot.weaponId,firstPerson?.85:.25))audio.gunshot(GUNSHOT_PROFILES[shot.weaponId]||{});
 }
 function finishKillcam(){
@@ -5625,7 +5817,7 @@ function updateFfa(dt){
   const hud=document.getElementById('ffaHud');hud.hidden=false;
   hud.textContent=`${netRoster.filter(p=>p.ready).length}/12 PLAYERS · YOU ${ensureStats(netMyId).kills}/${Number.isFinite(ffaKillGoal)?ffaKillGoal:'∞'} · LEADER ${leader?.name||'—'} ${leader?ensureStats(leader.id).kills:0}`;
   document.getElementById('centerMessage').textContent=ffaState.phase==='waiting'?`WAITING FOR PLAYERS · ${humans}/${FFA.minHumans} HUMANS · BOTS FILL TO 6`:
-    !player.alive?`RESPAWNING IN ${Math.ceil(ffaState.respawnT)}`:ffaState.protection>0?'SPAWN PROTECTION · FIRING CANCELS IT':'';
+    !player.alive?`RESPAWNING IN ${Math.ceil(ffaState.respawnT)}`:ffaState.protection>0?`SPAWN PROTECTION · ${Math.ceil(ffaState.protection)}s · FIRING CANCELS IT`:'';
 }
 
 async function hostRoom(teamSize){
@@ -5984,7 +6176,8 @@ function handleNetMessage(msg, fromId){
         const bloodPoint = player.pos.clone().add(new THREE.Vector3(0, player.crouching ? .85 : 1.15, 0));
         spawnBlood(bloodPoint);
         if (isFfa()) killcamHits.push({ t: performance.now(), shooterId: msg.fromId, targetId: netMyId, point: bloodPoint.toArray(), headshot: !!msg.isHeadshot });
-        damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId);
+        damagePlayer(msg.instantKill === true ? player.health + 1 : msg.dmg, msg.fromId,
+          { headshot: !!msg.isHeadshot, bypassArmor: msg.instantKill === true });
       }
       break;
     case 'flash':
@@ -6097,7 +6290,7 @@ function updateNetworking(dt){
     pos: [player.pos.x, player.pos.y, player.pos.z],
     yaw: player.yaw, pitch: player.pitch, fov: player.alive ? camera.fov : baseFov,
     crouching: player.crouching,
-    health: player.health, alive: player.alive, protected: isFfa() && ffaState.protection > 0,
+    health: player.health, alive: player.alive, protected: (isFfa() && ffaState.protection > 0) || teamSpawnProtection > 0,
     weaponId: currentSlot === 'melee' ? 'knife' : (inventory[currentSlot] || 'knife')
   };
   if (netRole === 'host') netBroadcast(msg);
@@ -6134,7 +6327,7 @@ function showRemoteShot(msg){
   scene.add(flash);
   particles.push({ obj: flash, type: 'remoteFlash', life: 0.065, maxLife: 0.065, vel: new THREE.Vector3() });
   if (!audio.ctx) return;
-  const samples = { tec9: 'smg', duals: 'smg' };
+  const samples = { tec9: 'smg', duals: 'smg', ump45: 'smg' };
   const source = audio.ctx.createBufferSource();
   source.buffer = audio.samples[samples[msg.weaponId] || msg.weaponId] || audio.noiseBuffer(0.1);
   const gain = audio.ctx.createGain();
@@ -6234,6 +6427,7 @@ function beginRematch(map, epoch){
   player.crouching = false;
   inventory.primary = null; inventory.secondary = null;
   grenadeCount = 0; smokeCount = 0; flashCount = 0;
+  clearArmor();
   Object.keys(ammoState).forEach(key => delete ammoState[key]);
   Object.assign(sessionMetrics, { shots: 0, hits: 0, headshots: 0 });
   document.getElementById('killfeed').replaceChildren();
@@ -6258,6 +6452,7 @@ function startPvpMatch(warmupSeconds = WARMUP_FULL){
     warmupSeconds = 15;
     inventory.primary = null; inventory.secondary = null;
     grenadeCount = 0; smokeCount = 0; flashCount = 0;
+    clearArmor(); updateArmorHUD();
     resetKnifeSupply();
     equipSlot('melee', true);
   }
@@ -6352,6 +6547,9 @@ function applyPvpRoundStart(roundNum, weaponId, scoreA, scoreB){
   damageIndicatorTime = 0;
   lastDamageMeta = {};
   resetKnifeSupply();
+  // Armor bought during warmup must not carry into forced-weapon rounds.
+  clearArmor(); updateArmorHUD();
+  startTeamSpawnProtection();
   thrownKnives.forEach(knife => scene.remove(knife.mesh));
   thrownKnives.length = 0;
   reloadGeneration++;
@@ -6486,6 +6684,7 @@ function countAliveOnTeam(team){
 function updatePvpRound(dt){
   updateNetworking(dt);
   if (isFfa()) { updateFfa(dt); return; }
+  if (teamSpawnProtection > 0) { teamSpawnProtection = Math.max(0, teamSpawnProtection - dt); updateSpawnProtectionHUD(); }
   if (roundState.phase === 'warmup') {
     updateWarmup(dt);
   } else if (roundState.phase === 'live') {
@@ -6628,9 +6827,13 @@ let damageBearing = 0;
 let damageIndicatorTime = 0;
 let damagePulse = 0;
 let recentAttackers = []; // [{id, t}], most recent last
-function damagePlayer(dmg, fromId){
+function damagePlayer(dmg, fromId, { headshot = false, bypassArmor = false } = {}){
   if (!player.alive || (gameMode === 'pvp' && (roundState.phase === 'ended' || matchFinished))) return;
   if (isFfa() && ffaState.protection > 0) return;
+  if (teamSpawnProtection > 0) return;
+  const hadArmor = armor.vest > 0 || armor.helmet > 0;
+  ({ damage: dmg, armor } = absorbDamage(armor, dmg, { headshot, bypass: bypassArmor }));
+  if (hadArmor) updateArmorHUD();
   trackDamageTaken(fromId, dmg);
   player.health -= dmg;
   regenDelayT = REGEN_DELAY;
@@ -6666,6 +6869,8 @@ function updatePlayerRegen(dt){
 
 function playerDie(){
   player.alive = false;
+  clearArmor(); updateArmorHUD();
+  teamSpawnProtection = 0; updateSpawnProtectionHUD();
   if (gameMode === 'pvp' && !isFfa() && roundState.phase === 'live') roundLives.eliminate(netMyId, roundState.roundNum);
   if (socialUI.wheelOpen) socialUI.closeWheel(false);
   clearGameplayInput();
@@ -6708,6 +6913,7 @@ function playerDie(){
 
 function respawnInPractice(){
   if (gameMode !== 'practice' || matchFinished) return;
+  clearArmor(); updateArmorHUD();
   player.alive = true;
   player.health = player.maxHealth;
   player.ads = false;
@@ -6726,6 +6932,8 @@ function respawnInPractice(){
 
 function respawnInWarmup(){
   if (roundState.phase !== 'warmup') return; // a real round may have started while we waited to respawn
+  clearArmor(); updateArmorHUD();
+  startTeamSpawnProtection();
   player.alive = true;
   player.health = player.maxHealth;
   player.ads = false;
@@ -6927,7 +7135,7 @@ function updatePlayer(dt){
   // deeply negative sentinel outside the safe footprint instead of the usual flat 0, so there's
   // nothing for the snap-to-floor logic above to catch once a player walks past the edge - they
   // just keep falling under normal gravity until they cross this threshold.
-  if (player.alive && player.pos.y < FALL_DEATH_Y) { lastDamageMeta = { weaponName: 'Fall Damage', headshot: false }; damagePlayer(9999, null); }
+  if (player.alive && player.pos.y < FALL_DEATH_Y) { lastDamageMeta = { weaponName: 'Fall Damage', headshot: false }; damagePlayer(9999, null, { bypassArmor: true }); }
 
   camera.position.set(player.pos.x + shakeX, player.pos.y + shakeY, player.pos.z);
 
@@ -7023,6 +7231,15 @@ function updateHealthHUD(){
   document.getElementById('healthValue').textContent = `${Math.ceil(Math.max(0, player.health))}`;
   const danger = 1 - pct / 100;
   document.getElementById('vignette').style.boxShadow = `inset 0 0 ${120 * danger}px ${40 * danger}px rgba(160,0,0,${0.55 * danger})`;
+}
+function updateArmorHUD(){
+  const el = document.getElementById('armorStatus');
+  if (!el) return;
+  const parts = [];
+  if (armor.vest > 0) parts.push(`VEST ${Math.ceil(armor.vest)}`);
+  if (armor.helmet > 0) parts.push(`HELMET ${Math.ceil(armor.helmet)}`);
+  el.textContent = parts.join(' · ');
+  el.hidden = parts.length === 0;
 }
 function updateEnemyHUD(){
   document.getElementById('enemyCount').textContent = enemies.filter(e => e.alive).length;
@@ -7297,6 +7514,17 @@ function buyWeapon(id){
   renderBuyMenu();
 }
 
+function buyArmor(piece){
+  if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
+  const def = ARMOR[piece];
+  if (money < weaponPrice(def) || armor[piece] >= def.durability) return;
+  money -= weaponPrice(def);
+  armor[piece] = def.durability;
+  updateMoneyHUD();
+  updateArmorHUD();
+  renderBuyMenu();
+}
+
 function buyGrenade(){
   if (gameMode === 'pvp' && selectedRuleset === 'knife') return;
   const def = WEAPONS.grenade;
@@ -7369,6 +7597,19 @@ function renderBuyMenu(){
   fcard.innerHTML = `<div class="wName">${fdef.name} (${flashCount}/${MAX_FLASHES})</div><div class="wPrice">${fmaxed ? 'MAX' : '$' + weaponPrice(fdef)}</div>`;
   if (!fmaxed) fcard.addEventListener('click', buyFlash);
   grenadeList.appendChild(fcard);
+
+  const armorList = document.getElementById('armorList');
+  armorList.innerHTML = '';
+  for (const [piece, adef] of Object.entries(ARMOR)) {
+    // A damaged piece can be bought again to restore it; a full one shows as equipped.
+    const full = armor[piece] >= adef.durability;
+    const status = armor[piece] > 0 && !full ? ` (${Math.ceil(armor[piece])}%)` : '';
+    const acard = document.createElement('div');
+    acard.className = 'weaponCard' + (full ? ' owned' : '');
+    acard.innerHTML = `<div class="wName">${adef.name}${status}</div><div class="wPrice">${full ? 'EQUIPPED' : '$' + weaponPrice(adef)}</div>`;
+    if (!full) acard.addEventListener('click', () => buyArmor(piece));
+    armorList.appendChild(acard);
+  }
 }
 
 document.getElementById('closeBuyMenu').addEventListener('click', toggleBuyMenu);
@@ -7887,6 +8128,7 @@ document.getElementById('startBtn').addEventListener('click', () => {
   updateAmmoHUD();
   updateGrenadeHUD();
   updateHealthHUD();
+  updateArmorHUD();
   updateEnemyHUD();
   updateMoneyHUD();
   gameMode = selectedMode;

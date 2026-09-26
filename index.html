@@ -42,6 +42,10 @@
   #healthbar .label{font-size:10px;font-weight:800;letter-spacing:2.5px;color:#aeb5ba;}
   #healthValue{font:800 18px/1 'Baserona','Arial Narrow',sans-serif;letter-spacing:1px;color:#f4f5f5;text-shadow:0 0 8px rgba(229,71,60,.35);}
   #healthOuter{position:relative;width:100%;height:9px;overflow:hidden;background:rgba(0,0,0,.72);border:1px solid rgba(255,255,255,.17);}
+  #armorStatus{margin-top:6px;font-size:10px;font-weight:800;letter-spacing:2px;color:#8fc3e6;}
+  #armorStatus[hidden]{display:none;}
+  #spawnProtectionMsg{position:fixed;top:116px;left:50%;transform:translateX(-50%);font:700 12px/1.5 system-ui,sans-serif;letter-spacing:.1em;color:#9fe3c9;text-shadow:0 2px 5px #000;pointer-events:none;z-index:20;}
+  #spawnProtectionMsg[hidden]{display:none;}
   #healthInner{height:100%;background:linear-gradient(90deg,#9f211e 0%,#e5473c 72%,#ffb15b 100%);width:100%;transition:width .15s;box-shadow:0 0 12px rgba(229,71,60,.55);}
   #ammo{position:absolute;bottom:30px;right:30px;text-align:right;font-size:34px;color:#eee;text-shadow:0 0 6px #000;}
   #ammo span{font-size:16px;color:#b88;}
@@ -150,7 +154,7 @@
   #pauseMenu button.pauseBtn:hover{background:#6a1a1a;}
   #pauseMenu #sensValue{color:#e5473c;font-weight:bold;}
   #buyMoney{font-size:20px;color:#fc6;margin-bottom:20px;}
-  #buyColumns{display:flex;gap:40px;}
+  #buyColumns{display:flex;flex-wrap:wrap;justify-content:center;gap:40px;}
   .buyColumn{width:260px;}
   .buyColumn h3{font-size:14px;letter-spacing:3px;color:#a88;border-bottom:1px solid #443;padding-bottom:6px;}
   .weaponCard{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin:6px 0;background:rgba(255,255,255,0.04);border:1px solid #443;border-radius:4px;cursor:pointer;transition:background .15s;}
@@ -558,9 +562,11 @@
   <div id="hitFlash"></div>
   <div id="vignette"></div>
   <div id="centerMessage"></div>
+  <div id="spawnProtectionMsg" hidden></div>
   <div id="healthbar">
     <div class="healthTop"><span class="label">VITALS</span><span id="healthValue">100</span></div>
     <div id="healthOuter"><div id="healthInner"></div></div>
+    <div id="armorStatus" hidden></div>
   </div>
   <div id="ammo"><span id="ammoLabel">MAG</span><br><span id="ammoCount">30</span> / <span id="ammoReserve">120</span></div>
   <div id="reloadLabel">RELOADING...</div>
@@ -663,6 +669,10 @@
     <div class="buyColumn">
       <h3>GRENADES</h3>
       <div id="grenadeList"></div>
+    </div>
+    <div class="buyColumn">
+      <h3>ARMOR</h3>
+      <div id="armorList"></div>
     </div>
   </div>
   <button id="closeBuyMenu">CLOSE [B]</button>

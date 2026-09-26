@@ -11,7 +11,7 @@ Select **Free for All**, choose **Dockyard** or **Atrium**, then host a room and
 - After a match starts, bots backfill departures to retain six participants. The host must remain connected. Host migration and public matchmaking are not included.
 - **30 kills or 10 minutes** ends the match. Kills rank first, fewer deaths break ties, and exact ties share their placing. FFA is unranked and does not alter the existing team-mode ELO.
 - Respawn after **3 seconds**, retaining firearms and replenishing ammunition. Spawn selection favours cover and distance from living opponents, avoiding nearby spawns where possible.
-- **2 seconds of spawn protection**, cancelled by firing or throwing a weapon/utility. A compact HUD message identifies protection.
+- **3 seconds of spawn protection**, cancelled by firing or throwing a weapon/utility. A compact HUD message counts it down.
 - **B** opens the shop at any point while alive. Every firearm and utility item costs **$0**; carrying limits still apply. **Tab** shows individual scores including bots.
 - At the result screen, the host selects either FFA map for another match with a 15-second warmup.
 
@@ -25,7 +25,7 @@ Both maps have twelve distributed spawn locations. Their conservative navigation
 
 ## Bots and networking
 
-The host owns bot movement, health, deaths, respawns and firing. Other players receive interpolated snapshots, shot effects and scores. Bots scan visible opponents, keep a short last-seen memory, use a field of view and proximity awareness, navigate around obstacles, strafe, turn towards targets, and fire three-shot bursts after a 250–500 ms reaction delay. Angular error reduces accuracy with distance. Shot obstruction, spawn protection, flash blindness and smoke affect their decisions. FFA smoke is shared between peers so the host's bots see the same obstruction.
+The host owns bot movement, health, deaths, respawns and firing. Other players receive interpolated snapshots, shot effects and scores. Bots scan visible opponents, keep a short last-seen memory, use a field of view and proximity awareness, navigate around obstacles, strafe, turn towards targets, and fire after a 250–500 ms reaction delay. Each life a bot draws a weighted random weapon (rifles most often, then Desert Eagle, AWP and pistols) with its own burst cadence, accuracy and damage. Angular error reduces accuracy with distance. Shot obstruction, spawn protection, flash blindness and smoke affect their decisions. FFA smoke is shared between peers so the host's bots see the same obstruction.
 
 Human hit reporting retains the game's existing client-authoritative model. This is not a dedicated competitive server or an anti-cheat implementation. All players must use the same release. No SQL migration is required.
 
