@@ -6661,10 +6661,35 @@ function playerDie(){
     }
     return; // during a live round, staying dead is what ends it for your team (see checkPvpRoundEnd)
   }
+  if (gameMode === 'practice') {
+    // Practice is uninterrupted training time - dying (e.g. a Highrise fall) shouldn't end the
+    // session and kick you back to the menu, just put you back on your feet.
+    showWaveBanner('You died - respawning...');
+    setTimeout(respawnInPractice, 2000);
+    return;
+  }
   localDeaths++;
   document.exitPointerLock();
   document.getElementById('deathScreen').style.display = 'flex';
   document.getElementById('finalScore').textContent = `Wave reached: ${wave} — Kills: ${kills} — Score: ${score}`;
+}
+
+function respawnInPractice(){
+  if (gameMode !== 'practice' || matchFinished) return;
+  player.alive = true;
+  player.health = player.maxHealth;
+  player.ads = false;
+  player.scopeLevel = 0;
+  updateHealthHUD();
+  const spawnPos = currentMapMeta.spawn;
+  player.pos.copy(spawnPos);
+  player.pos.y = groundHeightAt(spawnPos.x, spawnPos.z) + player.height;
+  player.velY = 0;
+  player.onGround = false;
+  player.yaw = 0;
+  player.pitch = 0;
+  camera.position.copy(player.pos);
+  restoreGameplayPointer();
 }
 
 function respawnInWarmup(){
