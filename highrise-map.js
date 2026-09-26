@@ -135,13 +135,18 @@ export function buildHighrise({ scene, floorMeshes, addBox, makeBoxProp, loadTil
   const warn = new THREE.Mesh(new THREE.PlaneGeometry(boomW + 0.2, 0.5), hazardMat);
   warn.rotation.x = -Math.PI / 2; warn.position.set(CRANE_X, DECK_Y + 0.41, CRANE_Z - BOOM_LEN + 0.3); scene.add(warn);
 
-  // Proximity ladder up the mast's west face, same COD-style mechanic as Scrapyard's tower - flush
-  // with the deck's own west edge (not tucked behind the legs, which taper inward to x=22-0.65 at
-  // the top and left nothing solid under the old position for the climb to hand off onto). Releases
-  // comfortably below the deck's real collider top (DECK_Y+0.15) so climb and floor-snap meet
-  // cleanly instead of stalling at the boundary - the exact bug the Scrapyard tower ladder had.
-  const ladderX = CRANE_X - DECK_HALF, ladderZ = CRANE_Z;
+  // Proximity ladder, same COD-style mechanic as Scrapyard's tower. Placing this flush with the
+  // deck's own edge (the first attempt) put the player's climb column right where the west legs'
+  // Box3 lives - a tilted cylinder's AABB spans its full bottom-to-top extent as one box, which is
+  // far wider than the actual thin leg, and it swallowed the ladder position at every height, not
+  // just near the top. Moved well clear of that AABB instead, with a small dedicated landing
+  // platform (its own honest, non-tilted collider) bridging back to the deck.
+  const ladderX = CRANE_X - legBottomHalf - 1.3, ladderZ = CRANE_Z;
   const ladderTop = DECK_Y + 0.15 - 0.3;
+  const landingMinX = ladderX - 0.7, landingMaxX = CRANE_X - DECK_HALF;
+  const landing = new THREE.Mesh(new THREE.BoxGeometry(landingMaxX - landingMinX, 0.3, 1.6), steelMat);
+  landing.position.set((landingMinX + landingMaxX) / 2, DECK_Y, CRANE_Z);
+  landing.castShadow = landing.receiveShadow = true; scene.add(landing); addBox(landing);
   for (const side of [-1, 1]) {
     strut(new THREE.Vector3(ladderX, 0.2, ladderZ + side * 0.4), new THREE.Vector3(ladderX, ladderTop, ladderZ + side * 0.4), 0.04, 0.04, steelMat, false);
   }
