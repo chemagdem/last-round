@@ -6714,9 +6714,9 @@ function updatePlayer(dt){
   // Left/Right arrow keys turn the camera continuously, like nudging the mouse - an alternative to
   // mouse-look for anyone who'd rather steer with the keyboard. Same yaw sign convention as
   // mousemove below (moving/turning right decreases yaw).
-  const ARROW_TURN_SPEED = 2.6; // rad/sec
-  if (keys.ArrowLeft) player.yaw += ARROW_TURN_SPEED * dt;
-  if (keys.ArrowRight) player.yaw -= ARROW_TURN_SPEED * dt;
+  const arrowTurnSpeed = 2.6 * settings.sensitivity; // rad/sec at the default 1.0 sensitivity
+  if (keys.ArrowLeft) player.yaw += arrowTurnSpeed * dt;
+  if (keys.ArrowRight) player.yaw -= arrowTurnSpeed * dt;
 
   // recoil / shake decay
   recoilKick = Math.max(0, recoilKick - dt * 0.08);
